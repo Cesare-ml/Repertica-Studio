@@ -91,8 +91,12 @@ pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artw
 #[tauri::command]
 pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(err)?;
+    let old_image = artwork_by_id(&conn, &id)?.image_path;
     let affected = conn.execute("DELETE FROM artworks WHERE id=?1",params![id]).map_err(|_|"Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
     if affected == 0 { return Err("Opera non trovata".into()); }
+    if let Some(path) = old_image {
+        if safe_relative(&path) { let _ = fs::remove_file(db.directory.join(path)); }
+    }
     Ok(())
 }
 
@@ -225,7 +229,7 @@ pub fn save_artwork_image(db: State<'_, Database>, artwork_id: String, data_base
     let (ext,_mime)=image_type(&bytes).ok_or_else(||"Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
     let conn=db.conn.lock().map_err(err)?;
     let old=artwork_by_id(&conn,&artwork_id)?.image_path;
-    let name=format!("{}-{0}.{ext}",Uuid::new_v4());
+    let name=format!("{}.{ext}",Uuid::new_v4());
     let relative=format!("media/{name}");
     let target=db.directory.join(&relative);
     let tmp=db.directory.join(format!("media/{name}.tmp"));

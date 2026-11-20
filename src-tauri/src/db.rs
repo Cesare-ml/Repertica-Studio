@@ -80,6 +80,12 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;"
         )?;
     }
+    // Certificates are append-only even when accessed through a raw SQLite client.
+    // Idempotent creation also upgrades early version-1 development databases.
+    conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
+        BEFORE UPDATE ON certificates BEGIN SELECT RAISE(ABORT, 'certificate_immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS certificates_no_delete
+        BEFORE DELETE ON certificates BEGIN SELECT RAISE(ABORT, 'certificate_immutable'); END;")?;
     Ok(Database { conn: Mutex::new(conn), directory })
 }
 
@@ -108,6 +114,28 @@ mod tests {
         let db = open(dir.path().into()).unwrap();
         let c = db.conn.lock().unwrap();
         assert!(c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s','a','c',100,'2026-11-21','now')",[]).is_err());
+    }
+    #[test]
+    fn certificates_cannot_be_edited_or_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(dir.path().into()).unwrap();
+        let c = db.conn.lock().unwrap();
+        c.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES('a','OP-01','Test','available','now','now')",[]).unwrap();
+        c.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at) VALUES('cert','a','RS-01','2026-11-21','Artista','{}','now')",[]).unwrap();
+        assert!(c.execute("UPDATE certificates SET serial='altered' WHERE id='cert'",[]).is_err());
+        assert!(c.execute("DELETE FROM certificates WHERE id='cert'",[]).is_err());
+        assert!(c.execute("DELETE FROM artworks WHERE id='a'",[]).is_err());
+    }
+    #[test]
+    fn sale_is_unique_and_prevents_orphaned_contacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(dir.path().into()).unwrap();
+        let c = db.conn.lock().unwrap();
+        c.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES('a','OP-01','Test','available','now','now')",[]).unwrap();
+        c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Persona','now','now')",[]).unwrap();
+        c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s','a','c',15000,'2026-11-21','now')",[]).unwrap();
+        assert!(c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s2','a','c',15000,'2026-11-21','now')",[]).is_err());
+        assert!(c.execute("DELETE FROM collectors WHERE id='c'",[]).is_err());
     }
     #[test]
     fn newer_schema_is_not_downgraded() {
