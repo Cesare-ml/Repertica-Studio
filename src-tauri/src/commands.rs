@@ -54,7 +54,8 @@ const COLLECTOR_FIELDS: &str = "id,name,email,phone,address,notes,created_at,upd
 pub fn list_artworks(db: State<'_, Database>) -> Result<Vec<Artwork>, String> {
     let conn = db.conn.lock().map_err(err)?;
     let mut statement = conn.prepare(&format!("SELECT {ARTWORK_FIELDS} FROM artworks ORDER BY updated_at DESC, title COLLATE NOCASE")).map_err(err)?;
-    statement.query_map([], artwork_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)
+    let items = statement.query_map([], artwork_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+    Ok(items)
 }
 #[tauri::command]
 pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artwork, String> {
@@ -104,7 +105,8 @@ pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String>
 pub fn list_collectors(db: State<'_, Database>) -> Result<Vec<Collector>, String> {
     let conn = db.conn.lock().map_err(err)?;
     let mut statement = conn.prepare(&format!("SELECT {COLLECTOR_FIELDS} FROM collectors ORDER BY name COLLATE NOCASE")).map_err(err)?;
-    statement.query_map([],collector_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)
+    let items = statement.query_map([], collector_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+    Ok(items)
 }
 #[tauri::command]
 pub fn save_collector(db: State<'_, Database>, input: CollectorInput) -> Result<Collector, String> {
@@ -144,7 +146,8 @@ pub fn list_sales(db: State<'_, Database>) -> Result<Vec<Sale>, String> {
     let conn=db.conn.lock().map_err(err)?;
     let mut statement=conn.prepare("SELECT s.id,s.artwork_id,s.collector_id,s.amount_cents,s.currency,s.sold_at,s.notes,a.title,c.name,s.created_at
         FROM sales s JOIN artworks a ON a.id=s.artwork_id JOIN collectors c ON c.id=s.collector_id ORDER BY s.sold_at DESC, s.created_at DESC").map_err(err)?;
-    statement.query_map([],sale_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)
+    let items = statement.query_map([], sale_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+    Ok(items)
 }
 #[tauri::command]
 pub fn record_sale(db: State<'_, Database>, input: SaleInput) -> Result<(), String> {
@@ -182,7 +185,8 @@ pub fn list_certificates(db: State<'_, Database>) -> Result<Vec<Certificate>, St
     let conn=db.conn.lock().map_err(err)?;
     let mut statement=conn.prepare("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at
         FROM certificates c JOIN artworks a ON a.id=c.artwork_id ORDER BY c.created_at DESC").map_err(err)?;
-    statement.query_map([],certificate_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)
+    let items = statement.query_map([], certificate_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+    Ok(items)
 }
 #[tauri::command]
 pub fn issue_certificate(db: State<'_, Database>, input: CertificateInput) -> Result<Certificate, String> {
