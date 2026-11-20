@@ -1,0 +1,33 @@
+{
+  "name": "repertica-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "ng serve --host 127.0.0.1 --port 4200",
+    "build": "ng build --configuration production",
+    "prepare:icons": "tauri icon branding/icon.png --output src-tauri/icons",
+    "pretauri:dev": "npm run prepare:icons",
+    "pretauri:build": "npm run prepare:icons",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "test:unit": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@angular/common": "20.3.35",
+    "@angular/compiler": "20.3.35",
+    "@angular/core": "20.3.35",
+    "@angular/forms": "20.3.35",
+    "@angular/platform-browser": "20.3.35",
+    "@tauri-apps/api": "2.12.2",
+    "zone.js": "~0.15.1",
+    "rxjs": "~7.8.2"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": "20.3.5",
+    "@angular/cli": "20.3.5",
+    "@angular/compiler-cli": "20.3.35",
+    "@tauri-apps/cli": "2.12.6",
+    "typescript": "5.8.3"
+  }
+}
