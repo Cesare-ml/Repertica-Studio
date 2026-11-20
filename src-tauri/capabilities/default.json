@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Only the core window may invoke Repertica's local commands.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
