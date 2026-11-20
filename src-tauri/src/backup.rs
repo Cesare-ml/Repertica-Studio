@@ -151,7 +151,7 @@ pub fn inspect_backup_core(folder: &Path) -> Result<BackupSummary, String> {
     let mut seen = HashSet::new();
     let mut total = 0_u64;
     for entry in &manifest.files {
-        if !valid_record_path(&entry.path) || !seen.insert(&entry.path) {
+        if !valid_record_path(&entry.path) || !seen.insert(entry.path.clone()) {
             return Err("Il manifest contiene un percorso non valido o duplicato".into());
         }
         let actual = record(&directory, &entry.path)?;
