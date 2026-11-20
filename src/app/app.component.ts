@@ -2,10 +2,11 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { isTauri } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
-  Certificate, CertificateInput, Overview
+  Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'settings';
@@ -53,6 +54,11 @@ export class AppComponent implements OnInit {
   certificates: Certificate[] = [];
   overview: Overview = { artworks: 0, collectors: 0, sales: 0, certificates: 0, revenue_cents: 0 };
   dataPath = '';
+  backupDestination = '';
+  lastBackup: BackupSummary | null = null;
+  restoreCandidate: BackupSummary | null = null;
+  lastRestore: RestoreSummary | null = null;
+
   thumbnails: Record<string, string> = {};
   artworkDialog = false;
   collectorDialog = false;
@@ -147,6 +153,57 @@ export class AppComponent implements OnInit {
       this.busy = false;
       this.change.detectChanges();
     }
+  }
+  async chooseBackupDestination(): Promise<void> {
+    if (this.busy || !this.initialized) return;
+    try {
+      const selection = await open({ directory: true, multiple: false, title: 'Cartella in cui conservare i backup' });
+      if (typeof selection === 'string') this.backupDestination = selection;
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async makeBackup(): Promise<void> {
+    if (!this.backupDestination || this.busy) return;
+    await this.run(async () => {
+      this.lastBackup = await api.createBackup(this.backupDestination);
+    }, 'Backup completato e verificato. Conserva la cartella risultante in un luogo sicuro.');
+  }
+  async chooseRestoreFolder(): Promise<void> {
+    if (this.busy || !this.initialized) return;
+    try {
+      const selection = await open({ directory: true, multiple: false, title: 'Scegli una cartella di backup ReperticaStudio-backup-…' });
+      if (typeof selection !== 'string') return;
+      this.busy = true;
+      this.errorMessage = '';
+      this.restoreCandidate = await api.inspectBackup(selection);
+    } catch (error) {
+      this.restoreCandidate = null;
+      this.errorMessage = this.error(error);
+    } finally {
+      this.busy = false;
+      this.change.detectChanges();
+    }
+  }
+  async restoreSelectedBackup(): Promise<void> {
+    if (this.busy || !this.restoreCandidate) return;
+    const candidate = this.restoreCandidate;
+    if (!window.confirm('RIPRISTINO ARCHIVIO\\n\\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\\n\\nContinuare?')) return;
+    this.busy = true; this.errorMessage = ''; this.notice = '';
+    try {
+      this.lastRestore = await api.restoreBackup(candidate.directory);
+      this.thumbnails = {};
+      this.restoreCandidate = null;
+      await this.refresh();
+      this.notice = 'Archivio ripristinato e verificato. Copia precedente: ' + this.lastRestore.previousArchive;
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    } finally {
+      this.busy = false;
+      this.change.detectChanges();
+    }
+  }
+  bytes(value: number): string {
+    return new Intl.NumberFormat('it-IT', { maximumFractionDigits: 1 }).format(value / 1048576) + ' MiB';
   }
   newArtwork(): void { this.artworkDraft = freshArtwork(); this.artworkDialog = true; }
   editArtwork(a: Artwork): void {

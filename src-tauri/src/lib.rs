@@ -1,3 +1,4 @@
+mod backup;
 mod commands;
 mod db;
 mod models;
@@ -5,9 +6,11 @@ mod models;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager;
             let directory = app.path().app_local_data_dir()?;
+            backup::recover_interrupted_restore(&directory).map_err(std::io::Error::other)?;
             let database = db::open(directory)?;
             app.manage(database);
             Ok(())
@@ -27,7 +30,10 @@ pub fn run() {
             commands::overview,
             commands::data_directory,
             commands::save_artwork_image,
-            commands::artwork_image_data
+            commands::artwork_image_data,
+            backup::create_backup,
+            backup::inspect_backup,
+            backup::restore_backup
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");
