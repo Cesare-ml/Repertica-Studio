@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (tredicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (quattordicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -22,6 +22,7 @@ Data ricognizione: **2026-11-21** (tredicesima ricognizione). Stato uniforme: **
 | [REPS-TECH-014](REPS-TECH-014-bridge-mcp-locale-lettura-permessi.md) | Bridge MCP locale STDIO in lettura con scope minimo, consensi revocabili e confine esplicito con gli host IA esterni (approfondisce issue #3) | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-015](REPS-TECH-015-diagnostica-assistenza-locale-report-privato.md) | Diagnostica per assistenza **solo su richiesta**, codice errore e report tecnico minimo senza dati dell'archivio, senza telemetria (coordinata con issue #12) | P2 | Proposta — da valutare |
 | [REPS-TECH-016](REPS-TECH-016-allegati-documentali-locali-multi-entita.md) | Allegati documentali locali riutilizzabili e verificabili, con collegamenti espliciti a più schede e senza cloud; non sostituisce allegati incasso v6 | P2 | Proposta — da valutare |
+| [REPS-TECH-017](REPS-TECH-017-protezione-archivio-attivo-cifratura-facoltativa.md) | Protezione facoltativa dei dati dell'**archivio attivo a riposo** (SQLite, WAL, media, allegati e residui), distinta dai backup cifrati di TECH-006; alternative OS prima di cifratura integrata | P2–P3 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -143,3 +144,11 @@ Nuova lettura diretta di `main`: [README](../../../README.md), [MVP](../../MVP.m
 - **Presente già su `main`:** lo schema SQLite è ora alla **v6**, con **un allegato PDF/JPEG/PNG/WebP per incasso** (`sale_receipt_attachments`), hash SHA-256, copia locale e controlli specifici durante backup/ripristino ([RECEIPT-ATTACHMENTS](../../RECEIPT-ATTACHMENTS.md)). Il nuovo studio **non** duplica o sostituisce la funzione esistente e impone compatibilità senza migrazione indiscriminata. Gli attuali [CSV sono **otto**](../../DATA-PORTABILITY.md), comprendendo ora anche `gallery`; le menzioni precedenti a cinque/sei/sette CSV documentano lo stato storico delle singole ricognizioni.
 - **Confini tecnico-gestionali:** TECH-001 tratta un pacchetto dati aperto, TECH-003 diagnostica dei media, TECH-007 collocazione degli originali, TECH-013 copie fotografiche di condivisione. UX-001/004/010/016/019 definiscono i processi e significati documentali, non il contenitore binario. Nessun file dell'altro filone modificato. **Nessun riconoscimento automatico di autenticità, OCR, firma digitale, cloud, invio o accesso MCP ai documenti.**
 - **Priorità alle verifiche:** domanda effettiva, quantità e dimensioni dei documenti, prova di round-trip e test su Windows/macOS/Linux; collaudo del backup v6 esistente prima di valutare un nuovo layer di file. Tutte le **sedici** schede restano **«Proposta — da valutare»**: nessuna approvazione, incarico, implementazione o merge.
+
+
+## Quattordicesima ricognizione — 21 novembre 2026
+
+- **[REPS-TECH-017](REPS-TECH-017-protezione-archivio-attivo-cifratura-facoltativa.md) — Protezione facoltativa dell'archivio attivo a riposo:** studiato il rischio di lettura di SQLite, fotografie, allegati e copie temporanee in caso di dispositivo sottratto o accesso al disco. Il `main` usa attualmente `rusqlite` senza codec di cifratura e un media store locale: **non è emerso alcun incidente reale**. Prima di una cifratura applicativa, da confrontare la semplice protezione del volume OS.
+- **Distinzione esplicita:** TECH-006 protegge le **copie di backup**, non l'archivio attivo; TECH-007 tratta posizione dei file; TECH-012 checkpoint prima di migrazione; TECH-001 portabilità. La PR [#14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) raccoglie 21 proposte gestionali distinte. L'eventuale cifratura non deve rendere illegibili dati senza la chiave, creare rollback/backup in chiaro silenziosi o imporre account.
+- **Sicurezza e decisione:** priorità ipotetica P2–P3 e **complessità alta/molto alta** per crittografia integrata; la guida alla cifratura OS è una possibile alternativa a rischio minore. Da verificare soprattutto bisogno reale, licenza, compatibilità con media/CSV/backup e recupero offline multipiattaforma. Nessun componente crittografico scelto né implementato.
+- **Perimetro:** aggiornata esclusivamente questa scheda e l'indice in `docs/idee/strumenti-e-architettura/`. Le **diciassette** proposte restano **«Proposta — da valutare»**, senza approvazioni, issue, modifiche al software o merge. La PR tecnica [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) rimane in bozza.
