@@ -273,8 +273,8 @@ mod tests {
     fn duplicate_persisted_part_ids_are_rejected_before_writing_even_when_disabled() {
         let (_dir, db) = setup();
         let original = load_plan(&db.conn.lock().unwrap()).unwrap();
-        for enabled in [true, false] {
-            let bad = PlanInput { enabled, parts: vec![
+        for is_enabled in [true, false] {
+            let bad = PlanInput { enabled: is_enabled, parts: vec![
                 PartInput { id: Some("personal".into()), name: "Autore".into(), share_bp: 6000, pays_expenses: false },
                 PartInput { id: Some("personal".into()), name: "Studio".into(), share_bp: 4000, pays_expenses: true },
             ] };
