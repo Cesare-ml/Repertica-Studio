@@ -485,10 +485,11 @@
 </div>
 
 <div class="print-only" *ngIf="selectedCertificate && selectedSnapshot">
-  <article class="certificate-page">
+  <article class="certificate-page" [class.has-photo]="!!selectedCertificatePhoto">
     <header><div class="certificate-wordmark">REPERTICA <small>STUDIO</small></div><span>{{ tr('ARCHIVIO D\'ARTISTA') }}</span></header>
     <div class="certificate-main"><p>{{ tr('CERTIFICATO DELL\'OPERA') }}</p><h2>{{ selectedSnapshot.title }}</h2>
       <p class="certificate-number">{{ selectedCertificate.serial }}</p>
+      <div class="certificate-photo" *ngIf="selectedCertificatePhoto"><img [src]="selectedCertificatePhoto" [alt]="tr('Fotografia storica dell\'opera')"></div>
       <div class="certificate-details"><div><span>{{ tr('Codice opera') }}</span><strong>{{ selectedSnapshot.code }}</strong></div>
         <div><span>{{ tr('Anno') }}</span><strong>{{ selectedSnapshot.year || 'Non indicato' }}</strong></div>
         <div><span>{{ tr('Tecnica e supporto') }}</span><strong>{{ selectedSnapshot.technique || '—' }} · {{ selectedSnapshot.support || '—' }}</strong></div>
