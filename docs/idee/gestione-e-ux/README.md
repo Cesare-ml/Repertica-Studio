@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (ventesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **27 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-21** (ventunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **28 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -33,6 +33,15 @@ Aggiornato: **2026-11-21** (ventesima ricognizione). Stato delle proposte: **Pro
 | [REPS-UX-025](REPS-UX-025-istruzioni-allestimento-cura-opera.md) | Istruzioni di installazione, movimentazione e cura **della singola opera**: passaggi versionati, fonti e condivisione selettiva; non crea movimenti o report di condizione | P2* | Proposta — da valutare |
 | [REPS-UX-026](REPS-UX-026-diario-lavorazione-opera-fasi-datate.md) | Diario facoltativo del **processo di produzione originale** per opere già catalogate: eventi, date anche incerte, fonti e fotografie di lavorazione; non gestisce incarichi, costi o restauro | P2* | Proposta — da valutare |
 | [REPS-UX-027](REPS-UX-027-valute-estere-vendite-incassi-costi.md) | Valuta originaria di vendite, rate, incassi e spese, con riepiloghi per valuta e nessuna conversione implicita; compatibilità dei dati EUR esistenti | P1–P2* | Proposta — da valutare |
+| [REPS-UX-028](REPS-UX-028-giustificativi-locali-spese-acquisti.md) | Giustificativi PDF/immagine locali per spese e acquisti, distinti dagli allegati agli incassi e senza generare ulteriori movimenti contabili | P1–P2* | Proposta — da valutare |
+
+## Ventunesima ricognizione (21 novembre 2026) — REPS-UX-028
+
+- **[REPS-UX-028 — Giustificativi locali delle spese e degli acquisti](REPS-UX-028-giustificativi-locali-spese-acquisti.md):** una scheda di analisi per collegare a una spesa già registrata una foto dello scontrino o un PDF di fattura, conservato nel backup completo e consultabile/esportabile interamente offline. La copia del documento **non crea una nuova spesa, incasso, vendita o alterazione dei riepiloghi**; il contenuto non è assunto vero o fiscalmente validato.
+- **Riscontro su `main`:** `finance.rs` e `models.ts` espongono `Expense` con fornitore, importo, note e `purchase_url`, ma senza campo di allegato; `docs/RECEIPT-ATTACHMENTS.md` documenta invece PDF/immagini **degli incassi** già implementati, con controlli SHA-256 e backup. Questa scheda studia un'esigenza diversa e non richiede un secondo motore media.
+- **Confronto e confini:** UX-003 riguarda i costi attribuiti alle opere, UX-008 la gestione delle scorte e UX-027 le valute; nessuna di esse descrive il flusso di conservazione del **giustificativo della spesa sorgente**. Il filone tecnico della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) riguarda integrità, portabilità, backup e architettura; nessun file della cartella tecnica è stato modificato.
+- **Ipotesi da convalidare:** utilità professionale, limite di dimensioni, numero di documenti per spesa e gestione di una fattura con più righe di spesa. **Priorità P1–P2 soltanto proposta**, senza approvazione né incarico di sviluppo.
+- **Perimetro eseguito:** aggiunta una scheda Markdown e aggiornato questo indice, esclusivamente in `docs/idee/gestione-e-ux/`. **28 proposte**, tutte **«Proposta — da valutare»**; PR #14 lasciata aperta e in bozza, nessun merge.
 
 ## Ventesima ricognizione (21 novembre 2026) — REPS-UX-027
 
