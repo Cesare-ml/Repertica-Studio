@@ -22,3 +22,10 @@ test('CPAL license attribution correctly names Repertica', () => {
   assert.match(license, /Powered by Repertica/);
   assert.doesNotMatch(license, /Powered by VirgoStars/);
 });
+
+test('native CSV export is wired and the Save dialog is explicitly permitted', () => {
+  const capability = JSON.parse(get('src-tauri/capabilities/default.json'));
+  assert.ok(capability.permissions.includes('dialog:allow-save'));
+  assert.match(get('src-tauri/src/lib.rs'), /export::export_ledger_csv/);
+  assert.match(get('src/app/api.ts'), /'export_ledger_csv'/);
+});
