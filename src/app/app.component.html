@@ -52,32 +52,71 @@
     <section *ngIf="section === 'artworks'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Archivio opere') }}</h2><p>{{ tr('Schede e immagini conservate esclusivamente su questo dispositivo.') }}</p></div>
         <button class="primary" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button></div>
-      <div class="filter-row"><input type="search" [placeholder]="tr('Cerca per titolo, codice, tecnica, anno…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca opere')">
-        <span>{{ visibleArtworks.length }} opere</span></div>
+      <div class="filter-row archive-filters">
+        <input type="search" [placeholder]="tr('Titolo, codice, tecnica, ubicazione, collezionista…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca opere')">
+        <label class="filter-control"><span>{{ tr('Stato') }}</span><select [(ngModel)]="artworkStatusFilter" [attr.aria-label]="tr('Filtra opere per stato')">
+          <option value="all">{{ tr('Tutti') }}</option><option value="available">{{ tr('Disponibili') }}</option>
+          <option value="reserved">{{ tr('Riservate') }}</option><option value="sold">{{ tr('Vendute') }}</option>
+          <option value="archived">{{ tr('In archivio') }}</option>
+        </select></label>
+        <label class="filter-control"><span>{{ tr('Collezionista') }}</span><select [(ngModel)]="artworkCollectorFilter" [attr.aria-label]="tr('Filtra opere acquisite dal collezionista')">
+          <option value="all">{{ tr('Tutti') }}</option><option *ngFor="let c of collectors" [value]="c.id">{{ c.name }}</option>
+        </select></label>
+        <label class="filter-control"><span>{{ tr('Ordina') }}</span><select [(ngModel)]="artworkOrder" [attr.aria-label]="tr('Ordina opere')">
+          <option value="recent">{{ tr('Ultime modificate') }}</option><option value="title">{{ tr('Titolo A–Z') }}</option><option value="year">{{ tr('Anno decrescente') }}</option>
+        </select></label>
+        <span class="filter-count" aria-live="polite">{{ visibleArtworks.length }} / {{ artworks.length }} {{ tr('Opere') }}</span>
+      </div>
       <div class="panel table-scroll">
-        <table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Anno / tecnica') }}</th><th>{{ tr('Misure') }}</th><th>{{ tr('Stato') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+        <table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Anno / tecnica') }}</th><th>{{ tr('Misure') }}</th><th>{{ tr('Stato') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
           <tbody><tr *ngFor="let a of visibleArtworks">
             <td><div class="work-cell"><div class="work-image"><img *ngIf="thumbnails[a.id]" [src]="thumbnails[a.id]" alt=""><span *ngIf="!thumbnails[a.id]">R</span></div>
               <div><strong>{{ a.title }}</strong><small>{{ a.code }}</small></div></div></td>
             <td>{{ a.year || '—' }}<small class="stacked">{{ a.technique || 'Tecnica non indicata' }}</small></td>
             <td>{{ dimensions(a) }}</td>
             <td><span class="status" [ngClass]="a.status">{{ tr(statusLabels[a.status]) }}</span></td>
+            <td><button *ngIf="salesByArtwork[a.id] as sale" type="button" class="link-button"
+              (click)="openCollectorFromArtwork(a.id)" [attr.aria-label]="'Apri il collezionista ' + sale.collector_name">{{ sale.collector_name }}</button>
+              <span *ngIf="!salesByArtwork[a.id]">—</span></td>
             <td class="actions"><button class="small" type="button" (click)="editArtwork(a)">{{ tr('Modifica') }}</button>
               <label class="small upload-btn">{{ tr('Foto') }}<input type="file" accept="image/jpeg,image/png,image/webp" (change)="onImage($event,a)" hidden></label>
               <button class="small danger-text" type="button" (click)="deleteArtwork(a)">{{ tr('Elimina') }}</button></td>
           </tr></tbody></table>
-        <div class="empty-state" *ngIf="!visibleArtworks.length"><strong>{{ tr('Nessuna opera trovata') }}</strong><p>{{ tr('Prova una ricerca diversa oppure aggiungi un\'opera.') }}</p></div>
+        <div class="empty-state" *ngIf="!visibleArtworks.length"><strong>{{ tr('Nessuna opera trovata') }}</strong><p>{{ tr('Modifica i filtri o la ricerca per visualizzare altre opere.') }}</p>
+          <button type="button" class="small" (click)="search = ''; artworkStatusFilter = 'all'; artworkCollectorFilter = 'all'; artworkOrder = 'recent'">{{ tr('Azzera filtri') }}</button></div>
       </div>
     </section>
 
     <section *ngIf="section === 'collectors'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Collezionisti e contatti') }}</h2><p>{{ tr('Un\'anagrafica privata per le tue relazioni professionali.') }}</p></div>
         <button class="primary" type="button" (click)="newCollector()" [disabled]="!initialized">{{ tr('+ Nuovo contatto') }}</button></div>
-      <div class="filter-row"><input type="search" [placeholder]="tr('Cerca nome, email o telefono…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca collezionisti')"><span>{{ visibleCollectors.length }} contatti</span></div>
-      <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Nome') }}</th><th>{{ tr('Contatti') }}</th><th>{{ tr('Indirizzo') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
-        <tbody><tr *ngFor="let c of visibleCollectors"><td><strong>{{ c.name }}</strong></td><td>{{ c.email || '—' }}<small class="stacked">{{ c.phone || '' }}</small></td>
-          <td>{{ c.address || '—' }}</td><td class="actions"><button class="small" type="button" (click)="editCollector(c)">{{ tr('Modifica') }}</button><button class="small danger-text" type="button" (click)="deleteCollector(c)">{{ tr('Elimina') }}</button></td></tr></tbody></table>
-        <div class="empty-state" *ngIf="!visibleCollectors.length">{{ tr('Nessun collezionista. Registra il tuo primo contatto.') }}</div></div>
+      <div class="filter-row"><input type="search" [placeholder]="tr('Nome, email, telefono o opera acquisita…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca collezionisti')"><span>{{ visibleCollectors.length }} / {{ collectors.length }} {{ tr('Contatti') }}</span></div>
+      <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Nome') }}</th><th>{{ tr('Contatti') }}</th><th>{{ tr('Indirizzo') }}</th><th>{{ tr('Opere acquisite') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+        <tbody>
+          <ng-container *ngFor="let c of visibleCollectors">
+            <tr><td><strong>{{ c.name }}</strong></td><td>{{ c.email || '—' }}<small class="stacked">{{ c.phone || '' }}</small></td>
+              <td>{{ c.address || '—' }}</td>
+              <td><button class="small" type="button" (click)="toggleCollectorAcquisitions(c.id)"
+                [disabled]="!(salesByCollector[c.id]?.length)" [attr.aria-expanded]="expandedCollectorId === c.id"
+                [attr.aria-controls]="'collector-works-' + c.id">
+                {{ salesByCollector[c.id]?.length || 0 }} · {{ tr(expandedCollectorId === c.id ? 'Nascondi' : 'Dettagli') }}
+              </button></td>
+              <td class="actions"><button class="small" type="button" (click)="editCollector(c)">{{ tr('Modifica') }}</button>
+                <button class="small danger-text" type="button" (click)="deleteCollector(c)">{{ tr('Elimina') }}</button></td></tr>
+            <tr *ngIf="expandedCollectorId === c.id" class="collector-details" [id]="'collector-works-' + c.id">
+              <td colspan="5">
+                <div class="collector-history-header"><strong>Opere acquistate da {{ c.name }}</strong>
+                  <button type="button" class="small" (click)="showCollectorArtworks(c.id)">{{ tr('Vedi nell\'archivio opere') }}</button></div>
+                <ul class="collector-history">
+                  <li *ngFor="let sale of salesByCollector[c.id]">
+                    <strong>{{ sale.artwork_title }}</strong><span>{{ date(sale.sold_at) }}</span>
+                  </li>
+                </ul>
+              </td>
+            </tr>
+          </ng-container>
+        </tbody></table>
+        <div class="empty-state" *ngIf="!visibleCollectors.length">{{ tr('Nessun contatto corrisponde alla ricerca.') }}</div></div>
     </section>
 
     <section *ngIf="section === 'sales'" class="page">
