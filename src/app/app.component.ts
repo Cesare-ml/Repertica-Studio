@@ -12,6 +12,7 @@ import { PaymentPlanComponent } from './payment-plan.component';
 import { MediaCenterComponent } from './media-center.component';
 import { MediaEditorComponent } from './media-editor.component';
 import { BrochuresComponent } from './brochures.component';
+import { BusinessMailComponent } from './business-mail.component';
 import { emptyPayment, installmentRows, paymentToInput, toCents, type PaymentDraft } from './payments';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
 import type { ArtworkOrder, CollectorFilter } from './archive-filters';
@@ -29,7 +30,7 @@ import type {
 
 /** A picture chosen for a new artwork, possibly edited before it is stored. */
 interface PendingPhoto { mediaId: string; label: string; thumb: string; kind: PhotoKind; }
-type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'brochures' | 'finance' | 'settings';
+type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'brochures' | 'mail' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
   code: null, title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
@@ -48,7 +49,7 @@ const statusLabels: Record<ArtworkStatus, string> = {
 @Component({
   selector: 'rp-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent],
+  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent, BusinessMailComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -70,6 +71,7 @@ export class AppComponent implements OnInit {
     { id: 'sales', label: 'Vendite' },
     { id: 'certificates', label: 'Certificati' },
     { id: 'brochures', label: 'Brochure' },
+    { id: 'mail', label: 'Posta professionale' },
     { id: 'finance', label: 'Economia' },
     { id: 'settings', label: 'Impostazioni' }
   ];
