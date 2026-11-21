@@ -754,6 +754,11 @@ export class AppComponent implements OnInit {
   async printCertificate(c: Certificate): Promise<void> {
     await this.showCertificate(c);
     if (this.selectedCertificate?.id !== c.id) return;
+    if (!this.selectedSnapshot) {
+      this.errorMessage = this.tr('Impossibile stampare: dati storici del certificato non validi.');
+      this.change.detectChanges();
+      return;
+    }
     // Printing the current cover would misrepresent the original certificate.
     if (this.selectedSnapshot?.image_path && !this.selectedCertificatePhoto) {
       this.errorMessage = this.tr('Impossibile stampare: fotografia storica mancante o non leggibile.');
