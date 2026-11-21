@@ -312,6 +312,10 @@ export class AppComponent implements OnInit {
       await this.loadFinanceYear();
     }
   }
+  get allocationValid(): boolean {
+    return [this.personalPercent,this.activityPercent,this.savingsPercent].every(v=>Number.isFinite(v)&&v>=0&&v<=100)
+      && [this.personalPercent,this.activityPercent,this.savingsPercent].reduce((a,b)=>a+Math.round(b*100),0)===10000;
+  }
   selectLanguage(): void {
     this.applyLanguage(this.languageChoice === 'system' ? this.systemLanguage : chooseLanguage(this.languageChoice));
   }

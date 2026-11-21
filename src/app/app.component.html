@@ -191,7 +191,7 @@
             <label class="settings-input"><span>{{ tr('Tasse predefinite (%)') }}</span><input type="number" min="0" max="100" step="0.01" [(ngModel)]="defaultTaxPercent"></label>
             <label class="settings-input"><span>{{ tr('Data inizio tesoreria') }}</span><input type="date" [(ngModel)]="settingsDraft.treasury_start_date"></label>
           </div>
-          <p class="allocation-total">Totale quote: {{ (personalPercent+activityPercent+savingsPercent).toFixed(2) }}% <span *ngIf="(Math.round(personalPercent*100)+Math.round(activityPercent*100)+Math.round(savingsPercent*100)) !== 10000">{{ tr('— Deve essere 100%') }}</span></p>
+          <p class="allocation-total">Totale quote: {{ (personalPercent+activityPercent+savingsPercent).toFixed(2) }}% <span *ngIf="!allocationValid">{{ tr('— Deve essere 100%') }}</span></p>
           <button type="button" class="primary" (click)="saveEconomySettings()" [disabled]="busy">{{ tr('Salva impostazioni') }}</button>
         </div>
         <div class="backup-block">
