@@ -125,8 +125,8 @@ export const api = {
   saveAllocationPlan: (input: AllocationPlanInput) => invoke<AllocationPlan>('save_allocation_plan', {input}),
   financeOverview: (year: number) => invoke<FinanceOverview>('finance_overview', {year}),
   mcpSetupInfo: () => invoke<McpSetup>('mcp_setup_info'),
-  mcpClientStatus: () => invoke<McpClientStatus>('mcp_client_status'),
-  mcpClientConfigure: () => invoke<McpClientStatus>('mcp_client_configure'),
-  mcpClientRemove: () => invoke<McpClientStatus>('mcp_client_remove'),
+  mcpClientsStatus: () => invoke<McpClientStatus[]>('mcp_clients_status'),
+  mcpClientConfigure: (clientId: string) => invoke<McpClientStatus>('mcp_client_configure', { clientId }),
+  mcpClientRemove: (clientId: string) => invoke<McpClientStatus>('mcp_client_remove', { clientId }),
   pricePreview: (widthCm: number, heightCm: number) => invoke<number|null>('price_preview', {widthCm,heightCm})
 };

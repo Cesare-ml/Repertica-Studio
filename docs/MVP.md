@@ -109,3 +109,10 @@ Da collaudare su desktop reale: creazione di un'opera con più fotografie grandi
 - **File RAW (v12):** un file RAW per opera (CR2/CR3, NEF, ARW, DNG, ORF, RAF, RW2, PEF e altri formati comuni), controllato per estensione e intestazione, copiato in streaming con SHA-256 (fino a 1 GiB), sostituibile, rimovibile e salvabile in una copia. Fa parte dei backup: i RAW possono renderli molto più grandi.
 - **Pagamenti rateali (v11):** una vendita può essere non incassata, saldata, parzialmente incassata o **rateale** (2–60 rate con scadenze mensili e quote che sommano esattamente al prezzo, con resto sulle prime rate; acconto facoltativo). Il piano è modificabile dopo la vendita. Lo stato di ogni rata (pagata, parziale, scaduta, da incassare) deriva dagli incassi registrati applicati in ordine di scadenza; il piano non è un incasso. Il ripristino rifiuta piani con totale diverso dal prezzo. Registro CSV `installments`.
 
+## Fotografie sempre dalla libreria
+
+- Ogni fotografia di una nuova opera (copertina e galleria) o di una scheda esistente viene importata nella libreria immagini e poi collegata: così si può **ritagliare e correggere subito**. Dopo la scelta della copertina l'editor si apre da solo (si può saltare: l'originale resta nella libreria); con «Ritaglia e correggi» si riapre quando serve. Le modifiche creano nuove versioni, l'originale non viene mai alterato.
+- Se la finestra «Nuova opera» viene chiusa senza salvare, le immagini importate durante quella sessione e rimaste inutilizzate sono spostate nel **cestino** della libreria (ripristinabili da lì). Quelle scelte dalla libreria non vengono toccate.
+- La sezione fotografie ha una copertina grande (anteprima completa, senza tagli), miniature per la galleria con modifica e rimozione, e il file RAW.
+- **Assistenti IA:** il collegamento con un clic ora vale per Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI e Visual Studio Code (vedi [MCP.md](MCP.md)).
+

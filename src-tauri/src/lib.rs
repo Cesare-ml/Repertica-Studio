@@ -88,7 +88,7 @@ pub fn run() {
             receipt_attachments::export_sale_receipt_attachment,
             export::export_ledger_csv,
             mcp::mcp_setup_info,
-            mcp_client::mcp_client_status,
+            mcp_client::mcp_clients_status,
             mcp_client::mcp_client_configure,
             mcp_client::mcp_client_remove,
             media::media_list,

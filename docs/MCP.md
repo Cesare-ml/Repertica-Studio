@@ -14,11 +14,22 @@ Repertica Studio include un server [Model Context Protocol](https://modelcontext
 
 ## Configurazione
 
-**Da Impostazioni, senza terminale.** In **Impostazioni → Assistenti IA locali (MCP)** l'app riconosce Claude Desktop e mostra lo stato del collegamento (non collegato, collegato, da aggiornare). Il pulsante **Collega a Claude Desktop** mostra il file che verrà modificato, chiede conferma, aggiunge soltanto la voce `repertica-studio` e conserva una copia del file originale (`claude_desktop_config.json.repertica-backup`). **Scollega** rimuove solo quella voce. Dopo ogni modifica va riavviato Claude Desktop.
+**Da Impostazioni, senza terminale.** In **Impostazioni → Assistenti IA locali (MCP)** l'app riconosce gli assistenti installati e mostra per ciascuno lo stato del collegamento (non trovato, non collegato, collegato, da aggiornare). Il pulsante **Collega** mostra il file che verrà modificato, chiede conferma, aggiunge soltanto la voce `repertica-studio` e conserva una copia del file originale (`<file>.repertica-backup`). **Scollega** rimuove solo quella voce. Dopo ogni modifica va riavviato l'assistente.
 
-Il collegamento non tocca mai le altre impostazioni o gli altri server MCP del file; un file che non è JSON valido viene lasciato intatto con un messaggio di errore. Se l'app viene spostata, lo stato diventa «da aggiornare» e basta un clic su **Aggiorna il collegamento**. Supporta la posizione classica (`%APPDATA%\Claude`) e quella della versione Microsoft Store di Claude Desktop.
+| Assistente | File modificato | Formato |
+|---|---|---|
+| Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` (anche la versione Microsoft Store) | JSON, sezione `mcpServers` |
+| Codex (OpenAI) | `~/.codex/config.toml` (o `$CODEX_HOME`) | TOML, tabella `[mcp_servers.repertica-studio]` |
+| Cursor | `~/.cursor/mcp.json` | JSON, `mcpServers` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | JSON, `mcpServers` |
+| Gemini CLI | `~/.gemini/settings.json` | JSON, `mcpServers` |
+| Visual Studio Code | `%APPDATA%\Code\User\mcp.json` | JSON, sezione `servers` con `"type": "stdio"` |
 
-**Altri assistenti.** Nella stessa sezione, **Configurazione manuale per altri assistenti** mostra il JSON pronto con il percorso corretto dell'eseguibile e dell'archivio e un pulsante per copiarlo (esempio Windows):
+Il collegamento non tocca mai le altre impostazioni o gli altri server MCP: nei file JSON l'ordine delle chiavi è conservato, in `config.toml` anche commenti, formattazione e le altre tabelle. Un file che non si può leggere (JSON o TOML non valido, sezione di tipo inatteso) viene lasciato intatto e l'errore è mostrato accanto all'assistente. Se l'app viene spostata, lo stato diventa «da aggiornare» e basta un clic su **Aggiorna il collegamento**.
+
+**ChatGPT.** L'app e il sito di ChatGPT si collegano soltanto a server MCP online (HTTP) e non possono usare un server locale su STDIO: per i prodotti OpenAI si usa Codex. Claude Code non è configurato automaticamente (il suo file contiene molte altre impostazioni): si collega con il comando mostrato nella configurazione manuale.
+
+**Altri assistenti.** Nella stessa sezione, **Configurazione manuale per altri assistenti** mostra, con il percorso corretto dell'eseguibile e dell'archivio e un pulsante per copiare, il JSON, la tabella TOML per Codex e i comandi `codex mcp add` / `claude mcp add`. Esempio JSON (Windows):
 
 ```json
 {

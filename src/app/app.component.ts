@@ -24,7 +24,7 @@ import type {
 } from './models';
 
 /** A picture chosen for a new artwork, possibly edited before it is stored. */
-interface PendingPhoto { path?: string; mediaId?: string; label: string; operations: EditOperation[]; thumb: string; }
+interface PendingPhoto { mediaId: string; label: string; thumb: string; }
 type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
   code: null, title: '', year: null, technique: null, support: null,
@@ -154,7 +154,7 @@ export class AppComponent implements OnInit {
   showGuide = false;
   private readonly guideKey = 'repertica-first-run-guide';
   mcpSetup: McpSetup | null = null;
-  mcpClient: McpClientStatus | null = null;
+  mcpClients: McpClientStatus[] = [];
 
   thumbnails: Record<string, string> = {};
   galleryArtwork: Artwork | null = null;
@@ -173,7 +173,10 @@ export class AppComponent implements OnInit {
   newCover: PendingPhoto | null = null;
   newGallery: PendingPhoto[] = [];
   newRawPath: string | null = null;
-  editingPending: { cover: boolean; index: number; photo: PendingPhoto; source: PreviewData } | null = null;
+  /** Library picture being edited (cover chosen for a new artwork, stored cover or gallery photo). */
+  photoEditor: { mediaId: string; label: string; source: PreviewData; done: () => Promise<void> | void } | null = null;
+  /** Pictures imported while the artwork dialog is open: unused ones are moved to the trash afterwards. */
+  private readonly sessionImports = new Set<string>();
   libraryPicker: { purpose: 'new-cover' | 'new-gallery' | 'existing-cover' | 'existing-gallery'; artworkId?: string } | null = null;
   rawByArtwork: Record<string, RawFile> = {};
   mediaOpenId: string | null = null;
@@ -262,33 +265,58 @@ export class AppComponent implements OnInit {
   }
   async loadMcpSetup(): Promise<void> {
     try {
-      [this.mcpSetup, this.mcpClient] = await Promise.all([api.mcpSetupInfo(), api.mcpClientStatus()]);
+      const [setup, clients] = await Promise.all([api.mcpSetupInfo(), api.mcpClientsStatus()]);
+      this.mcpSetup = setup;
+      // Installed assistants first.
+      this.mcpClients = [...clients].sort((a, b) => Number(b.appFound) - Number(a.appFound));
     } catch (error) {
       this.errorMessage = this.error(error);
     }
     this.change.detectChanges();
   }
-  async connectClaude(): Promise<void> {
-    const client = this.mcpClient;
-    if (!client || this.busy) return;
-    if (!window.confirm(this.tr('Verrà aggiunto Repertica Studio alla configurazione di Claude Desktop. Il file modificato è:') + '\n\n' + client.configPath +
-        '\n\n' + this.tr('Una copia del file originale viene conservata accanto ad esso. Continuare?'))) return;
-    await this.run(async () => { this.mcpClient = await api.mcpClientConfigure(); },
-      this.tr('Collegamento completato: riavvia Claude Desktop'));
+  clientStatusLabel(client: McpClientStatus): string {
+    if (client.error) return this.tr('Configurazione non leggibile');
+    if (!client.appFound) return this.tr('Non trovato su questo computer');
+    if (!client.configured) return this.tr('Non collegato');
+    return client.upToDate ? this.tr('Collegato') : this.tr('Collegato, da aggiornare');
   }
-  async disconnectClaude(): Promise<void> {
-    if (!this.mcpClient || this.busy) return;
-    await this.run(async () => { this.mcpClient = await api.mcpClientRemove(); },
-      this.tr('Collegamento rimosso: riavvia Claude Desktop'));
+  private replaceClient(updated: McpClientStatus): void {
+    this.mcpClients = this.mcpClients.map(c => c.id === updated.id ? updated : c);
+  }
+  async connectClient(client: McpClientStatus): Promise<void> {
+    if (this.busy) return;
+    if (!window.confirm(this.tr('Verrà aggiunto Repertica Studio alla configurazione di') + ' ' + client.name + '. ' + this.tr('Il file modificato è:') + '\n\n' + client.configPath +
+        '\n\n' + this.tr('Una copia del file originale viene conservata accanto ad esso. Continuare?'))) return;
+    await this.run(async () => { this.replaceClient(await api.mcpClientConfigure(client.id)); },
+      this.tr('Collegamento completato: riavvia l’assistente'));
+  }
+  async disconnectClient(client: McpClientStatus): Promise<void> {
+    if (this.busy) return;
+    await this.run(async () => { this.replaceClient(await api.mcpClientRemove(client.id)); },
+      this.tr('Collegamento rimosso: riavvia l’assistente'));
   }
   get mcpConfigJson(): string {
     const setup = this.mcpSetup;
     if (!setup) return '';
     return JSON.stringify({ mcpServers: { 'repertica-studio': { command: setup.command, args: setup.args } } }, null, 2);
   }
-  async copyMcpConfig(): Promise<void> {
+  get mcpTomlSnippet(): string {
+    const setup = this.mcpSetup;
+    if (!setup) return '';
+    // TOML literal strings need no escaping of backslashes.
+    const literal = (value: string) => value.includes("'") ? JSON.stringify(value) : `'${value}'`;
+    return `[mcp_servers.repertica-studio]\ncommand = ${literal(setup.command)}\nargs = [${setup.args.map(literal).join(', ')}]`;
+  }
+  get mcpCommands(): string {
+    const setup = this.mcpSetup;
+    if (!setup) return '';
+    const quote = (value: string) => `"${value}"`;
+    const call = `repertica-studio -- ${quote(setup.command)} ${setup.args.map(a => a.startsWith('--') ? a : quote(a)).join(' ')}`;
+    return `codex mcp add ${call}\nclaude mcp add ${call}`;
+  }
+  async copyText(text: string): Promise<void> {
     try {
-      await navigator.clipboard.writeText(this.mcpConfigJson);
+      await navigator.clipboard.writeText(text);
       this.notice = this.tr('Configurazione copiata');
     } catch {
       this.errorMessage = this.tr('Impossibile copiare: seleziona il testo e copialo a mano');
@@ -693,7 +721,7 @@ export class AppComponent implements OnInit {
   fileName(path: string): string { return path.split(/[\\/]/).pop() ?? path; }
   async newArtwork(): Promise<void> {
     this.estimateCents = null; this.artworkDraft = freshArtwork();
-    this.newCover = null; this.newGallery = []; this.newRawPath = null; this.withSale = false;
+    this.newCover = null; this.newGallery = []; this.newRawPath = null; this.withSale = false; this.sessionImports.clear();
     this.newSaleDraft = this.freshNewSale(); this.newSalePayment = emptyPayment(today()); this.nextCode = '';
     this.artworkDialog = true;
     await this.refreshNextCode();
@@ -703,52 +731,85 @@ export class AppComponent implements OnInit {
     try { this.nextCode = await api.nextArchiveCode(this.artworkDraft.year); } catch { this.nextCode = ''; }
     this.change.detectChanges();
   }
-  private async pending(path: string): Promise<PendingPhoto> {
+  // Every picture goes through the library, so it can be cropped and corrected right away.
+  private async toPending(id: string, label: string, large: boolean): Promise<PendingPhoto> {
     let thumb = '';
-    try { thumb = (await api.mediaFilePreview(path, 260)).data_url; } catch (error) { this.errorMessage = this.error(error); }
-    return { path, label: this.fileName(path), operations: [], thumb };
+    try { thumb = large ? (await api.mediaPreview(id, 720)).data_url : await api.mediaThumbnail(id); }
+    catch (error) { this.errorMessage = this.error(error); }
+    return { mediaId: id, label, thumb };
+  }
+  private async importToLibrary(paths: string[]): Promise<MediaItem[]> {
+    if (!paths.length) return [];
+    const result = await api.mediaImport(paths);
+    if (result.failed.length) this.errorMessage = result.failed.map(f => `${f.path}: ${f.message}`).join(' · ');
+    for (const item of result.imported) this.sessionImports.add(item.id);
+    return result.imported;
+  }
+  async openPhotoEditor(mediaId: string, label: string, done: () => Promise<void> | void): Promise<void> {
+    try {
+      this.photoEditor = { mediaId, label, source: await api.mediaPreview(mediaId, 1400), done };
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  readonly previewLibraryEdit = (operations: EditOperation[]): Promise<PreviewData> =>
+    api.mediaPreview(this.photoEditor!.mediaId, 1400, operations);
+  async applyLibraryEdit(operations: EditOperation[]): Promise<void> {
+    const editor = this.photoEditor;
+    if (!editor) return;
+    try {
+      await api.mediaApplyEdit(editor.mediaId, operations);
+      this.photoEditor = null;
+      await editor.done();
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async closePhotoEditor(): Promise<void> {
+    const editor = this.photoEditor;
+    this.photoEditor = null;
+    if (editor) await editor.done();
+    this.change.detectChanges();
   }
   async pickCover(): Promise<void> {
+    if (this.busy) return;
     try {
       const path = await this.pickPhoto(this.tr('Scegli copertina…'));
-      if (path) this.newCover = await this.pending(path);
+      if (!path) return;
+      this.busy = true; this.change.detectChanges();
+      const [item] = await this.importToLibrary([path]);
+      if (item) {
+        const label = item.title || item.original_name;
+        this.newCover = await this.toPending(item.id, label, true);
+        this.busy = false;
+        await this.openPhotoEditor(item.id, label, async () => { this.newCover = await this.toPending(item.id, label, true); });
+      }
     } catch (error) { this.errorMessage = this.error(error); }
+    finally { this.busy = false; }
     this.change.detectChanges();
   }
   async pickGalleryPhotos(): Promise<void> {
+    if (this.busy) return;
     try {
       const selected = await open({ directory: false, multiple: true, title: this.tr('Aggiungi fotografie…'),
         filters: [{ name: 'JPEG / PNG / WebP', extensions: ['jpg', 'jpeg', 'png', 'webp'] }] });
-      const paths = (Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [])
-        .filter(p => !this.newGallery.some(g => g.path === p)).slice(0, 20 - this.newGallery.length);
-      for (const path of paths) this.newGallery = [...this.newGallery, await this.pending(path)];
+      const paths = (Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : []).slice(0, 20 - this.newGallery.length);
+      if (!paths.length) return;
+      this.busy = true; this.change.detectChanges();
+      for (const item of await this.importToLibrary(paths)) {
+        this.newGallery = [...this.newGallery, await this.toPending(item.id, item.title || item.original_name, false)];
+      }
     } catch (error) { this.errorMessage = this.error(error); }
+    finally { this.busy = false; }
     this.change.detectChanges();
   }
   removeNewGalleryPhoto(index: number): void { this.newGallery = this.newGallery.filter((_, i) => i !== index); }
-  async editPending(cover: boolean, index = 0): Promise<void> {
+  async editNewPhoto(cover: boolean, index = 0): Promise<void> {
     const photo = cover ? this.newCover : this.newGallery[index];
-    if (!photo?.path) return;
-    try {
-      const source = await api.mediaFilePreview(photo.path, 1400);
-      this.editingPending = { cover, index, photo, source };
-    } catch (error) { this.errorMessage = this.error(error); }
-    this.change.detectChanges();
-  }
-  readonly previewPending = (operations: EditOperation[]): Promise<PreviewData> =>
-    api.mediaFilePreview(this.editingPending!.photo.path!, 1400, operations);
-  async applyPendingEdit(operations: EditOperation[]): Promise<void> {
-    const pending = this.editingPending;
-    if (!pending?.photo.path) return;
-    pending.photo.operations = operations;
-    try { pending.photo.thumb = (await api.mediaFilePreview(pending.photo.path, 260, operations)).data_url; }
-    catch (error) { this.errorMessage = this.error(error); }
-    this.editingPending = null;
-    this.change.detectChanges();
-  }
-  clearPendingEdit(photo: PendingPhoto): void {
-    photo.operations = [];
-    if (photo.path) void api.mediaFilePreview(photo.path, 260).then(p => { photo.thumb = p.data_url; this.change.detectChanges(); });
+    if (!photo) return;
+    await this.openPhotoEditor(photo.mediaId, photo.label, async () => {
+      const refreshed = await this.toPending(photo.mediaId, photo.label, cover);
+      if (cover) this.newCover = refreshed;
+      else this.newGallery = this.newGallery.map(p => p.mediaId === photo.mediaId ? refreshed : p);
+    });
   }
   openLibraryPicker(purpose: 'new-cover' | 'new-gallery' | 'existing-cover' | 'existing-gallery', artworkId?: string): void {
     this.libraryPicker = { purpose, artworkId };
@@ -759,11 +820,12 @@ export class AppComponent implements OnInit {
     this.libraryPicker = null;
     const label = item.title || item.original_name;
     try {
-      if (picker.purpose === 'new-cover' || picker.purpose === 'new-gallery') {
-        const thumb = await api.mediaThumbnail(item.id);
-        const photo: PendingPhoto = { mediaId: item.id, label, operations: [], thumb };
-        if (picker.purpose === 'new-cover') this.newCover = photo;
-        else if (this.newGallery.length < 20 && !this.newGallery.some(g => g.mediaId === item.id)) this.newGallery = [...this.newGallery, photo];
+      if (picker.purpose === 'new-cover') {
+        this.newCover = await this.toPending(item.id, label, true);
+      } else if (picker.purpose === 'new-gallery') {
+        if (this.newGallery.length < 20 && !this.newGallery.some(g => g.mediaId === item.id)) {
+          this.newGallery = [...this.newGallery, await this.toPending(item.id, label, false)];
+        }
       } else if (picker.artworkId) {
         const artworkId = picker.artworkId;
         if (picker.purpose === 'existing-cover') {
@@ -778,17 +840,38 @@ export class AppComponent implements OnInit {
     } catch (error) { this.errorMessage = this.error(error); }
     this.change.detectChanges();
   }
-  /** Open a picture of an artwork in the library, where it can be edited (a new version is created). */
-  async editInMediaCenter(path: string | null): Promise<void> {
+  /** Edit a picture that is already stored (the artwork shows the new version straight away). */
+  private async editStoredPicture(path: string | null, done: () => Promise<void>): Promise<void> {
     if (!path) return;
     try {
       const id = await api.mediaIdForPath(path);
       if (!id) { this.errorMessage = this.tr('Immagine non trovata nella libreria'); return; }
-      this.artworkDialog = false; this.closeGallery();
-      this.navigate('media');
-      this.mediaOpenId = id;
+      await this.openPhotoEditor(id, this.fileName(path), done);
     } catch (error) { this.errorMessage = this.error(error); }
-    this.change.detectChanges();
+  }
+  async editCoverPicture(): Promise<void> {
+    const artwork = this.editingArtwork;
+    if (!artwork) return;
+    await this.editStoredPicture(artwork.image_path, async () => { delete this.thumbnails[artwork.id]; await this.refresh(); });
+  }
+  async editGalleryPicture(image: GalleryImage): Promise<void> {
+    const artwork = this.galleryArtwork;
+    if (!artwork) return;
+    await this.editStoredPicture(image.image_path, async () => {
+      this.galleryPreviews = {};
+      this.galleryImages = await api.listArtworkGallery(artwork.id);
+      await this.refresh();
+    });
+  }
+  /** Pictures imported for a dialog that was not completed are moved to the trash (recoverable there). */
+  private async finishPhotoSession(keep: Set<string>): Promise<void> {
+    const leftovers = [...this.sessionImports].filter(id => !keep.has(id));
+    this.sessionImports.clear();
+    for (const id of leftovers) { try { await api.mediaTrash(id); } catch { /* in use or already gone */ } }
+  }
+  async cancelArtworkDialog(): Promise<void> {
+    this.artworkDialog = false;
+    await this.finishPhotoSession(new Set());
   }
   async pickRaw(): Promise<void> {
     try {
@@ -884,12 +967,13 @@ export class AppComponent implements OnInit {
       };
     }
     const { id: _unused, ...record } = this.artworkDraft;
-    const source = (photo: PendingPhoto): PhotoSource => ({ path: photo.path ?? null, media_id: photo.mediaId ?? null, operations: photo.operations });
+    const source = (photo: PendingPhoto): PhotoSource => ({ path: null, media_id: photo.mediaId, operations: [] });
     const input: NewArtworkInput = {
       artwork: { ...record, code: null, status: this.withSale ? 'sold' : record.status },
       cover: this.newCover ? source(this.newCover) : null, gallery: this.newGallery.map(source), raw_path: this.newRawPath, sale
     };
-    if (await this.run(() => api.createArtworkFull(input), this.tr('Opera salvata'))) this.artworkDialog = false;
+    const used = new Set([...(this.newCover ? [this.newCover.mediaId] : []), ...this.newGallery.map(p => p.mediaId)]);
+    if (await this.run(() => api.createArtworkFull(input), this.tr('Opera salvata'))) { this.artworkDialog = false; await this.finishPhotoSession(used); }
   }
   async deleteArtwork(a: Artwork): Promise<void> {
     if (!window.confirm(`Eliminare definitivamente l'opera "${a.title}"? Questa operazione non è reversibile.`)) return;
@@ -908,10 +992,14 @@ export class AppComponent implements OnInit {
     try {
       const path = await this.pickPhoto(this.tr('Foto'));
       if (!path) return;
-      if (await this.run(() => api.saveArtworkImageFromPath(artwork.id, path), this.tr('Immagine principale salvata'))) {
-        delete this.thumbnails[artwork.id];
-        this.thumbnails[artwork.id] = (await api.artworkImage(artwork.id)) ?? '';
-      }
+      const [item] = await this.importToLibrary([path]);
+      if (!item) return;
+      if (!(await this.run(() => api.artworkSetCoverFromMedia(artwork.id, item.id), this.tr('Immagine principale salvata')))) return;
+      this.sessionImports.delete(item.id);
+      const reload = async () => { delete this.thumbnails[artwork.id]; await this.refresh(); };
+      await reload();
+      // The picture is in the library: it can be cropped and corrected right away.
+      await this.openPhotoEditor(item.id, item.title || item.original_name, reload);
     } catch (error) {
       this.errorMessage = this.error(error);
     }
@@ -985,10 +1073,10 @@ export class AppComponent implements OnInit {
     try {
       const path = await this.pickPhoto(this.tr('Aggiungi fotografia'));
       if (!path || this.galleryArtwork?.id !== artwork.id) return;
-      if (await this.run(
-        () => api.addArtworkGalleryImageFromPath(artwork.id, path, this.galleryCaption),
-        this.tr('Fotografia aggiunta alla galleria')
-      )) {
+      const [item] = await this.importToLibrary([path]);
+      if (!item) return;
+      if (await this.run(() => api.artworkAddGalleryFromMedia(artwork.id, item.id, this.galleryCaption || null), this.tr('Fotografia aggiunta alla galleria'))) {
+        this.sessionImports.delete(item.id);
         this.galleryImages = await api.listArtworkGallery(artwork.id);
         this.galleryCaption = '';
       }

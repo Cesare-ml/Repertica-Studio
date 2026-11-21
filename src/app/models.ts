@@ -206,5 +206,7 @@ export interface BackupScheduleStatus {
 }
 export type BackupScheduleInput = Pick<BackupScheduleStatus,
   'enabled' | 'frequency' | 'time_of_day' | 'weekday' | 'day_of_month' | 'destination' | 'keep_last'>;
-export interface McpClientStatus { configPath: string; appFound: boolean; configured: boolean; upToDate: boolean; }
+export interface McpClientStatus {
+  id: string; name: string; configPath: string; appFound: boolean; configured: boolean; upToDate: boolean; error: string | null;
+}
 export interface McpSetup { command: string; args: string[]; dataDir: string; }

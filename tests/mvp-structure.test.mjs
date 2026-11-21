@@ -200,3 +200,23 @@ test('edits never overwrite the original: the engine only writes new revision fi
   assert.doesNotMatch(get('src-tauri/src/imaging.rs'), /std::net|TcpStream|reqwest/);
 });
 
+test('pictures always go through the library and can be edited right after they are chosen', () => {
+  const ui = get('src/app/app.component.ts');
+  const html = get('src/app/app.component.html');
+  assert.match(ui, /importToLibrary/);
+  assert.match(ui, /openPhotoEditor/);
+  const pickCover = ui.slice(ui.indexOf('async pickCover()'), ui.indexOf('async pickGalleryPhotos()'));
+  assert.ok(pickCover.includes('importToLibrary') && pickCover.includes('openPhotoEditor'), 'the editor opens right after the cover is chosen');
+  assert.doesNotMatch(ui, /saveArtworkImageFromPath|addArtworkGalleryImageFromPath/, 'no path-based shortcut around the library');
+  assert.match(html, /<rp-media-editor/);
+  assert.doesNotMatch(html, /Suggerimento: dopo aver creato/);
+});
+
+test('the local MCP server can be registered in several assistants, including Codex (TOML)', () => {
+  const client = get('src-tauri/src/mcp_client.rs');
+  for (const id of ['claude-desktop', 'codex', 'cursor', 'windsurf', 'gemini-cli', 'vscode']) assert.ok(client.includes(`"${id}"`), id);
+  assert.match(client, /toml_edit/);
+  assert.match(get('src-tauri/src/lib.rs'), /mcp_client::mcp_clients_status/);
+  assert.match(get('src/app/app.component.html'), /mcpClients/);
+});
+

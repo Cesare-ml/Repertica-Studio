@@ -72,7 +72,6 @@
           <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
           <button class="primary action-glyph action-glyph--artworks" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button>
         </div></div>
-      <p class="hint" *ngIf="!artworks.length">{{ tr('Suggerimento: dopo aver creato un’opera usa «Foto» per la copertina e «Galleria» per altre fotografie (fino a 20).') }}</p>
       <div class="filter-row archive-filters">
         <input type="search" [placeholder]="tr('Titolo, codice, tecnica, collezionista…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca opere')">
         <label class="filter-control"><span>{{ tr('Stato') }}</span><select [(ngModel)]="artworkStatusFilter" [attr.aria-label]="tr('Filtra opere per stato')">
@@ -298,22 +297,33 @@
           <h3>{{ tr('Assistenti IA locali (MCP)') }}</h3>
           <p>{{ tr('Permette a un assistente IA installato sul tuo computer di consultare l’archivio in sola lettura, per esempio per cercare opere o riassumere le vendite. Non può modificare nulla; email, telefoni, indirizzi, note private e fotografie non vengono condivisi.') }}</p>
           <p class="hint">{{ tr('Attenzione: ciò che l’assistente legge può essere inviato al suo fornitore. Usa solo assistenti di cui ti fidi.') }}</p>
-          <div class="mcp-status" *ngIf="mcpClient as client" role="status" aria-live="polite">
-            <strong>Claude Desktop</strong>
-            <span class="status-pill" [class.ok]="client.configured && client.upToDate" [class.warn]="client.configured && !client.upToDate">
-              {{ !client.appFound ? tr('Non trovato su questo computer') : !client.configured ? tr('Non collegato') : client.upToDate ? tr('Collegato') : tr('Collegato, da aggiornare') }}</span>
-            <div class="mcp-actions">
-              <button type="button" class="primary" *ngIf="client.appFound && (!client.configured || !client.upToDate)" (click)="connectClaude()" [disabled]="busy">
-                {{ client.configured ? tr('Aggiorna il collegamento') : tr('Collega a Claude Desktop') }}</button>
-              <button type="button" class="secondary" *ngIf="client.configured" (click)="disconnectClaude()" [disabled]="busy">{{ tr('Scollega') }}</button>
+          <div class="mcp-clients" role="status" aria-live="polite">
+            <div class="mcp-client" *ngFor="let client of mcpClients">
+              <strong>{{ client.name }}</strong>
+              <span class="status-pill" [class.ok]="client.configured && client.upToDate && !client.error" [class.warn]="(client.configured && !client.upToDate) || client.error">{{ clientStatusLabel(client) }}</span>
+              <div class="mcp-actions">
+                <button type="button" class="primary small" *ngIf="client.appFound && !client.error && (!client.configured || !client.upToDate)" (click)="connectClient(client)" [disabled]="busy">
+                  {{ client.configured ? tr('Aggiorna il collegamento') : tr('Collega') }}</button>
+                <button type="button" class="secondary small" *ngIf="client.configured && !client.error" (click)="disconnectClient(client)" [disabled]="busy">{{ tr('Scollega') }}</button>
+              </div>
+              <small *ngIf="client.error">{{ client.error }}</small>
             </div>
-            <small *ngIf="client.configured || client.appFound">{{ tr('Dopo ogni modifica riavvia Claude Desktop.') }}</small>
           </div>
+          <p class="mcp-note">{{ tr('Dopo ogni modifica riavvia l’assistente.') }}</p>
+          <p class="mcp-note">{{ tr('ChatGPT (app e sito) si collega solo a server online e non può usare un server locale: per i prodotti OpenAI usa Codex.') }}</p>
           <details class="mcp-manual">
             <summary>{{ tr('Configurazione manuale per altri assistenti') }}</summary>
-            <p>{{ tr('Aggiungi questa configurazione ai server MCP del tuo assistente e riavvia l’assistente.') }}</p>
-            <pre class="mcp-config" *ngIf="mcpSetup" tabindex="0">{{ mcpConfigJson }}</pre>
-            <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyMcpConfig()" [disabled]="!mcpSetup">{{ tr('Copia configurazione') }}</button>
+            <ng-container *ngIf="mcpSetup">
+              <p>{{ tr('Formato JSON (Claude, Cursor, Windsurf, Gemini CLI…)') }}</p>
+              <pre class="mcp-config" tabindex="0">{{ mcpConfigJson }}</pre>
+              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpConfigJson)">{{ tr('Copia configurazione') }}</button>
+              <p>{{ tr('Codex (file config.toml)') }}</p>
+              <pre class="mcp-config" tabindex="0">{{ mcpTomlSnippet }}</pre>
+              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpTomlSnippet)">{{ tr('Copia configurazione') }}</button>
+              <p>{{ tr('Da riga di comando') }}</p>
+              <pre class="mcp-config" tabindex="0">{{ mcpCommands }}</pre>
+              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpCommands)">{{ tr('Copia configurazione') }}</button>
+            </ng-container>
           </details>
         </div>
         <div class="backup-block code-settings">
@@ -448,55 +458,75 @@
 </div>
 
 <div class="overlay" *ngIf="artworkDialog" role="dialog" aria-modal="true" aria-labelledby="artwork-title">
-  <div class="dialog wide"><div class="dialog-top"><h2 id="artwork-title">{{ artworkDraft.id ? tr('Modifica opera') : tr('Nuova opera') }}</h2><button type="button" class="close" (click)="artworkDialog=false" [attr.aria-label]="tr('Chiudi')">×</button></div>
+  <div class="dialog wide"><div class="dialog-top"><h2 id="artwork-title">{{ artworkDraft.id ? tr('Modifica opera') : tr('Nuova opera') }}</h2><button type="button" class="close" (click)="cancelArtworkDialog()" [attr.aria-label]="tr('Chiudi')">×</button></div>
     <fieldset class="dialog-section photo-top" *ngIf="!artworkDraft.id">
       <legend>{{ tr('Fotografie e file RAW') }}</legend>
-      <div class="photo-block"><strong>{{ tr('Copertina') }}</strong>
-        <div class="photo-cards"><div class="photo-card">
-          <span class="photo-thumb" [class.filled]="newCover"><img *ngIf="newCover?.thumb" [src]="newCover!.thumb" alt=""><span *ngIf="!newCover">{{ tr('Nessuna copertina selezionata') }}</span>
-            <span class="tag-edited" *ngIf="newCover?.operations?.length">{{ tr('Modificata') }}</span></span>
-          <span class="file-name" *ngIf="newCover">{{ newCover.label }}</span>
-          <span class="photo-buttons">
-            <button type="button" class="secondary small action-glyph action-glyph--photo" (click)="pickCover()" [disabled]="busy">{{ newCover ? tr('Cambia copertina…') : tr('Scegli copertina…') }}</button>
+      <div class="photo-layout">
+        <div class="cover-panel">
+          <div class="cover-frame" [class.empty]="!newCover">
+            <img *ngIf="newCover?.thumb" [src]="newCover!.thumb" [alt]="tr('Copertina')">
+            <div class="cover-empty" *ngIf="!newCover">
+              <strong>{{ tr('Copertina') }}</strong>
+              <p>{{ tr('Scegli una fotografia: potrai ritagliarla e correggerla subito.') }}</p>
+              <div class="cover-actions center">
+                <button type="button" class="primary action-glyph action-glyph--photo" (click)="pickCover()" [disabled]="busy">{{ tr('Scegli copertina…') }}</button>
+                <button type="button" class="secondary" (click)="openLibraryPicker('new-cover')" [disabled]="busy">{{ tr('Dalla libreria') }}</button></div>
+            </div>
+          </div>
+          <div class="cover-actions" *ngIf="newCover">
+            <button type="button" class="primary small action-glyph action-glyph--edit" (click)="editNewPhoto(true)" [disabled]="busy">{{ tr('Ritaglia e correggi') }}</button>
+            <button type="button" class="secondary small" (click)="pickCover()" [disabled]="busy">{{ tr('Cambia copertina…') }}</button>
             <button type="button" class="secondary small" (click)="openLibraryPicker('new-cover')" [disabled]="busy">{{ tr('Dalla libreria') }}</button>
-            <button type="button" class="secondary small action-glyph action-glyph--edit" *ngIf="newCover?.path" (click)="editPending(true)">{{ tr('Modifica') }}</button>
-            <button type="button" class="small" *ngIf="newCover?.operations?.length" (click)="clearPendingEdit(newCover!)">{{ tr('Annulla modifiche') }}</button>
-            <button type="button" class="small danger-text" *ngIf="newCover" (click)="newCover = null">{{ tr('Rimuovi') }}</button></span>
-        </div></div></div>
-      <div class="photo-block"><strong>{{ tr('Fotografie aggiuntive') }} <span class="muted">({{ newGallery.length }}/20)</span></strong>
-        <div class="photo-cards"><div class="photo-card" *ngFor="let photo of newGallery; let i = index">
-          <span class="photo-thumb filled"><img *ngIf="photo.thumb" [src]="photo.thumb" alt=""><span class="tag-edited" *ngIf="photo.operations.length">{{ tr('Modificata') }}</span></span>
-          <span class="file-name">{{ photo.label }}</span>
-          <span class="photo-buttons">
-            <button type="button" class="secondary small action-glyph action-glyph--edit" *ngIf="photo.path" (click)="editPending(false, i)">{{ tr('Modifica') }}</button>
-            <button type="button" class="small danger-text" (click)="removeNewGalleryPhoto(i)" [attr.aria-label]="tr('Rimuovi')">{{ tr('Rimuovi') }}</button></span>
-        </div></div>
-        <div class="photo-buttons" style="margin-top:8px"><button type="button" class="secondary small action-glyph action-glyph--photo" (click)="pickGalleryPhotos()" [disabled]="busy || newGallery.length >= 20">{{ tr('Aggiungi fotografie…') }}</button>
-          <button type="button" class="secondary small" (click)="openLibraryPicker('new-gallery')" [disabled]="busy || newGallery.length >= 20">{{ tr('Dalla libreria') }}</button></div></div>
-      <div class="photo-block raw-row"><div><strong>{{ tr('File RAW') }}</strong>
-          <span class="raw-name" *ngIf="newRawPath; else noRaw">{{ fileName(newRawPath) }}</span>
-          <ng-template #noRaw><span class="file-name muted">{{ tr('Nessun file RAW allegato') }}</span></ng-template></div>
-        <span class="photo-buttons"><button type="button" class="secondary small" (click)="pickRaw()" [disabled]="busy">{{ newRawPath ? tr('Cambia file RAW…') : tr('Scegli file RAW…') }}</button>
-          <button type="button" class="small danger-text" *ngIf="newRawPath" (click)="newRawPath = null">{{ tr('Rimuovi') }}</button></span></div>
+            <button type="button" class="small danger-text" (click)="newCover = null">{{ tr('Rimuovi') }}</button></div>
+        </div>
+        <div class="side-panel">
+          <div class="side-head"><strong>{{ tr('Fotografie aggiuntive') }} <span class="muted">({{ newGallery.length }}/20)</span></strong>
+            <span class="photo-buttons">
+              <button type="button" class="secondary small action-glyph action-glyph--photo" (click)="pickGalleryPhotos()" [disabled]="busy || newGallery.length >= 20">{{ tr('Aggiungi fotografie…') }}</button>
+              <button type="button" class="secondary small" (click)="openLibraryPicker('new-gallery')" [disabled]="busy || newGallery.length >= 20">{{ tr('Dalla libreria') }}</button></span></div>
+          <div class="gallery-tiles" *ngIf="newGallery.length; else noGalleryYet">
+            <div class="tile" *ngFor="let photo of newGallery; let i = index">
+              <img *ngIf="photo.thumb" [src]="photo.thumb" [alt]="photo.label">
+              <span class="tile-actions">
+                <button type="button" (click)="editNewPhoto(false, i)" [attr.aria-label]="tr('Ritaglia e correggi')" [title]="tr('Ritaglia e correggi')">✎</button>
+                <button type="button" (click)="removeNewGalleryPhoto(i)" [attr.aria-label]="tr('Rimuovi')" [title]="tr('Rimuovi')">×</button></span>
+            </div>
+          </div>
+          <ng-template #noGalleryYet><p class="side-empty">{{ tr('Nessuna fotografia aggiuntiva.') }}</p></ng-template>
+          <div class="raw-card"><div><strong>{{ tr('File RAW') }}</strong>
+              <span class="raw-name" *ngIf="newRawPath; else noRaw">{{ fileName(newRawPath) }}</span>
+              <ng-template #noRaw><span class="file-name muted">{{ tr('Nessun file RAW allegato') }}</span></ng-template></div>
+            <span class="photo-buttons"><button type="button" class="secondary small" (click)="pickRaw()" [disabled]="busy">{{ newRawPath ? tr('Cambia file RAW…') : tr('Scegli file RAW…') }}</button>
+              <button type="button" class="small danger-text" *ngIf="newRawPath" (click)="newRawPath = null">{{ tr('Rimuovi') }}</button></span></div>
+        </div>
+      </div>
     </fieldset>
     <fieldset class="dialog-section photo-top" *ngIf="artworkDraft.id">
       <legend>{{ tr('Fotografie e file RAW') }}</legend>
-      <div class="photo-cards"><div class="photo-card">
-        <span class="photo-thumb" [class.filled]="thumbnails[artworkDraft.id]"><img *ngIf="thumbnails[artworkDraft.id]" [src]="thumbnails[artworkDraft.id]" alt=""><span *ngIf="!thumbnails[artworkDraft.id]">{{ tr('Nessuna copertina selezionata') }}</span></span>
-        <strong>{{ tr('Copertina') }}</strong>
-        <span class="photo-buttons">
-          <button type="button" class="secondary small action-glyph action-glyph--photo" (click)="chooseCoverPhoto(editingArtwork!)" [disabled]="busy || !editingArtwork">{{ tr('Foto') }}</button>
-          <button type="button" class="secondary small" (click)="openLibraryPicker('existing-cover', artworkDraft.id)" [disabled]="busy">{{ tr('Dalla libreria') }}</button>
-          <button type="button" class="secondary small action-glyph action-glyph--edit" *ngIf="editingArtwork?.image_path" (click)="editInMediaCenter(editingArtwork!.image_path)">{{ tr('Modifica') }}</button>
-          <button type="button" class="secondary small action-glyph action-glyph--gallery" (click)="artworkDialog = false; openGallery(editingArtwork!)" [disabled]="!editingArtwork">{{ tr('Galleria') }}</button></span>
-      </div></div>
-      <div class="photo-block raw-row"><div><strong>{{ tr('File RAW') }}</strong>
-          <ng-container *ngIf="rawByArtwork[artworkDraft.id] as raw; else noRawFile">
-            <span class="raw-name">{{ raw.original_name }}</span> <span class="file-name muted">({{ bytes(raw.size_bytes) }})</span></ng-container>
-          <ng-template #noRawFile><span class="file-name muted">{{ tr('Nessun file RAW allegato') }}</span></ng-template></div>
-        <span class="photo-buttons"><button type="button" class="secondary small" (click)="attachRaw(artworkDraft.id)" [disabled]="busy">{{ rawByArtwork[artworkDraft.id] ? tr('Sostituisci file RAW…') : tr('Allega file RAW…') }}</button>
-          <button type="button" class="secondary small action-glyph action-glyph--export" *ngIf="rawByArtwork[artworkDraft.id]" (click)="exportRaw(artworkDraft.id)" [disabled]="busy">{{ tr('Salva una copia…') }}</button>
-          <button type="button" class="small danger-text" *ngIf="rawByArtwork[artworkDraft.id]" (click)="removeRaw(artworkDraft.id)" [disabled]="busy">{{ tr('Rimuovi') }}</button></span></div>
+      <div class="photo-layout">
+        <div class="cover-panel">
+          <div class="cover-frame" [class.empty]="!thumbnails[artworkDraft.id]">
+            <img *ngIf="thumbnails[artworkDraft.id]" [src]="thumbnails[artworkDraft.id]" [alt]="tr('Copertina')">
+            <div class="cover-empty" *ngIf="!thumbnails[artworkDraft.id]"><strong>{{ tr('Copertina') }}</strong>
+              <p>{{ tr('Scegli una fotografia: potrai ritagliarla e correggerla subito.') }}</p></div>
+          </div>
+          <div class="cover-actions">
+            <button type="button" class="primary small action-glyph action-glyph--edit" *ngIf="editingArtwork?.image_path" (click)="editCoverPicture()" [disabled]="busy">{{ tr('Ritaglia e correggi') }}</button>
+            <button type="button" class="secondary small action-glyph action-glyph--photo" (click)="chooseCoverPhoto(editingArtwork!)" [disabled]="busy || !editingArtwork">{{ editingArtwork?.image_path ? tr('Cambia copertina…') : tr('Scegli copertina…') }}</button>
+            <button type="button" class="secondary small" (click)="openLibraryPicker('existing-cover', artworkDraft.id)" [disabled]="busy">{{ tr('Dalla libreria') }}</button></div>
+        </div>
+        <div class="side-panel">
+          <div class="side-head"><strong>{{ tr('Fotografie aggiuntive') }}</strong>
+            <button type="button" class="secondary small action-glyph action-glyph--gallery" (click)="artworkDialog = false; openGallery(editingArtwork!)" [disabled]="!editingArtwork">{{ tr('Galleria') }}</button></div>
+          <div class="raw-card"><div><strong>{{ tr('File RAW') }}</strong>
+              <ng-container *ngIf="rawByArtwork[artworkDraft.id] as raw; else noRawFile">
+                <span class="raw-name">{{ raw.original_name }}</span> <span class="file-name muted">({{ bytes(raw.size_bytes) }})</span></ng-container>
+              <ng-template #noRawFile><span class="file-name muted">{{ tr('Nessun file RAW allegato') }}</span></ng-template></div>
+            <span class="photo-buttons"><button type="button" class="secondary small" (click)="attachRaw(artworkDraft.id)" [disabled]="busy">{{ rawByArtwork[artworkDraft.id] ? tr('Sostituisci file RAW…') : tr('Allega file RAW…') }}</button>
+              <button type="button" class="secondary small action-glyph action-glyph--export" *ngIf="rawByArtwork[artworkDraft.id]" (click)="exportRaw(artworkDraft.id)" [disabled]="busy">{{ tr('Salva una copia…') }}</button>
+              <button type="button" class="small danger-text" *ngIf="rawByArtwork[artworkDraft.id]" (click)="removeRaw(artworkDraft.id)" [disabled]="busy">{{ tr('Rimuovi') }}</button></span></div>
+        </div>
+      </div>
     </fieldset>
     <div class="form-grid">
       <div class="full code-field"><span>{{ tr('Codice archivio') }}</span>
@@ -532,15 +562,16 @@
         <label class="full"><span>{{ tr('Note') }}</span><textarea [(ngModel)]="newSaleDraft.notes" rows="2"></textarea></label>
       </div>
     </fieldset>
-    <div class="dialog-bottom"><button class="secondary" type="button" (click)="artworkDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !artworkDraft.title.trim()" (click)="saveArtwork()">{{ tr('Salva opera') }}</button></div>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="cancelArtworkDialog()">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !artworkDraft.title.trim()" (click)="saveArtwork()">{{ tr('Salva opera') }}</button></div>
   </div>
 </div>
 
-<div class="overlay" *ngIf="editingPending as ep" role="dialog" aria-modal="true" aria-labelledby="pending-edit-title">
-  <div class="dialog wide"><div class="dialog-top"><h2 id="pending-edit-title">{{ tr('Modifica fotografia') }} · {{ ep.photo.label }}</h2>
-    <button type="button" class="close" (click)="editingPending = null" [attr.aria-label]="tr('Chiudi')">×</button></div>
-    <rp-media-editor [src]="ep.source.data_url" [imageWidth]="ep.source.width" [imageHeight]="ep.source.height" [language]="language"
-      [previewFn]="previewPending" (applied)="applyPendingEdit($event)" (cancelled)="editingPending = null"></rp-media-editor></div>
+<div class="overlay" *ngIf="photoEditor as pe" role="dialog" aria-modal="true" aria-labelledby="photo-edit-title">
+  <div class="dialog wide"><div class="dialog-top"><h2 id="photo-edit-title">{{ tr('Modifica fotografia') }} · {{ pe.label }}</h2>
+    <button type="button" class="close" (click)="closePhotoEditor()" [attr.aria-label]="tr('Chiudi')">×</button></div>
+    <p class="form-note">{{ tr('Puoi saltare la modifica: l’originale resta nella libreria.') }}</p>
+    <rp-media-editor [src]="pe.source.data_url" [imageWidth]="pe.source.width" [imageHeight]="pe.source.height" [language]="language"
+      [previewFn]="previewLibraryEdit" (applied)="applyLibraryEdit($event)" (cancelled)="closePhotoEditor()"></rp-media-editor></div>
 </div>
 
 <div class="overlay" *ngIf="libraryPicker" role="dialog" aria-modal="true" aria-label="Libreria immagini">
@@ -582,7 +613,7 @@
           <button class="small secondary" type="button" [disabled]="busy || i === galleryImages.length - 1" (click)="moveGalleryPhoto(img, 'down')">{{ tr('Sposta dopo') }}</button>
         </div>
         <button class="small secondary" type="button" [disabled]="busy" (click)="makeGalleryPrimary(img)">{{ tr('Imposta come principale') }}</button>
-        <button class="small secondary action-glyph action-glyph--edit" type="button" [disabled]="busy" (click)="editInMediaCenter(img.image_path)">{{ tr('Modifica immagine') }}</button>
+        <button class="small secondary action-glyph action-glyph--edit" type="button" [disabled]="busy" (click)="editGalleryPicture(img)">{{ tr('Modifica immagine') }}</button>
         <button class="small danger-text action-glyph action-glyph--delete" type="button" [disabled]="busy" (click)="removeGalleryPhoto(img)">{{ tr('Elimina') }}</button>
       </div>
     </div>
