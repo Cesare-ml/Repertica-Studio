@@ -308,7 +308,7 @@ mod tests {
         let summary = serde_json::to_value(&backup).unwrap();
         let directory = summary["directory"].as_str().unwrap();
         let folder = Path::new(directory);
-        assert_eq!(summary["schemaVersion"], 6);
+        assert_eq!(summary["schemaVersion"], crate::db::SCHEMA_VERSION);
         assert_eq!(serde_json::to_value(crate::backup::inspect_backup_core(folder).unwrap()).unwrap()["verified"], true);
         let manifest_path = folder.join("manifest.json");
         let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();

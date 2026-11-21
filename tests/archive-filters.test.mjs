@@ -40,12 +40,14 @@ test('text search includes metadata and related collector, case-insensitively', 
     artwork('b', { title: 'Paesaggio', support: 'Carta', location: 'MILANO', status: 'sold' })
   ];
   const indexes = buildSaleIndexes([sale('b', 'c-1', 'Paesaggio', 'Elena Verdi')]);
-  for (const term of ['carta', 'miLANo', 'ELENA']) {
+  // The location field is no longer part of the interface, so it is not searched.
+  for (const term of ['carta', 'ELENA']) {
     assert.deepEqual(filterArtworks(artworks, options({ query: term }), indexes)
       .map(a => a.id), ['b']);
   }
   assert.deepEqual(filterArtworks(artworks, options({ query: 'OLIO' }), indexes)
     .map(a => a.id), ['a']);
+  assert.deepEqual(filterArtworks(artworks, options({ query: 'milano' }), indexes), []);
 });
 
 test('title/year sorting is stable for missing years and does not mutate source array', () => {
@@ -144,4 +146,19 @@ test('quoted collector searches can find acquired works but cannot span unrelate
   assert.deepEqual(found('"LUCE MARINA" éLoDiE'), ['c1']);
   assert.deepEqual(found('"luce firenze"'), []);
   assert.deepEqual(found('luce firenze'), ['c1']);
+});
+
+test('collector filters separate buyers and incomplete records and search social profiles', () => {
+  const collectors = [
+    collector('a', { name: 'Anna', email: 'anna@example.org' }),
+    collector('b', { name: 'Luca', phone: '333', instagram: '@luca_art' }),
+    collector('c', { name: 'Chiara' })
+  ];
+  const indexes = buildSaleIndexes([sale('w1', 'a', 'Notte', 'Anna')]);
+  const ids = list => list.map(c => c.id);
+  assert.deepEqual(ids(filterCollectors(collectors, '', indexes)), ['a', 'b', 'c']);
+  assert.deepEqual(ids(filterCollectors(collectors, '', indexes, 'buyers')), ['a']);
+  assert.deepEqual(ids(filterCollectors(collectors, '', indexes, 'incomplete')), ['c']);
+  assert.deepEqual(ids(filterCollectors(collectors, 'luca_art', indexes)), ['b']);
+  assert.deepEqual(ids(filterCollectors(collectors, 'notte', indexes, 'incomplete')), []);
 });

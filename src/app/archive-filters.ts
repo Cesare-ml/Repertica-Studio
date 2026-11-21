@@ -78,7 +78,7 @@ export function filterArtworks(
   const visible = artworks.filter(a =>
     (filters.status === 'all' || a.status === filters.status) &&
     (acquiredIds === null || acquiredIds.has(a.id)) &&
-    matchesTerms(terms, [a.title, a.code, a.year, a.technique, a.support, a.location,
+    matchesTerms(terms, [a.title, a.code, a.year, a.technique, a.support,
       a.description, indexes.byArtwork[a.id]?.collector_name]));
 
   if (filters.order === 'title') {
@@ -98,14 +98,21 @@ export function filterArtworks(
   return visible; // Backend delivers updated_at descending.
 }
 
+export type CollectorFilter = 'all' | 'buyers' | 'incomplete';
+
 export function filterCollectors(
   collectors: Collector[],
   query: string,
-  indexes: SaleIndexes
+  indexes: SaleIndexes,
+  filter: CollectorFilter = 'all'
 ): Collector[] {
+  const base = filter === 'all' ? collectors : collectors.filter(c => filter === 'buyers'
+    ? (indexes.byCollector[c.id]?.length ?? 0) > 0
+    : !c.email && !c.phone);
   const terms = searchTerms(query);
-  if (terms.length === 0) return collectors;
-  return collectors.filter(c =>
-    matchesTerms(terms, [c.name, c.email, c.phone, c.address, c.notes,
+  if (terms.length === 0) return base;
+  return base.filter(c =>
+    matchesTerms(terms, [c.name, c.email, c.phone, c.address, c.notes, c.birth_place,
+      c.instagram, c.facebook, c.tiktok, c.website, c.linkedin,
       ...(indexes.byCollector[c.id] ?? []).map(s => s.artwork_title)]));
 }

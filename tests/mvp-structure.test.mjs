@@ -13,7 +13,7 @@ test('no cloud or Sites dependency in runtime', () => {
 test('four MVP modules available via typed native IPC', () => {
   const native = get('src-tauri/src/lib.rs');
   for (const name of ['list_artworks','list_collectors','list_sales','list_certificates','issue_certificate']) {
-    assert.ok(native.includes('commands::' + name));
+    assert.match(native, new RegExp('(commands|collectors)::' + name));
   }
 });
 test('CPAL license attribution correctly names Repertica', () => {
@@ -43,7 +43,7 @@ test('gallery IPC, schema v3 and backup consistency are wired', () => {
   assert.match(db, /CREATE TABLE IF NOT EXISTS artwork_images/);
   assert.match(db, /PRAGMA user_version=3/);
   assert.match(backup, /SELECT image_path FROM artwork_images/);
-  assert.match(backup, /1\.\.=6/);
+  assert.match(backup, /1\.\.=crate::db::SCHEMA_VERSION/);
 });
 
 test('gallery sorting commands and schema v5 are available offline', () => {
@@ -73,6 +73,7 @@ test('receipt PDF/image attachments use offline SQLite v6 and verified backup me
   const native = get('src-tauri/src/lib.rs'), module = get('src-tauri/src/receipt_attachments.rs');
   assert.match(db, /CREATE TABLE IF NOT EXISTS sale_receipt_attachments/);
   assert.match(db, /PRAGMA user_version=6/);
+  assert.match(db, /PRAGMA user_version=7/);
   for (const command of ['attach_sale_receipt_file','get_sale_receipt_attachment',
     'sale_receipt_attachment_data','remove_sale_receipt_attachment']) {
     assert.ok(native.includes('receipt_attachments::' + command));

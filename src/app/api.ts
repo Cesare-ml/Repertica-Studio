@@ -3,7 +3,8 @@ import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
-  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup
+  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup,
+  NewArtworkInput, CodePolicy, McpClientStatus, CollectorImage, NewCollectorInput
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -11,7 +12,11 @@ import type { CsvRegisterKind } from './csv-registers';
 export const api = {
   listArtworks: () => invoke<Artwork[]>('list_artworks'),
   saveArtwork: (input: ArtworkInput) => invoke<Artwork>('save_artwork', { input }),
+  createArtworkFull: (input: NewArtworkInput) => invoke<Artwork>('create_artwork_full', { input }),
   deleteArtwork: (id: string) => invoke<void>('delete_artwork', { id }),
+  getArchiveCodePolicy: () => invoke<CodePolicy>('get_archive_code_policy'),
+  saveArchiveCodePolicy: (input: CodePolicy) => invoke<CodePolicy>('save_archive_code_policy', { input }),
+  nextArchiveCode: (year: string | null) => invoke<string>('next_archive_code', { year }),
   artworkImage: (artworkId: string) => invoke<string | null>('artwork_image_data', { artworkId }),
   saveArtworkImageFromPath: (artworkId: string, sourcePath: string) =>
     invoke<void>('save_artwork_image_from_path', { artworkId, sourcePath }),
@@ -29,7 +34,13 @@ export const api = {
   auditArtworkMedia: () => invoke<MediaAudit>('audit_artwork_media'),
   listCollectors: () => invoke<Collector[]>('list_collectors'),
   saveCollector: (input: CollectorInput) => invoke<Collector>('save_collector', { input }),
+  createCollectorFull: (input: NewCollectorInput) => invoke<Collector>('create_collector_full', { input }),
   deleteCollector: (id: string) => invoke<void>('delete_collector', { id }),
+  listCollectorImages: (collectorId: string) => invoke<CollectorImage[]>('list_collector_images', { collectorId }),
+  addCollectorImageFromPath: (collectorId: string, sourcePath: string, kind: 'PROFILE' | 'PHOTO') =>
+    invoke<CollectorImage>('add_collector_image_from_path', { collectorId, sourcePath, kind }),
+  collectorImageData: (imageId: string) => invoke<string>('collector_image_data', { imageId }),
+  deleteCollectorImage: (imageId: string) => invoke<void>('delete_collector_image', { imageId }),
   listSales: () => invoke<Sale[]>('list_sales'),
   recordSale: (input: SaleInput) => invoke<void>('record_sale', { input }),
   deleteSale: (id: string) => invoke<void>('delete_sale', { id }),
@@ -64,5 +75,8 @@ export const api = {
     invoke<string>('export_ledger_csv', {kind, destination}),
   financeOverview: (year: number) => invoke<FinanceOverview>('finance_overview', {year}),
   mcpSetupInfo: () => invoke<McpSetup>('mcp_setup_info'),
+  mcpClientStatus: () => invoke<McpClientStatus>('mcp_client_status'),
+  mcpClientConfigure: () => invoke<McpClientStatus>('mcp_client_configure'),
+  mcpClientRemove: () => invoke<McpClientStatus>('mcp_client_remove'),
   pricePreview: (widthCm: number, heightCm: number) => invoke<number|null>('price_preview', {widthCm,heightCm})
 };

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn now() -> String { Utc::now().to_rfc3339() }
-fn clean(value: Option<String>, max: usize) -> Result<Option<String>, String> {
+pub(crate) fn clean(value: Option<String>, max: usize) -> Result<Option<String>, String> {
     match value {
         None => Ok(None),
         Some(v) if v.trim().is_empty() => Ok(None),
@@ -15,7 +15,7 @@ fn clean(value: Option<String>, max: usize) -> Result<Option<String>, String> {
         Some(_) => Err(format!("Testo troppo lungo (massimo {max} caratteri)")),
     }
 }
-fn required(v: String, max: usize, label: &str) -> Result<String, String> {
+pub(crate) fn required(v: String, max: usize, label: &str) -> Result<String, String> {
     clean(Some(v), max)?.ok_or_else(|| format!("{label} obbligatorio"))
 }
 fn dim(value: Option<f64>) -> Result<Option<f64>, String> {
@@ -41,14 +41,6 @@ fn artwork_by_id(conn: &Connection, id: &str) -> Result<Artwork, String> {
         params![id], artwork_row,
     ).optional().map_err(err)?.ok_or_else(|| "Opera non trovata".to_string())
 }
-fn collector_row(row: &Row<'_>) -> rusqlite::Result<Collector> {
-    Ok(Collector {
-        id: row.get(0)?, name: row.get(1)?, email: row.get(2)?, phone: row.get(3)?,
-        address: row.get(4)?, notes: row.get(5)?, created_at: row.get(6)?, updated_at: row.get(7)?,
-    })
-}
-const COLLECTOR_FIELDS: &str = "id,name,email,phone,address,notes,created_at,updated_at";
-
 #[tauri::command]
 pub fn list_artworks(db: State<'_, Database>) -> Result<Vec<Artwork>, String> {
     let conn = db.conn.lock().map_err(err)?;
@@ -56,42 +48,160 @@ pub fn list_artworks(db: State<'_, Database>) -> Result<Vec<Artwork>, String> {
     let items = statement.query_map([], artwork_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(items)
 }
-fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, String> {
-    let code = required(input.code, 80, "Codice")?;
-    let title = required(input.title, 240, "Titolo")?;
-    let year = clean(input.year, 40)?;
-    let technique = clean(input.technique, 300)?;
-    let support = clean(input.support, 300)?;
-    let width = dim(input.width_cm)?;
-    let height = dim(input.height_cm)?;
-    let depth = dim(input.depth_cm)?;
-    let description = clean(input.description, 40_000)?;
-    let location = clean(input.location, 300)?;
+struct ArtworkFields {
+    code: Option<String>, title: String, year: Option<String>, technique: Option<String>,
+    support: Option<String>, width: Option<f64>, height: Option<f64>, depth: Option<f64>,
+    description: Option<String>, location: Option<String>, status: String,
+}
+fn normalize_artwork(input: &ArtworkInput) -> Result<ArtworkFields, String> {
     if !["available", "reserved", "sold", "archived"].contains(&input.status.as_str()) {
         return Err("Stato opera non valido".into());
     }
-    let conn = db.conn.lock().map_err(err)?;
+    Ok(ArtworkFields {
+        code: clean(input.code.clone(), 80)?,
+        title: required(input.title.clone(), 240, "Titolo")?,
+        year: clean(input.year.clone(), 40)?,
+        technique: clean(input.technique.clone(), 300)?,
+        support: clean(input.support.clone(), 300)?,
+        width: dim(input.width_cm)?, height: dim(input.height_cm)?, depth: dim(input.depth_cm)?,
+        description: clean(input.description.clone(), 40_000)?,
+        location: clean(input.location.clone(), 300)?,
+        status: input.status.clone(),
+    })
+}
+fn code_in_use(conn: &Connection, code: &str, except_id: &str) -> Result<bool, String> {
+    conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE code=?1 COLLATE NOCASE AND id<>?2)",
+        params![code, except_id], |r| r.get(0)).map_err(err)
+}
+fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, String> {
+    let fields = normalize_artwork(&input)?;
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
     let editing = input.id.is_some();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let existing: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
+    let existing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
     if editing && !existing { return Err("Opera da modificare non trovata".into()); }
-    let sale_exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE artwork_id=?1)",params![id],|r|r.get(0)).map_err(err)?;
-    if input.status == "sold" && !sale_exists { return Err("Registra una vendita per indicare l'opera come venduta".into()); }
-    if input.status != "sold" && sale_exists { return Err("L'opera ha una vendita registrata e deve restare venduta".into()); }
-    let code_taken: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM artworks WHERE code=?1 COLLATE NOCASE AND id<>?2)",
-        params![code, id], |r| r.get(0)).map_err(err)?;
-    if code_taken { return Err("Esiste già un'opera con questo codice".into()); }
+    let sale_exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE artwork_id=?1)",params![id],|r|r.get(0)).map_err(err)?;
+    if fields.status == "sold" && !sale_exists { return Err("Registra una vendita per indicare l'opera come venduta".into()); }
+    if fields.status != "sold" && sale_exists { return Err("L'opera ha una vendita registrata e deve restare venduta".into()); }
+    let code = match fields.code {
+        Some(code) => code,
+        None if existing => artwork_by_id(&tx, &id)?.code,
+        None => crate::archive_code::allocate(&tx, fields.year.as_deref())?,
+    };
+    if code_in_use(&tx, &code, &id)? { return Err("Esiste già un'opera con questo codice".into()); }
     let stamp = now();
+    let (title, year, technique, support, description, location) =
+        (fields.title, fields.year, fields.technique, fields.support, fields.description, fields.location);
     if existing {
-        conn.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13 WHERE id=?1",
-            params![id,code,title,year,technique,support,width,height,depth,description,location,input.status,stamp]).map_err(err)?;
+        tx.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13 WHERE id=?1",
+            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp]).map_err(err)?;
     } else {
-        conn.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at)
+        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13)",
-            params![id,code,title,year,technique,support,width,height,depth,description,location,input.status,stamp]).map_err(err)?;
+            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp]).map_err(err)?;
     }
-    artwork_by_id(&conn, &id)
+    let saved = artwork_by_id(&tx, &id)?;
+    tx.commit().map_err(err)?;
+    Ok(saved)
+}
+/// Write a picture into the media store (temporary file, then rename) and return its relative path.
+pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: &str) -> Result<String, String> {
+    let name = format!("{}.{extension}", Uuid::new_v4());
+    let relative = format!("media/{name}");
+    let temporary = directory.join(format!("media/{name}.tmp"));
+    fs::write(&temporary, bytes).map_err(err)?;
+    if let Err(e) = fs::rename(&temporary, directory.join(&relative)) {
+        let _ = fs::remove_file(&temporary);
+        return Err(err(e));
+    }
+    Ok(relative)
+}
+/// Create an artwork with an automatic archive code, its photographs and an optional sale in
+/// a single transaction. Every picture is validated before anything is written, and files
+/// written during a failed attempt are removed, so nothing is left half-created.
+fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Artwork, String> {
+    if input.artwork.id.is_some() { return Err("Questa operazione crea una nuova opera".into()); }
+    let mut fields = normalize_artwork(&input.artwork)?;
+    if input.gallery_paths.len() > 20 { return Err("Massimo 20 fotografie aggiuntive per opera".into()); }
+    let load = |path: &String| -> Result<(Vec<u8>, &'static str), String> {
+        let bytes = read_image_file(path)?;
+        let (extension, _) = image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
+        Ok((bytes, extension))
+    };
+    let cover = input.cover_path.as_ref().map(load).transpose()?;
+    let gallery = input.gallery_paths.iter().map(load).collect::<Result<Vec<_>, _>>()?;
+    match &input.sale {
+        Some(sale) => {
+            if sale.amount_cents <= 0 || sale.amount_cents > 100_000_000_000 { return Err("Importo non valido".into()); }
+            if !canonical_date(&sale.sold_at) { return Err("Data di vendita non valida".into()); }
+            fields.status = "sold".into();
+        }
+        None if fields.status == "sold" => return Err("Registra una vendita per indicare l'opera come venduta".into()),
+        None => {}
+    }
+    let sale_notes = match &input.sale { Some(s) => clean(s.notes.clone(), 15_000)?, None => None };
+    let new_collector = match &input.sale {
+        Some(s) if s.collector_id.as_deref().is_none_or(|v| v.trim().is_empty()) =>
+            Some(required(s.new_collector_name.clone().unwrap_or_default(), 240, "Nome del collezionista")?),
+        _ => None,
+    };
+
+    let mut written: Vec<std::path::PathBuf> = Vec::new();
+    let outcome = (|| -> Result<Artwork, String> {
+        let mut conn = db.conn.lock().map_err(err)?;
+        let tx = conn.transaction().map_err(err)?;
+        let id = Uuid::new_v4().to_string();
+        let code = match fields.code.clone() {
+            Some(code) => code,
+            None => crate::archive_code::allocate(&tx, fields.year.as_deref())?,
+        };
+        if code_in_use(&tx, &code, &id)? { return Err("Esiste già un'opera con questo codice".into()); }
+        let mut cover_path: Option<String> = None;
+        if let Some((bytes, extension)) = &cover {
+            let relative = store_media(&db.directory, bytes, extension)?;
+            written.push(db.directory.join(&relative));
+            cover_path = Some(relative);
+        }
+        let stamp = now();
+        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,created_at,updated_at)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)",
+            params![id, code, fields.title, fields.year, fields.technique, fields.support, fields.width, fields.height,
+                fields.depth, fields.description, fields.location, fields.status, cover_path, stamp]).map_err(err)?;
+        for (position, (bytes, extension)) in gallery.iter().enumerate() {
+            let relative = store_media(&db.directory, bytes, extension)?;
+            written.push(db.directory.join(&relative));
+            tx.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order) VALUES(?1,?2,?3,NULL,?4,?5)",
+                params![Uuid::new_v4().to_string(), id, relative, stamp, position as i64 + 1]).map_err(err)?;
+        }
+        if let Some(sale) = &input.sale {
+            let collector_id = match &new_collector {
+                Some(name) => {
+                    let collector_id = Uuid::new_v4().to_string();
+                    tx.execute("INSERT INTO collectors(id,name,first_name,created_at,updated_at) VALUES(?1,?2,?2,?3,?3)",
+                        params![collector_id, name, stamp]).map_err(err)?;
+                    collector_id
+                }
+                None => sale.collector_id.clone().unwrap_or_default(),
+            };
+            let sale_id = Uuid::new_v4().to_string();
+            tx.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,currency,sold_at,notes,created_at) VALUES(?1,?2,?3,?4,'EUR',?5,?6,?7)",
+                params![sale_id, id, collector_id, sale.amount_cents, sale.sold_at, sale_notes, stamp])
+                .map_err(|_| "Vendita non registrata: verifica il collezionista scelto".to_string())?;
+            crate::finance::attach_sale_finances(&tx, &sale_id, sale.amount_cents, sale.tax_cents, sale.shipping_cents)?;
+        }
+        let saved = artwork_by_id(&tx, &id)?;
+        tx.commit().map_err(err)?;
+        Ok(saved)
+    })();
+    if outcome.is_err() {
+        for path in &written { let _ = fs::remove_file(path); }
+    }
+    outcome
+}
+#[tauri::command]
+pub fn create_artwork_full(db: State<'_, Database>, input: NewArtworkInput) -> Result<Artwork, String> {
+    create_artwork_full_core(&db, input)
 }
 #[tauri::command]
 pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artwork, String> {
@@ -120,46 +230,6 @@ pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String>
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_collectors(db: State<'_, Database>) -> Result<Vec<Collector>, String> {
-    let conn = db.conn.lock().map_err(err)?;
-    let mut statement = conn.prepare(&format!("SELECT {COLLECTOR_FIELDS} FROM collectors ORDER BY name COLLATE NOCASE")).map_err(err)?;
-    let items = statement.query_map([], collector_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
-    Ok(items)
-}
-fn save_collector_core(db: &Database, input: CollectorInput) -> Result<Collector, String> {
-    let name = required(input.name, 240, "Nome")?;
-    let email = clean(input.email, 320)?;
-    let phone = clean(input.phone, 100)?;
-    let address = clean(input.address, 1000)?;
-    let notes = clean(input.notes, 15_000)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let editing = input.id.is_some();
-    let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let stamp = now();
-    let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
-    if editing && !exists { return Err("Collezionista da modificare non trovato".into()); }
-    if exists {
-        conn.execute("UPDATE collectors SET name=?2,email=?3,phone=?4,address=?5,notes=?6,updated_at=?7 WHERE id=?1",
-            params![id,name,email,phone,address,notes,stamp]).map_err(err)?;
-    } else {
-        conn.execute("INSERT INTO collectors(id,name,email,phone,address,notes,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
-            params![id,name,email,phone,address,notes,stamp]).map_err(err)?;
-    }
-    conn.query_row(&format!("SELECT {COLLECTOR_FIELDS} FROM collectors WHERE id=?1"),params![id],collector_row).map_err(err)
-}
-#[tauri::command]
-pub fn save_collector(db: State<'_, Database>, input: CollectorInput) -> Result<Collector, String> {
-    save_collector_core(&db, input)
-}
-#[tauri::command]
-pub fn delete_collector(db: State<'_, Database>, id: String) -> Result<(), String> {
-    let conn=db.conn.lock().map_err(err)?;
-    let affected=conn.execute("DELETE FROM collectors WHERE id=?1",params![id])
-        .map_err(|_| "Non puoi eliminare un collezionista collegato a una vendita".to_string())?;
-    if affected==0 { return Err("Collezionista non trovato".into()); }
-    Ok(())
-}
 fn sale_row(row: &Row<'_>) -> rusqlite::Result<Sale> {
     Ok(Sale { id:row.get(0)?, artwork_id:row.get(1)?, collector_id:row.get(2)?,
         amount_cents:row.get(3)?,currency:row.get(4)?,sold_at:row.get(5)?, notes:row.get(6)?,
@@ -174,7 +244,7 @@ pub fn list_sales(db: State<'_, Database>) -> Result<Vec<Sale>, String> {
     Ok(items)
 }
 // Dates are stored as text and sorted/grouped lexicographically: accept only canonical YYYY-MM-DD.
-fn canonical_date(value: &str) -> bool {
+pub(crate) fn canonical_date(value: &str) -> bool {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map(|d| d.format("%Y-%m-%d").to_string() == value)
         .unwrap_or(false)
@@ -352,11 +422,11 @@ pub fn save_artwork_image_from_path(db: State<'_, Database>, artwork_id: String,
     let bytes = read_image_file(&source_path)?;
     save_artwork_image_bytes(&db, &artwork_id, &bytes)
 }
-fn safe_relative(path: &str) -> bool {
+pub(crate) fn safe_relative(path: &str) -> bool {
     let p=std::path::Path::new(path);
     p.components().all(|c|matches!(c,Component::Normal(_))) && p.starts_with("media")
 }
-fn image_type(bytes:&[u8])->Option<(&'static str,&'static str)> {
+pub(crate) fn image_type(bytes:&[u8])->Option<(&'static str,&'static str)> {
     if bytes.starts_with(&[0xff,0xd8,0xff]) { return Some(("jpg","image/jpeg")); }
     if bytes.starts_with(&[137,80,78,71,13,10,26,10]) { return Some(("png","image/png")); }
     if bytes.len()>=12 && &bytes[0..4]==b"RIFF" && &bytes[8..12]==b"WEBP" { return Some(("webp","image/webp")); }
@@ -464,17 +534,18 @@ mod tests {
 
     fn artwork_edit_input(id: Option<String>, title: &str) -> ArtworkInput {
         ArtworkInput {
-            id, code: "WORK-STALE-01".into(), title: title.into(), year: None,
+            id, code: Some("WORK-STALE-01".into()), title: title.into(), year: None,
             technique: None, support: None, width_cm: None, height_cm: None,
             depth_cm: None, description: None, location: None,
             status: "available".into(),
         }
     }
 
-    fn collector_edit_input(id: Option<String>, name: &str) -> CollectorInput {
-        CollectorInput {
-            id, name: name.into(), email: None, phone: None,
-            address: None, notes: None,
+    fn collector_edit_input(id: Option<String>, name: &str) -> crate::collectors::CollectorInput {
+        crate::collectors::CollectorInput {
+            id, first_name: name.into(), last_name: None, email: None, phone: None, address: None,
+            notes: None, birth_date: None, birth_time: None, birth_place: None, instagram: None,
+            facebook: None, tiktok: None, website: None, linkedin: None,
         }
     }
 
@@ -501,7 +572,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().to_path_buf()).unwrap();
         let artwork = save_artwork_core(&db, artwork_edit_input(None, "Opera")).unwrap();
-        let collector = save_collector_core(&db, collector_edit_input(None, "Persona")).unwrap();
+        let collector = crate::collectors::save_collector_core(&db, collector_edit_input(None, "Persona")).unwrap();
         (dir, db, artwork.id, collector.id)
     }
 
@@ -520,14 +591,14 @@ mod tests {
         let error = save_artwork_core(&db, artwork_edit_input(None, "Seconda")).unwrap_err();
         assert!(error.contains("codice"), "{error}");
         let mut other = artwork_edit_input(None, "Altra");
-        other.code = "WORK-OTHER".into();
+        other.code = Some("WORK-OTHER".into());
         let other = save_artwork_core(&db, other).unwrap();
         let mut clash = artwork_edit_input(Some(other.id.clone()), "Altra");
-        clash.code = first.code.to_lowercase();
+        clash.code = Some(first.code.to_lowercase());
         assert!(save_artwork_core(&db, clash).unwrap_err().contains("codice"));
         // Re-saving a record with its own code is not a conflict.
         let mut same = artwork_edit_input(Some(first.id.clone()), "Prima modificata");
-        same.code = first.code.clone();
+        same.code = Some(first.code.clone());
         assert_eq!(save_artwork_core(&db, same).unwrap().title, "Prima modificata");
     }
 
@@ -596,6 +667,125 @@ mod tests {
         assert!(save_artwork_image_bytes(&db, &artwork, &wrong).unwrap_err().contains("JPEG"));
     }
 
+    fn new_artwork(title: &str, year: Option<&str>) -> NewArtworkInput {
+        let mut artwork = artwork_edit_input(None, title);
+        artwork.code = None;
+        artwork.year = year.map(String::from);
+        NewArtworkInput { artwork, cover_path: None, gallery_paths: vec![], sale: None }
+    }
+    fn picture(dir: &std::path::Path, name: &str, marker: u8) -> String {
+        let path = dir.join(name);
+        fs::write(&path, [0xff, 0xd8, 0xff, marker]).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+    fn media_files(db: &Database) -> usize {
+        fs::read_dir(db.directory.join("media")).unwrap().count()
+    }
+    fn count(db: &Database, table: &str) -> i64 {
+        db.conn.lock().unwrap().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn new_artworks_get_automatic_sequential_codes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let first = create_artwork_full_core(&db, new_artwork("Uno", None)).unwrap();
+        let second = save_artwork_core(&db, { let mut a = artwork_edit_input(None, "Due"); a.code = None; a }).unwrap();
+        assert_eq!((first.code.as_str(), second.code.as_str()), ("ART-0001", "ART-0002"));
+        let mut edit = artwork_edit_input(Some(second.id.clone()), "Due modificata");
+        edit.code = None;
+        assert_eq!(save_artwork_core(&db, edit).unwrap().code, "ART-0002", "editing keeps the assigned code");
+        let mut manual = new_artwork("Manuale", None);
+        manual.artwork.code = Some("art-0001".into());
+        assert!(create_artwork_full_core(&db, manual).unwrap_err().contains("codice"));
+        assert_eq!(create_artwork_full_core(&db, new_artwork("Tre", None)).unwrap().code, "ART-0003");
+    }
+
+    #[test]
+    fn creating_with_photos_and_a_sale_stores_everything_in_one_step() {
+        let (dir, db, _artwork, collector) = sale_fixture();
+        let mut input = new_artwork("Con foto e vendita", Some("2025"));
+        input.cover_path = Some(picture(dir.path(), "copertina.jpg", 1));
+        input.gallery_paths = vec![picture(dir.path(), "a.jpg", 2), picture(dir.path(), "b.jpg", 3)];
+        input.artwork.status = "available".into();
+        input.sale = Some(NewSaleInput {
+            collector_id: Some(collector.clone()), new_collector_name: None, amount_cents: 250_000,
+            sold_at: "2026-11-21".into(), notes: Some(" Consegna a mano ".into()), tax_cents: 0, shipping_cents: 5_000,
+        });
+        let saved = create_artwork_full_core(&db, input).unwrap();
+        assert_eq!(saved.status, "sold", "a sale makes the artwork sold");
+        assert!(saved.image_path.is_some());
+        let conn = db.conn.lock().unwrap();
+        let rows: Vec<(i64, String)> = conn.prepare("SELECT sort_order,image_path FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order").unwrap()
+            .query_map(params![saved.id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect();
+        assert_eq!(rows.iter().map(|r| r.0).collect::<Vec<_>>(), vec![1, 2]);
+        for (_, path) in &rows { assert!(db.directory.join(path).is_file()); }
+        assert!(db.directory.join(saved.image_path.unwrap()).is_file());
+        let (amount, shipping, notes): (i64, i64, String) = conn.query_row(
+            "SELECT s.amount_cents,f.shipping_cents,s.notes FROM sales s JOIN sale_finances f ON f.sale_id=s.id WHERE s.artwork_id=?1",
+            params![saved.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!((amount, shipping, notes.as_str()), (250_000, 5_000, "Consegna a mano"));
+    }
+
+    #[test]
+    fn a_new_collector_can_be_created_together_with_the_sale() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let mut input = new_artwork("Venduta subito", None);
+        input.sale = Some(NewSaleInput {
+            collector_id: None, new_collector_name: Some("  Anna Rossi ".into()), amount_cents: 90_000,
+            sold_at: "2026-11-21".into(), notes: None, tax_cents: 0, shipping_cents: 0,
+        });
+        create_artwork_full_core(&db, input).unwrap();
+        let name: String = db.conn.lock().unwrap().query_row("SELECT name FROM collectors", [], |r| r.get(0)).unwrap();
+        assert_eq!(name, "Anna Rossi");
+        let mut anonymous = new_artwork("Senza acquirente", None);
+        anonymous.sale = Some(NewSaleInput {
+            collector_id: None, new_collector_name: None, amount_cents: 1, sold_at: "2026-11-21".into(),
+            notes: None, tax_cents: 0, shipping_cents: 0,
+        });
+        assert!(create_artwork_full_core(&db, anonymous).unwrap_err().contains("collezionista"));
+        assert_eq!((count(&db, "artworks"), count(&db, "collectors")), (1, 1));
+    }
+
+    #[test]
+    fn a_failed_creation_leaves_no_artwork_sale_collector_file_or_used_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        // Invalid pictures are rejected before anything is written.
+        let mut wrong_type = new_artwork("Tipo errato", None);
+        let text = dir.path().join("testo.jpg");
+        fs::write(&text, b"not an image").unwrap();
+        wrong_type.gallery_paths = vec![text.to_string_lossy().into_owned()];
+        assert!(create_artwork_full_core(&db, wrong_type).is_err());
+        // A failure after the files were written (the sale breaks a rule) is rolled back and cleaned up.
+        let mut bad_sale = new_artwork("Vendita errata", None);
+        bad_sale.cover_path = Some(picture(dir.path(), "c.jpg", 4));
+        bad_sale.gallery_paths = vec![picture(dir.path(), "g.jpg", 5)];
+        bad_sale.sale = Some(NewSaleInput {
+            collector_id: Some("inesistente".into()), new_collector_name: None, amount_cents: 1_000,
+            sold_at: "2026-11-21".into(), notes: None, tax_cents: 0, shipping_cents: 0,
+        });
+        assert!(create_artwork_full_core(&db, bad_sale).is_err());
+        let mut too_much = new_artwork("Spese eccessive", None);
+        too_much.cover_path = Some(picture(dir.path(), "c2.jpg", 6));
+        too_much.sale = Some(NewSaleInput {
+            collector_id: None, new_collector_name: Some("Chi".into()), amount_cents: 1_000,
+            sold_at: "2026-11-21".into(), notes: None, tax_cents: 900, shipping_cents: 900,
+        });
+        assert!(create_artwork_full_core(&db, too_much).is_err());
+        assert_eq!((count(&db, "artworks"), count(&db, "artwork_images"), count(&db, "sales"), count(&db, "collectors")), (0, 0, 0, 0));
+        assert_eq!(media_files(&db), 0, "no orphan files");
+        assert_eq!(create_artwork_full_core(&db, new_artwork("Prima vera", None)).unwrap().code, "ART-0001",
+            "failed attempts must not consume archive numbers");
+        let mut sold_without_sale = new_artwork("Venduta senza vendita", None);
+        sold_without_sale.artwork.status = "sold".into();
+        assert!(create_artwork_full_core(&db, sold_without_sale).is_err());
+        let mut many = new_artwork("Troppe foto", None);
+        many.gallery_paths = vec!["x".into(); 21];
+        assert!(create_artwork_full_core(&db, many).unwrap_err().contains("20"));
+    }
+
     #[test]
     fn certificates_use_the_local_calendar_and_unique_increasing_serials() {
         let (_dir, db, artwork, _collector) = sale_fixture();
@@ -621,14 +811,14 @@ mod tests {
     fn collector_edit_never_recreates_a_deleted_record() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().to_path_buf()).unwrap();
-        let created = save_collector_core(&db, collector_edit_input(None, "Original")).unwrap();
-        let changed = save_collector_core(&db,
+        let created = crate::collectors::save_collector_core(&db, collector_edit_input(None, "Original")).unwrap();
+        let changed = crate::collectors::save_collector_core(&db,
             collector_edit_input(Some(created.id.clone()), "Edited")).unwrap();
         assert_eq!(changed.id, created.id);
         assert_eq!(changed.name, "Edited");
         db.conn.lock().unwrap().execute("DELETE FROM collectors WHERE id=?1",
             params![created.id]).unwrap();
-        let error = save_collector_core(&db,
+        let error = crate::collectors::save_collector_core(&db,
             collector_edit_input(Some(created.id.clone()), "Resurrected")).unwrap_err();
         assert!(error.contains("non trovato"));
         let count: i64 = db.conn.lock().unwrap().query_row(

@@ -263,7 +263,7 @@ mod tests{
         drop(db);
         let upgraded=crate::db::open(temp.path().into()).unwrap();let c=upgraded.conn.lock().unwrap();
         let version:i64=c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(version,6);
+        assert_eq!(version,crate::db::SCHEMA_VERSION);
         assert_eq!(balances_core(&c).unwrap()[0].outstanding_cents,12001);
         assert!(list_core(&c).unwrap().is_empty());
     }

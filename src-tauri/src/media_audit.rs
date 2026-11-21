@@ -1,4 +1,4 @@
-//! Read-only, offline diagnostic of artwork media in the active archive.
+//! Read-only, offline diagnostic of artwork and collector media in the active archive.
 //! This checks reference safety, presence and file headers; without stored
 //! per-image hashes it cannot prove that image contents are unchanged.
 use crate::db::Database;
@@ -117,7 +117,9 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
         let mut stmt = conn.prepare(
             "SELECT id, NULL, 'primary', image_path FROM artworks WHERE image_path IS NOT NULL
              UNION ALL
-             SELECT artwork_id, id, 'gallery', image_path FROM artwork_images"
+             SELECT artwork_id, id, 'gallery', image_path FROM artwork_images
+             UNION ALL
+             SELECT collector_id, id, 'collector', image_path FROM collector_images"
         ).map_err(error)?;
         let rows = stmt.query_map([], reference).map_err(error)?
             .collect::<Result<Vec<_>, _>>().map_err(error)?;

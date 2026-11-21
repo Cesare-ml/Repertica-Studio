@@ -18,9 +18,22 @@ export interface Artwork {
   updated_at: string;
 }
 export type ArtworkInput = Pick<Artwork,
-  'code' | 'title' | 'year' | 'technique' | 'support' | 'width_cm' |
+  'title' | 'year' | 'technique' | 'support' | 'width_cm' |
   'height_cm' | 'depth_cm' | 'description' | 'location' | 'status'
-> & { id?: string };
+> & { id?: string; code?: string | null };
+/** For a new artwork the archive code is assigned by the application. */
+export type NewArtworkRecord = ArtworkInput;
+export interface NewSaleInput {
+  collector_id: string | null; new_collector_name: string | null;
+  amount_cents: number; sold_at: string; notes: string | null;
+  tax_cents: number; shipping_cents: number;
+}
+export interface NewArtworkInput {
+  artwork: NewArtworkRecord; cover_path: string | null; gallery_paths: string[]; sale: NewSaleInput | null;
+}
+export interface CodePolicy {
+  prefix: string; scope: 'GLOBAL' | 'YEARLY'; padding: number; separator: '-' | '.' | '_';
+}
 
 export interface GalleryImage {
   id: string; artwork_id: string; image_path: string;
@@ -37,10 +50,20 @@ export interface MediaAudit {
 }
 
 export interface Collector {
-  id: string; name: string; email: string | null; phone: string | null;
-  address: string | null; notes: string | null; created_at: string; updated_at: string;
+  id: string; name: string; first_name: string; last_name: string | null;
+  email: string | null; phone: string | null; address: string | null; notes: string | null;
+  birth_date: string | null; birth_time: string | null; birth_place: string | null;
+  instagram: string | null; facebook: string | null; tiktok: string | null;
+  website: string | null; linkedin: string | null;
+  profile_image_id: string | null; photo_count: number;
+  created_at: string; updated_at: string;
 }
-export type CollectorInput = Pick<Collector, 'name' | 'email' | 'phone' | 'address' | 'notes'> & { id?: string };
+export type CollectorInput = Pick<Collector, 'first_name' | 'last_name' | 'email' | 'phone' | 'address' | 'notes' |
+  'birth_date' | 'birth_time' | 'birth_place' | 'instagram' | 'facebook' | 'tiktok' | 'website' | 'linkedin'> & { id?: string };
+export interface CollectorImage {
+  id: string; collector_id: string; kind: 'PROFILE' | 'PHOTO'; image_path: string; created_at: string;
+}
+export interface NewCollectorInput { collector: CollectorInput; profile_path: string | null; photo_paths: string[]; }
 
 export interface Sale {
   id: string; artwork_id: string; collector_id: string; amount_cents: number;
@@ -117,4 +140,5 @@ export interface SaleBalance {
   sale_id: string; sale_cents: number; received_cents: number; outstanding_cents: number;
 }
 
+export interface McpClientStatus { configPath: string; appFound: boolean; configured: boolean; upToDate: boolean; }
 export interface McpSetup { command: string; args: string[]; dataDir: string; }

@@ -40,9 +40,13 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              ORDER BY a.code COLLATE NOCASE,a.id,i.sort_order,i.created_at,i.id"
         ),
         "collectors" => (
-            "collector_id;name;email;phone;address;notes;created_at;updated_at",
-            "SELECT id,name,email,phone,address,notes,created_at,updated_at
-             FROM collectors ORDER BY name COLLATE NOCASE,id"
+            "collector_id;name;email;phone;address;notes;created_at;updated_at;first_name;last_name;birth_date;birth_time;birth_place;instagram;facebook;tiktok;website;linkedin;profile_photo_path;photo_count",
+            "SELECT c.id,c.name,c.email,c.phone,c.address,c.notes,c.created_at,c.updated_at,
+                    COALESCE(c.first_name,c.name),c.last_name,c.birth_date,c.birth_time,c.birth_place,
+                    c.instagram,c.facebook,c.tiktok,c.website,c.linkedin,
+                    (SELECT image_path FROM collector_images WHERE collector_id=c.id AND kind='PROFILE'),
+                    (SELECT count(*) FROM collector_images WHERE collector_id=c.id)
+             FROM collectors c ORDER BY c.name COLLATE NOCASE,c.id"
         ),
         "certificates" => (
             "certificate_id;artwork_id;artwork_code;current_artwork_title;serial;issued_at;artist_name;collector_name;notes;snapshot_json;created_at",
@@ -56,7 +60,9 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
             "SELECT s.id,s.sold_at,s.artwork_id,a.code,a.title,s.collector_id,c.name,s.currency,
                     s.amount_cents,COALESCE(f.tax_cents,0),COALESCE(f.shipping_cents,0),
                     s.amount_cents-COALESCE(f.tax_cents,0)-COALESCE(f.shipping_cents,0),
-                    COALESCE(f.personal_bp,3334),COALESCE(f.activity_bp,3333),COALESCE(f.savings_bp,3333),
+                    COALESCE((SELECT share_bp FROM sale_allocations WHERE sale_id=s.id AND part_id='personal'),0),
+                    COALESCE((SELECT share_bp FROM sale_allocations WHERE sale_id=s.id AND part_id='activity'),0),
+                    COALESCE((SELECT share_bp FROM sale_allocations WHERE sale_id=s.id AND part_id='savings'),0),
                     s.notes,s.created_at
              FROM sales s JOIN artworks a ON a.id=s.artwork_id
              JOIN collectors c ON c.id=s.collector_id
@@ -89,9 +95,20 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              ORDER BY r.received_at,r.created_at,r.id"
         ),
         "expenses" => (
-            "expense_id;expense_date;category;description;amount_cents;fund;supplier;purchase_url;notes;created_at;updated_at",
-            "SELECT id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at
-             FROM expenses ORDER BY expense_date,id"
+            "expense_id;expense_date;category;description;amount_cents;fund;supplier;purchase_url;notes;created_at;updated_at;fund_name",
+            "SELECT e.id,e.expense_date,e.category,e.description,e.amount_cents,e.fund,e.supplier,e.purchase_url,e.notes,
+                    e.created_at,e.updated_at,p.name
+             FROM expenses e LEFT JOIN allocation_parts p ON p.id=e.fund ORDER BY e.expense_date,e.id"
+        ),
+        "allocations" => (
+            "sale_id;sold_at;artwork_id;artwork_code;artwork_title;net_cents;part_id;part_name;share_bp",
+            "SELECT s.id,s.sold_at,s.artwork_id,a.code,a.title,
+                    s.amount_cents-COALESCE(f.tax_cents,0)-COALESCE(f.shipping_cents,0),
+                    al.part_id,p.name,al.share_bp
+             FROM sale_allocations al JOIN allocation_parts p ON p.id=al.part_id
+             JOIN sales s ON s.id=al.sale_id JOIN artworks a ON a.id=s.artwork_id
+             LEFT JOIN sale_finances f ON f.sale_id=s.id
+             ORDER BY s.sold_at,s.id,p.position,p.id"
         ),
         _ => return Err("Tipo di registro CSV non riconosciuto".into()),
     };
@@ -248,6 +265,7 @@ mod tests {
             VALUES('s','a','c',15001,'2026-11-01','  =HYPERLINK(\"https://example.test\")','t')", []).unwrap();
         conn.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
             VALUES('s',200,301,5000,3000,2000)", []).unwrap();
+        conn.execute_batch("INSERT INTO sale_allocations(sale_id,part_id,share_bp) VALUES('s','personal',5000),('s','activity',3000),('s','savings',2000);").unwrap();
         conn.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,notes,created_at,updated_at)
             VALUES('e','2026-11-02','materiali','+SUM(A1:A9)',1250,'activity','Prima riga
 seconda riga','t','t')", []).unwrap();

@@ -1,4 +1,7 @@
+mod allocations;
+mod archive_code;
 mod backup;
+mod collectors;
 mod commands;
 pub mod db;
 mod export;
@@ -9,6 +12,7 @@ mod models;
 mod receipts;
 mod util;
 pub mod mcp;
+mod mcp_client;
 mod receipt_attachments;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,10 +31,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_artworks,
             commands::save_artwork,
+            commands::create_artwork_full,
             commands::delete_artwork,
-            commands::list_collectors,
-            commands::save_collector,
-            commands::delete_collector,
+            collectors::list_collectors,
+            collectors::save_collector,
+            collectors::create_collector_full,
+            collectors::delete_collector,
+            collectors::list_collector_images,
+            collectors::add_collector_image_from_path,
+            collectors::collector_image_data,
+            collectors::delete_collector_image,
             commands::list_sales,
             commands::record_sale,
             commands::delete_sale,
@@ -71,7 +81,15 @@ pub fn run() {
             receipt_attachments::remove_sale_receipt_attachment,
             receipt_attachments::export_sale_receipt_attachment,
             export::export_ledger_csv,
-            mcp::mcp_setup_info
+            mcp::mcp_setup_info,
+            mcp_client::mcp_client_status,
+            mcp_client::mcp_client_configure,
+            mcp_client::mcp_client_remove,
+            allocations::get_allocation_plan,
+            allocations::save_allocation_plan,
+            archive_code::get_archive_code_policy,
+            archive_code::save_archive_code_policy,
+            archive_code::next_archive_code
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");

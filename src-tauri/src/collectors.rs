@@ -1,0 +1,482 @@
+//! Collectors: the people who buy the artist's work. Fields follow the artist's own
+//! archive (first and last name, contacts, social profiles, optional birth data, notes)
+//! and each collector can have a profile photograph and further photographs.
+use crate::{
+    commands::{canonical_date, clean, image_type, read_image_file, required, safe_relative, store_media},
+    db::Database,
+};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use chrono::{NaiveTime, Utc};
+use rusqlite::{params, Connection, OptionalExtension, Row};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use tauri::State;
+use uuid::Uuid;
+
+const MAX_PHOTOS: i64 = 20;
+
+fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
+fn now() -> String { Utc::now().to_rfc3339() }
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Collector {
+    pub id: String,
+    /// Display name: first name followed by last name.
+    pub name: String,
+    pub first_name: String,
+    pub last_name: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub address: Option<String>,
+    pub notes: Option<String>,
+    pub birth_date: Option<String>,
+    pub birth_time: Option<String>,
+    pub birth_place: Option<String>,
+    pub instagram: Option<String>,
+    pub facebook: Option<String>,
+    pub tiktok: Option<String>,
+    pub website: Option<String>,
+    pub linkedin: Option<String>,
+    pub profile_image_id: Option<String>,
+    pub photo_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CollectorInput {
+    #[serde(default)] pub id: Option<String>,
+    pub first_name: String,
+    #[serde(default)] pub last_name: Option<String>,
+    #[serde(default)] pub email: Option<String>,
+    #[serde(default)] pub phone: Option<String>,
+    #[serde(default)] pub address: Option<String>,
+    #[serde(default)] pub notes: Option<String>,
+    #[serde(default)] pub birth_date: Option<String>,
+    #[serde(default)] pub birth_time: Option<String>,
+    #[serde(default)] pub birth_place: Option<String>,
+    #[serde(default)] pub instagram: Option<String>,
+    #[serde(default)] pub facebook: Option<String>,
+    #[serde(default)] pub tiktok: Option<String>,
+    #[serde(default)] pub website: Option<String>,
+    #[serde(default)] pub linkedin: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewCollectorInput {
+    pub collector: CollectorInput,
+    #[serde(default)] pub profile_path: Option<String>,
+    #[serde(default)] pub photo_paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CollectorImage {
+    pub id: String,
+    pub collector_id: String,
+    /// `PROFILE` or `PHOTO`.
+    pub kind: String,
+    pub image_path: String,
+    pub created_at: String,
+}
+
+const FIELDS: &str = "c.id,c.name,COALESCE(c.first_name,c.name),c.last_name,c.email,c.phone,c.address,c.notes,
+    c.birth_date,c.birth_time,c.birth_place,c.instagram,c.facebook,c.tiktok,c.website,c.linkedin,
+    (SELECT id FROM collector_images WHERE collector_id=c.id AND kind='PROFILE'),
+    (SELECT count(*) FROM collector_images WHERE collector_id=c.id),
+    c.created_at,c.updated_at";
+
+fn collector_row(r: &Row<'_>) -> rusqlite::Result<Collector> {
+    Ok(Collector {
+        id: r.get(0)?, name: r.get(1)?, first_name: r.get(2)?, last_name: r.get(3)?, email: r.get(4)?,
+        phone: r.get(5)?, address: r.get(6)?, notes: r.get(7)?, birth_date: r.get(8)?, birth_time: r.get(9)?,
+        birth_place: r.get(10)?, instagram: r.get(11)?, facebook: r.get(12)?, tiktok: r.get(13)?,
+        website: r.get(14)?, linkedin: r.get(15)?, profile_image_id: r.get(16)?, photo_count: r.get(17)?,
+        created_at: r.get(18)?, updated_at: r.get(19)?,
+    })
+}
+
+fn by_id(conn: &Connection, id: &str) -> Result<Collector, String> {
+    conn.query_row(&format!("SELECT {FIELDS} FROM collectors c WHERE c.id=?1"), params![id], collector_row)
+        .optional().map_err(err)?.ok_or_else(|| "Collezionista non trovato".to_string())
+}
+
+struct Clean {
+    first_name: String, last_name: Option<String>, name: String, email: Option<String>, phone: Option<String>,
+    address: Option<String>, notes: Option<String>, birth_date: Option<String>, birth_time: Option<String>,
+    birth_place: Option<String>, instagram: Option<String>, facebook: Option<String>, tiktok: Option<String>,
+    website: Option<String>, linkedin: Option<String>,
+}
+
+fn normalize(input: &CollectorInput) -> Result<Clean, String> {
+    let first_name = required(input.first_name.clone(), 240, "Nome")?;
+    let last_name = clean(input.last_name.clone(), 240)?;
+    let name = match &last_name { Some(last) => format!("{first_name} {last}"), None => first_name.clone() };
+    let email = clean(input.email.clone(), 320)?;
+    if email.as_ref().is_some_and(|e| !e.contains('@') || e.chars().any(char::is_whitespace)) {
+        return Err("Indirizzo email non valido".into());
+    }
+    let birth_date = clean(input.birth_date.clone(), 10)?;
+    if birth_date.as_ref().is_some_and(|d| !canonical_date(d)) { return Err("Data di nascita non valida".into()); }
+    let birth_time = clean(input.birth_time.clone(), 8)?;
+    if birth_time.as_ref().is_some_and(|t| {
+        NaiveTime::parse_from_str(t, "%H:%M").map(|v| v.format("%H:%M").to_string() != *t).unwrap_or(true)
+    }) {
+        return Err("Ora di nascita non valida (usa HH:MM)".into());
+    }
+    Ok(Clean {
+        first_name, last_name, name, email,
+        phone: clean(input.phone.clone(), 100)?,
+        address: clean(input.address.clone(), 1000)?,
+        notes: clean(input.notes.clone(), 15_000)?,
+        birth_date, birth_time,
+        birth_place: clean(input.birth_place.clone(), 300)?,
+        instagram: clean(input.instagram.clone(), 300)?,
+        facebook: clean(input.facebook.clone(), 300)?,
+        tiktok: clean(input.tiktok.clone(), 300)?,
+        website: clean(input.website.clone(), 500)?,
+        linkedin: clean(input.linkedin.clone(), 500)?,
+    })
+}
+
+fn insert(conn: &Connection, id: &str, c: &Clean, stamp: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO collectors(id,name,first_name,last_name,email,phone,address,notes,birth_date,birth_time,
+            birth_place,instagram,facebook,tiktok,website,linkedin,created_at,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17)",
+        params![id, c.name, c.first_name, c.last_name, c.email, c.phone, c.address, c.notes, c.birth_date,
+            c.birth_time, c.birth_place, c.instagram, c.facebook, c.tiktok, c.website, c.linkedin, stamp],
+    ).map(|_| ()).map_err(err)
+}
+
+pub(crate) fn save_collector_core(db: &Database, input: CollectorInput) -> Result<Collector, String> {
+    let c = normalize(&input)?;
+    let conn = db.conn.lock().map_err(err)?;
+    let stamp = now();
+    match &input.id {
+        Some(id) => {
+            let changed = conn.execute(
+                "UPDATE collectors SET name=?2,first_name=?3,last_name=?4,email=?5,phone=?6,address=?7,notes=?8,
+                    birth_date=?9,birth_time=?10,birth_place=?11,instagram=?12,facebook=?13,tiktok=?14,
+                    website=?15,linkedin=?16,updated_at=?17 WHERE id=?1",
+                params![id, c.name, c.first_name, c.last_name, c.email, c.phone, c.address, c.notes, c.birth_date,
+                    c.birth_time, c.birth_place, c.instagram, c.facebook, c.tiktok, c.website, c.linkedin, stamp],
+            ).map_err(err)?;
+            if changed == 0 { return Err("Collezionista da modificare non trovato".into()); }
+            by_id(&conn, id)
+        }
+        None => {
+            let id = Uuid::new_v4().to_string();
+            insert(&conn, &id, &c, &stamp)?;
+            by_id(&conn, &id)
+        }
+    }
+}
+
+/// Create a collector together with a profile photograph and further photographs, all or nothing.
+fn create_collector_full_core(db: &Database, input: NewCollectorInput) -> Result<Collector, String> {
+    if input.collector.id.is_some() { return Err("Questa operazione crea un nuovo collezionista".into()); }
+    let fields = normalize(&input.collector)?;
+    if input.photo_paths.len() as i64 > MAX_PHOTOS { return Err(format!("Massimo {MAX_PHOTOS} fotografie per collezionista")); }
+    let load = |path: &String| -> Result<(Vec<u8>, &'static str), String> {
+        let bytes = read_image_file(path)?;
+        let (extension, _) = image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
+        Ok((bytes, extension))
+    };
+    let profile = input.profile_path.as_ref().map(load).transpose()?;
+    let photos = input.photo_paths.iter().map(load).collect::<Result<Vec<_>, _>>()?;
+    let mut written: Vec<std::path::PathBuf> = Vec::new();
+    let outcome = (|| -> Result<Collector, String> {
+        let mut conn = db.conn.lock().map_err(err)?;
+        let tx = conn.transaction().map_err(err)?;
+        let id = Uuid::new_v4().to_string();
+        let stamp = now();
+        insert(&tx, &id, &fields, &stamp)?;
+        let entries = profile.iter().map(|p| ("PROFILE", p)).chain(photos.iter().map(|p| ("PHOTO", p)));
+        for (kind, (bytes, extension)) in entries {
+            let relative = store_media(&db.directory, bytes, extension)?;
+            written.push(db.directory.join(&relative));
+            tx.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
+                params![Uuid::new_v4().to_string(), id, kind, relative, stamp]).map_err(err)?;
+        }
+        let saved = by_id(&tx, &id)?;
+        tx.commit().map_err(err)?;
+        Ok(saved)
+    })();
+    if outcome.is_err() {
+        for path in &written { let _ = fs::remove_file(path); }
+    }
+    outcome
+}
+
+fn image_row(r: &Row<'_>) -> rusqlite::Result<CollectorImage> {
+    Ok(CollectorImage { id: r.get(0)?, collector_id: r.get(1)?, kind: r.get(2)?, image_path: r.get(3)?, created_at: r.get(4)? })
+}
+const IMAGE_FIELDS: &str = "id,collector_id,kind,image_path,created_at";
+
+fn remove_media_file(db: &Database, relative: &str) {
+    if safe_relative(relative) { let _ = fs::remove_file(db.directory.join(relative)); }
+}
+
+/// Add a photograph. A new profile photograph replaces the previous one, whose file is
+/// removed only after the database change has been committed.
+fn add_image_core(db: &Database, collector_id: &str, source_path: &str, kind: &str) -> Result<CollectorImage, String> {
+    if !["PROFILE", "PHOTO"].contains(&kind) { return Err("Tipo di fotografia non valido".into()); }
+    let bytes = read_image_file(source_path)?;
+    let (extension, _) = image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)", params![collector_id], |r| r.get(0)).map_err(err)?;
+    if !exists { return Err("Collezionista non trovato".into()); }
+    let mut replaced: Option<String> = None;
+    if kind == "PROFILE" {
+        replaced = tx.query_row("SELECT image_path FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
+            params![collector_id], |r| r.get(0)).optional().map_err(err)?;
+        tx.execute("DELETE FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'", params![collector_id]).map_err(err)?;
+    } else {
+        let count: i64 = tx.query_row("SELECT count(*) FROM collector_images WHERE collector_id=?1 AND kind='PHOTO'",
+            params![collector_id], |r| r.get(0)).map_err(err)?;
+        if count >= MAX_PHOTOS { return Err(format!("Massimo {MAX_PHOTOS} fotografie per collezionista")); }
+    }
+    let relative = store_media(&db.directory, &bytes, extension)?;
+    let id = Uuid::new_v4().to_string();
+    let inserted = tx.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
+        params![id, collector_id, kind, relative, now()]);
+    if let Err(e) = inserted {
+        let _ = fs::remove_file(db.directory.join(&relative));
+        return Err(err(e));
+    }
+    let image = tx.query_row(&format!("SELECT {IMAGE_FIELDS} FROM collector_images WHERE id=?1"), params![id], image_row).map_err(err)?;
+    if let Err(e) = tx.commit() {
+        let _ = fs::remove_file(db.directory.join(&relative));
+        return Err(err(e));
+    }
+    if let Some(old) = replaced { remove_media_file(db, &old); }
+    Ok(image)
+}
+
+fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(err)?;
+    let path: String = conn.query_row("SELECT image_path FROM collector_images WHERE id=?1", params![image_id], |r| r.get(0))
+        .optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    conn.execute("DELETE FROM collector_images WHERE id=?1", params![image_id]).map_err(err)?;
+    remove_media_file(db, &path);
+    Ok(())
+}
+
+fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(err)?;
+    let paths: Vec<String> = {
+        let mut statement = conn.prepare("SELECT image_path FROM collector_images WHERE collector_id=?1").map_err(err)?;
+        let paths = statement.query_map(params![id], |r| r.get(0)).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
+        paths
+    };
+    let affected = conn.execute("DELETE FROM collectors WHERE id=?1", params![id])
+        .map_err(|_| "Non puoi eliminare un collezionista collegato a una vendita".to_string())?;
+    if affected == 0 { return Err("Collezionista non trovato".into()); }
+    for path in paths { remove_media_file(db, &path); }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn list_collectors(db: State<'_, Database>) -> Result<Vec<Collector>, String> {
+    let conn = db.conn.lock().map_err(err)?;
+    let mut statement = conn.prepare(&format!("SELECT {FIELDS} FROM collectors c ORDER BY c.name COLLATE NOCASE")).map_err(err)?;
+    let items = statement.query_map([], collector_row).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
+    Ok(items)
+}
+#[tauri::command]
+pub fn save_collector(db: State<'_, Database>, input: CollectorInput) -> Result<Collector, String> {
+    save_collector_core(&db, input)
+}
+#[tauri::command]
+pub fn create_collector_full(db: State<'_, Database>, input: NewCollectorInput) -> Result<Collector, String> {
+    create_collector_full_core(&db, input)
+}
+#[tauri::command]
+pub fn delete_collector(db: State<'_, Database>, id: String) -> Result<(), String> {
+    delete_collector_core(&db, &id)
+}
+#[tauri::command]
+pub fn list_collector_images(db: State<'_, Database>, collector_id: String) -> Result<Vec<CollectorImage>, String> {
+    let conn = db.conn.lock().map_err(err)?;
+    let mut statement = conn.prepare(&format!(
+        "SELECT {IMAGE_FIELDS} FROM collector_images WHERE collector_id=?1 ORDER BY (kind='PROFILE') DESC,created_at,id")).map_err(err)?;
+    let items = statement.query_map(params![collector_id], image_row).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
+    Ok(items)
+}
+#[tauri::command]
+pub fn add_collector_image_from_path(db: State<'_, Database>, collector_id: String, source_path: String, kind: String) -> Result<CollectorImage, String> {
+    add_image_core(&db, &collector_id, &source_path, &kind)
+}
+#[tauri::command]
+pub fn collector_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
+    // Held while reading so the file cannot be replaced or removed halfway.
+    let conn = db.conn.lock().map_err(err)?;
+    let path: String = conn.query_row("SELECT image_path FROM collector_images WHERE id=?1", params![image_id], |r| r.get(0))
+        .optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    if !safe_relative(&path) { return Err("Percorso media non valido".into()); }
+    let bytes = fs::read(db.directory.join(path)).map_err(err)?;
+    let (_, mime) = image_type(&bytes).ok_or("Formato file non valido")?;
+    Ok(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
+}
+#[tauri::command]
+pub fn delete_collector_image(db: State<'_, Database>, image_id: String) -> Result<(), String> {
+    delete_image_core(&db, &image_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> (tempfile::TempDir, Database) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("archive")).unwrap();
+        (dir, db)
+    }
+    fn input(first: &str) -> CollectorInput {
+        CollectorInput {
+            id: None, first_name: first.into(), last_name: None, email: None, phone: None, address: None,
+            notes: None, birth_date: None, birth_time: None, birth_place: None, instagram: None,
+            facebook: None, tiktok: None, website: None, linkedin: None,
+        }
+    }
+    fn picture(dir: &std::path::Path, name: &str, marker: u8) -> String {
+        let path = dir.join(name);
+        fs::write(&path, [0xff, 0xd8, 0xff, marker]).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+    fn media_count(db: &Database) -> usize { fs::read_dir(db.directory.join("media")).unwrap().count() }
+
+    #[test]
+    fn all_archive_fields_round_trip_and_the_display_name_combines_first_and_last_name() {
+        let (_dir, db) = setup();
+        let mut full = input("  Anna ");
+        full.last_name = Some("Rossi".into());
+        full.email = Some("anna@example.org".into());
+        full.phone = Some("+39 333 1112223".into());
+        full.address = Some("Via Roma 1\n20100 Milano".into());
+        full.notes = Some("Collezionista di acquerelli".into());
+        full.birth_date = Some("1980-04-23".into());
+        full.birth_time = Some("07:45".into());
+        full.birth_place = Some("Torino".into());
+        full.instagram = Some("@annarossi".into());
+        full.facebook = Some("facebook.com/anna".into());
+        full.tiktok = Some("@anna".into());
+        full.website = Some("https://anna.example".into());
+        full.linkedin = Some("linkedin.com/in/anna".into());
+        let saved = save_collector_core(&db, full).unwrap();
+        assert_eq!((saved.name.as_str(), saved.first_name.as_str(), saved.last_name.as_deref()), ("Anna Rossi", "Anna", Some("Rossi")));
+        assert_eq!((saved.birth_date.as_deref(), saved.birth_time.as_deref(), saved.instagram.as_deref()),
+            (Some("1980-04-23"), Some("07:45"), Some("@annarossi")));
+        assert_eq!((saved.photo_count, saved.profile_image_id), (0, None));
+        let mut edit = input("Anna Maria");
+        edit.id = Some(saved.id.clone());
+        let edited = save_collector_core(&db, edit).unwrap();
+        assert_eq!((edited.name.as_str(), edited.last_name, edited.email, edited.birth_date), ("Anna Maria", None, None, None));
+    }
+
+    #[test]
+    fn invalid_values_are_rejected_and_stale_edits_never_recreate_a_record() {
+        let (_dir, db) = setup();
+        assert!(save_collector_core(&db, input("  ")).unwrap_err().contains("Nome"));
+        let mut bad = input("Anna");
+        bad.email = Some("non un'email".into());
+        assert!(save_collector_core(&db, bad).unwrap_err().contains("email"));
+        for date in ["1980-4-23", "1980-02-30", "23/04/1980"] {
+            let mut bad = input("Anna");
+            bad.birth_date = Some(date.into());
+            assert!(save_collector_core(&db, bad).unwrap_err().contains("Data di nascita"), "{date}");
+        }
+        for time in ["7:45", "25:00", "07:45:10", "mattina"] {
+            let mut bad = input("Anna");
+            bad.birth_time = Some(time.into());
+            assert!(save_collector_core(&db, bad).unwrap_err().contains("Ora di nascita"), "{time}");
+        }
+        let mut stale = input("Fantasma");
+        stale.id = Some("inesistente".into());
+        assert!(save_collector_core(&db, stale).unwrap_err().contains("non trovato"));
+        let count: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collectors", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn profile_and_other_photographs_are_stored_replaced_and_deleted_safely() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        let first = add_image_core(&db, &collector.id, &picture(dir.path(), "p1.jpg", 1), "PROFILE").unwrap();
+        let photo = add_image_core(&db, &collector.id, &picture(dir.path(), "f1.jpg", 2), "PHOTO").unwrap();
+        assert_eq!(media_count(&db), 2);
+        let second = add_image_core(&db, &collector.id, &picture(dir.path(), "p2.jpg", 3), "PROFILE").unwrap();
+        assert_eq!(media_count(&db), 2, "the replaced profile photograph file is removed");
+        assert!(!db.directory.join(&first.image_path).exists());
+        let listed = by_id(&db.conn.lock().unwrap(), &collector.id).unwrap();
+        assert_eq!((listed.profile_image_id.as_deref(), listed.photo_count), (Some(second.id.as_str()), 2));
+        delete_image_core(&db, &photo.id).unwrap();
+        assert_eq!(media_count(&db), 1);
+        assert!(add_image_core(&db, &collector.id, &picture(dir.path(), "x.jpg", 4), "BANNER").is_err());
+        let text = dir.path().join("note.jpg");
+        fs::write(&text, b"not an image").unwrap();
+        assert!(add_image_core(&db, &collector.id, text.to_str().unwrap(), "PHOTO").is_err());
+        assert!(add_image_core(&db, "inesistente", &picture(dir.path(), "y.jpg", 5), "PHOTO").is_err());
+        assert_eq!(media_count(&db), 1, "rejected photographs leave no files behind");
+    }
+
+    #[test]
+    fn photographs_are_capped_and_deleting_a_collector_removes_its_files_but_not_when_sold_to() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        for i in 0..MAX_PHOTOS {
+            add_image_core(&db, &collector.id, &picture(dir.path(), &format!("f{i}.jpg"), i as u8), "PHOTO").unwrap();
+        }
+        assert!(add_image_core(&db, &collector.id, &picture(dir.path(), "extra.jpg", 99), "PHOTO").unwrap_err().contains("Massimo"));
+        // A collector linked to a sale cannot be deleted and keeps every photograph.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES('a','A-1','T','sold','t','t')", []).unwrap();
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s','a',?1,100,'2026-11-21','t')", params![collector.id]).unwrap();
+        }
+        assert!(delete_collector_core(&db, &collector.id).unwrap_err().contains("vendita"));
+        assert_eq!(media_count(&db), MAX_PHOTOS as usize);
+        db.conn.lock().unwrap().execute("DELETE FROM sales", []).unwrap();
+        delete_collector_core(&db, &collector.id).unwrap();
+        assert_eq!(media_count(&db), 0);
+        let rows: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collector_images", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn creating_with_photographs_is_atomic() {
+        let (dir, db) = setup();
+        let mut ok = input("Anna");
+        ok.last_name = Some("Rossi".into());
+        let saved = create_collector_full_core(&db, NewCollectorInput {
+            collector: ok, profile_path: Some(picture(dir.path(), "p.jpg", 1)),
+            photo_paths: vec![picture(dir.path(), "a.jpg", 2), picture(dir.path(), "b.jpg", 3)],
+        }).unwrap();
+        assert_eq!((saved.name.as_str(), saved.photo_count), ("Anna Rossi", 3));
+        assert!(saved.profile_image_id.is_some());
+        assert_eq!(media_count(&db), 3);
+        // Invalid input leaves nothing behind.
+        let text = dir.path().join("t.jpg");
+        fs::write(&text, b"not an image").unwrap();
+        for bad in [
+            NewCollectorInput { collector: input(""), profile_path: Some(picture(dir.path(), "q.jpg", 4)), photo_paths: vec![] },
+            NewCollectorInput { collector: input("Luca"), profile_path: None, photo_paths: vec![text.to_string_lossy().into_owned()] },
+        ] {
+            assert!(create_collector_full_core(&db, bad).is_err());
+        }
+        let count: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collectors", [], |r| r.get(0)).unwrap();
+        assert_eq!((count, media_count(&db)), (1, 3));
+    }
+
+    #[test]
+    fn migrated_legacy_collectors_keep_their_name_and_are_listed() {
+        let (_dir, db) = setup();
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('old','Mario Bianchi','t','t')", []).unwrap();
+        }
+        let listed = by_id(&db.conn.lock().unwrap(), "old").unwrap();
+        assert_eq!((listed.name.as_str(), listed.first_name.as_str()), ("Mario Bianchi", "Mario Bianchi"));
+    }
+}

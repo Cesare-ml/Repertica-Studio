@@ -14,7 +14,7 @@ use std::{
 use tauri::State;
 
 /// Schema written by this version of the app (`PRAGMA user_version`).
-const SUPPORTED_SCHEMA: i64 = 6;
+const SUPPORTED_SCHEMA: i64 = crate::db::SCHEMA_VERSION;
 const PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const APP_DIRECTORY: &str = "it.repertica.studio";
 const INSTRUCTIONS: &str = "Archivio locale di Repertica Studio in SOLA LETTURA: opere, collezionisti, \
@@ -174,7 +174,7 @@ fn search_artworks(archive: &Archive, args: &Value) -> Result<Value, String> {
     let limit = limit_arg(args, 20, 50)?;
     let mut statement = sql(archive.conn.prepare(
         "SELECT a.id,a.code,a.title,a.year,a.technique,a.support,a.width_cm,a.height_cm,a.depth_cm,
-                a.description,a.location,a.status,a.updated_at,
+                a.description,a.status,a.updated_at,
                 (SELECT c.name FROM sales s JOIN collectors c ON c.id=s.collector_id WHERE s.artwork_id=a.id)
          FROM artworks a ORDER BY a.updated_at DESC, a.title COLLATE NOCASE",
     ))?;
@@ -183,19 +183,19 @@ fn search_artworks(archive: &Archive, args: &Value) -> Result<Value, String> {
             r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
             r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?,
             [r.get::<_, Option<f64>>(6)?, r.get::<_, Option<f64>>(7)?, r.get::<_, Option<f64>>(8)?],
-            r.get::<_, Option<String>>(9)?, r.get::<_, Option<String>>(10)?, r.get::<_, String>(11)?,
-            r.get::<_, String>(12)?, r.get::<_, Option<String>>(13)?,
+            r.get::<_, Option<String>>(9)?, r.get::<_, String>(10)?,
+            r.get::<_, String>(11)?, r.get::<_, Option<String>>(12)?,
         ))
     }))?;
     let (mut total, mut items) = (0_usize, Vec::new());
     for row in rows {
-        let (id, code, title, year, technique, support, size, description, location, state, updated, buyer) = sql(row)?;
+        let (id, code, title, year, technique, support, size, description, state, updated, buyer) = sql(row)?;
         if status.is_some_and(|s| s != state) {
             continue;
         }
         let haystack = [
             Some(code.as_str()), Some(title.as_str()), year.as_deref(), technique.as_deref(),
-            support.as_deref(), description.as_deref(), location.as_deref(), buyer.as_deref(),
+            support.as_deref(), description.as_deref(), buyer.as_deref(),
         ]
         .into_iter().flatten().collect::<Vec<_>>().join("\n");
         if !matches_all(&haystack, &terms) {
@@ -206,7 +206,7 @@ fn search_artworks(archive: &Archive, args: &Value) -> Result<Value, String> {
             items.push(json!({
                 "id": id, "code": code, "title": title, "year": year, "technique": technique,
                 "support": support, "height_cm": size[1], "width_cm": size[0], "depth_cm": size[2],
-                "status": state, "location": location, "buyer": buyer,
+                "status": state, "buyer": buyer,
                 "description_excerpt": excerpt(&description, 300), "updated_at": updated
             }));
         }
@@ -219,7 +219,7 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
         .ok_or("Indica id oppure code dell'opera")?;
     let c = &archive.conn;
     let found = c.query_row(
-        "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,
+        "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,status,
                 image_path IS NOT NULL,created_at,updated_at
          FROM artworks WHERE id=?1 OR code=?1 COLLATE NOCASE",
         params![key],
@@ -228,12 +228,12 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
                 r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
                 r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?, r.get::<_, Option<String>>(5)?,
                 [r.get::<_, Option<f64>>(6)?, r.get::<_, Option<f64>>(7)?, r.get::<_, Option<f64>>(8)?],
-                r.get::<_, Option<String>>(9)?, r.get::<_, Option<String>>(10)?, r.get::<_, String>(11)?,
-                r.get::<_, bool>(12)?, r.get::<_, String>(13)?, r.get::<_, String>(14)?,
+                r.get::<_, Option<String>>(9)?, r.get::<_, String>(10)?,
+                r.get::<_, bool>(11)?, r.get::<_, String>(12)?, r.get::<_, String>(13)?,
             ))
         },
     );
-    let (id, code, title, year, technique, support, size, description, location, status, has_cover, created, updated) =
+    let (id, code, title, year, technique, support, size, description, status, has_cover, created, updated) =
         match found {
             Ok(v) => v,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Err("Opera non trovata".into()),
@@ -266,7 +266,7 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
     Ok(json!({
         "id": id, "code": code, "title": title, "year": year, "technique": technique, "support": support,
         "height_cm": size[1], "width_cm": size[0], "depth_cm": size[2],
-        "description": excerpt(&description, 8000), "location": location, "status": status,
+        "description": excerpt(&description, 8000), "status": status,
         "has_cover_photo": has_cover, "gallery_photo_count": gallery,
         "sale": sale, "certificates": certificates, "created_at": created, "updated_at": updated
     }))
@@ -370,7 +370,7 @@ fn tool_definitions() -> Value {
          "description": "Conteggi di opere (per stato), collezionisti, vendite e certificati, con totali venduto, incassato e da incassare.",
          "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}, "annotations": read_only},
         {"name": "search_artworks", "title": "Cerca opere",
-         "description": "Cerca opere per parole (senza distinguere maiuscole e accenti) in codice, titolo, anno, tecnica, supporto, descrizione, ubicazione e acquirente. Le frasi tra virgolette devono comparire come parole consecutive.",
+         "description": "Cerca opere per parole (senza distinguere maiuscole e accenti) in codice, titolo, anno, tecnica, supporto, descrizione e acquirente. Le frasi tra virgolette devono comparire come parole consecutive.",
          "inputSchema": {"type": "object", "properties": {
             "query": {"type": "string", "description": "Parole o \"frasi\" da cercare; vuoto = tutte le opere"},
             "status": {"type": "string", "enum": ["available", "reserved", "sold", "archived"]},

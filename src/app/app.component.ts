@@ -8,23 +8,25 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
 import { csvRegisterOptions, type CsvRegisterKind } from './csv-registers';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
-import type { ArtworkOrder } from './archive-filters';
+import type { ArtworkOrder, CollectorFilter } from './archive-filters';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
-  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup
+  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, CollectorImage
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
-  code: '', title: '', year: null, technique: null, support: null,
+  code: null, title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
   location: null, status: 'available'
 });
 const freshCollector = (): CollectorInput => ({
-  name: '', email: null, phone: null, address: null, notes: null
+  first_name: '', last_name: null, email: null, phone: null, address: null, notes: null,
+  birth_date: null, birth_time: null, birth_place: null,
+  instagram: null, facebook: null, tiktok: null, website: null, linkedin: null
 });
 const today = () => new Date().toLocaleDateString('sv-SE');
 const statusLabels: Record<ArtworkStatus, string> = {
@@ -134,6 +136,7 @@ export class AppComponent implements OnInit {
   showGuide = false;
   private readonly guideKey = 'repertica-first-run-guide';
   mcpSetup: McpSetup | null = null;
+  mcpClient: McpClientStatus | null = null;
 
   thumbnails: Record<string, string> = {};
   galleryArtwork: Artwork | null = null;
@@ -147,7 +150,19 @@ export class AppComponent implements OnInit {
   saleDialog = false;
   certificateDialog = false;
   artworkDraft: ArtworkInput = freshArtwork();
+  nextCode = '';
+  newCoverPath: string | null = null;
+  newGalleryPaths: string[] = [];
+  withSale = false;
+  newSaleDraft = this.freshNewSale();
+  codePolicy: CodePolicy = { prefix: 'ART', scope: 'GLOBAL', padding: 4, separator: '-' };
   collectorDraft: CollectorInput = freshCollector();
+  collectorFilter: CollectorFilter = 'all';
+  collectorThumbs: Record<string, string> = {};
+  collectorImages: CollectorImage[] = [];
+  collectorPreviews: Record<string, string> = {};
+  newCollectorProfile: string | null = null;
+  newCollectorPhotos: string[] = [];
   saleDraft = { artwork_id: '', collector_id: '', amount_eur: null as number | null,
     taxes_eur: 0, shipping_eur: 0, sold_at: today(), notes: null as string | null };
   certificateDraft: CertificateInput = { artwork_id: '', artist_name: '', collector_name: null, notes: null };
@@ -180,6 +195,7 @@ export class AppComponent implements OnInit {
       this.applyLanguage(chooseLanguage(stored.ui_language ?? system ?? navigator.language));
       this.initialized = true;
       this.showGuide = !this.guideDismissed();
+      try { this.codePolicy = await api.getArchiveCodePolicy(); } catch { /* keep defaults */ }
       await this.refresh();
     } catch (error) {
       this.errorMessage = this.error(error);
@@ -197,7 +213,7 @@ export class AppComponent implements OnInit {
       this.artworkOrder = 'recent';
     }
     if (section === 'collectors') this.expandedCollectorId = null;
-    if (section === 'settings' && this.initialized && !this.mcpSetup) void this.loadMcpSetup();
+    if (section === 'settings' && this.initialized) void this.loadMcpSetup();
   }
   private guideDismissed(): boolean {
     try { return localStorage.getItem(this.guideKey) === 'done'; } catch { return false; }
@@ -213,11 +229,24 @@ export class AppComponent implements OnInit {
   }
   async loadMcpSetup(): Promise<void> {
     try {
-      this.mcpSetup = await api.mcpSetupInfo();
+      [this.mcpSetup, this.mcpClient] = await Promise.all([api.mcpSetupInfo(), api.mcpClientStatus()]);
     } catch (error) {
       this.errorMessage = this.error(error);
     }
     this.change.detectChanges();
+  }
+  async connectClaude(): Promise<void> {
+    const client = this.mcpClient;
+    if (!client || this.busy) return;
+    if (!window.confirm(this.tr('Verrà aggiunto Repertica Studio alla configurazione di Claude Desktop. Il file modificato è:') + '\n\n' + client.configPath +
+        '\n\n' + this.tr('Una copia del file originale viene conservata accanto ad esso. Continuare?'))) return;
+    await this.run(async () => { this.mcpClient = await api.mcpClientConfigure(); },
+      this.tr('Collegamento completato: riavvia Claude Desktop'));
+  }
+  async disconnectClaude(): Promise<void> {
+    if (!this.mcpClient || this.busy) return;
+    await this.run(async () => { this.mcpClient = await api.mcpClientRemove(); },
+      this.tr('Collegamento rimosso: riavvia Claude Desktop'));
   }
   get mcpConfigJson(): string {
     const setup = this.mcpSetup;
@@ -246,7 +275,7 @@ export class AppComponent implements OnInit {
   }
   get visibleCollectors(): Collector[] {
     return filterCollectors(this.collectors, this.search,
-      { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork });
+      { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork }, this.collectorFilter);
   }
   showCollectorArtworks(collectorId: string): void {
     this.navigate('artworks');
@@ -306,6 +335,11 @@ export class AppComponent implements OnInit {
           const image = await api.artworkImage(a.id);
           if (image) this.thumbnails[a.id] = image;
         } catch { /* a missing local image must not hide the archive */ }
+      }));
+      const profiles = this.collectors.filter(c => c.profile_image_id && !this.collectorThumbs[c.profile_image_id]).slice(0, 60);
+      await Promise.all(profiles.map(async c => {
+        try { this.collectorThumbs[c.profile_image_id!] = await api.collectorImageData(c.profile_image_id!); }
+        catch { /* a missing photograph must not hide the list */ }
       }));
     } catch (error) {
       this.errorMessage = this.error(error);
@@ -511,7 +545,61 @@ export class AppComponent implements OnInit {
     }
     this.change.detectChanges();
   }
-  newArtwork(): void { this.estimateCents=null; this.artworkDraft = freshArtwork(); this.artworkDialog = true; }
+  private freshNewSale() {
+    return { collector_id: '', new_collector_name: null as string | null, amount_eur: null as number | null,
+      taxes_eur: 0, shipping_eur: 0, sold_at: today(), notes: null as string | null };
+  }
+  fileName(path: string): string { return path.split(/[\\/]/).pop() ?? path; }
+  async newArtwork(): Promise<void> {
+    this.estimateCents = null; this.artworkDraft = freshArtwork();
+    this.newCoverPath = null; this.newGalleryPaths = []; this.withSale = false;
+    this.newSaleDraft = this.freshNewSale(); this.nextCode = '';
+    this.artworkDialog = true;
+    await this.refreshNextCode();
+  }
+  async refreshNextCode(): Promise<void> {
+    if (this.artworkDraft.id || !this.initialized) return;
+    try { this.nextCode = await api.nextArchiveCode(this.artworkDraft.year); } catch { this.nextCode = ''; }
+    this.change.detectChanges();
+  }
+  async pickCover(): Promise<void> {
+    try {
+      const path = await this.pickPhoto(this.tr('Scegli copertina…'));
+      if (path) this.newCoverPath = path;
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async pickGalleryPhotos(): Promise<void> {
+    try {
+      const selected = await open({ directory: false, multiple: true, title: this.tr('Aggiungi fotografie…'),
+        filters: [{ name: 'JPEG / PNG / WebP', extensions: ['jpg', 'jpeg', 'png', 'webp'] }] });
+      const paths = Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [];
+      this.newGalleryPaths = [...new Set([...this.newGalleryPaths, ...paths])].slice(0, 20);
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  removeNewGalleryPhoto(index: number): void { this.newGalleryPaths = this.newGalleryPaths.filter((_, i) => i !== index); }
+  onWithSaleChange(): void {
+    if (this.withSale && !this.newSaleDraft.collector_id) {
+      this.newSaleDraft.collector_id = this.collectors.length ? '' : '__new__';
+    }
+  }
+  recalculateNewSaleTax(): void {
+    const amount = this.newSaleDraft.amount_eur;
+    if (amount === null || !Number.isFinite(amount) || amount < 0) return;
+    this.newSaleDraft.taxes_eur = Math.round(amount * this.defaultTaxPercent) / 100;
+  }
+  get codeExample(): string {
+    const p = this.codePolicy;
+    const number = '1'.padStart(Math.min(8, Math.max(2, Number(p.padding) || 4)), '0');
+    const prefix = (p.prefix || 'ART').toUpperCase();
+    return p.scope === 'YEARLY' ? [prefix, new Date().getFullYear(), number].join(p.separator) : [prefix, number].join(p.separator);
+  }
+  async saveCodePolicy(): Promise<void> {
+    await this.run(async () => {
+      this.codePolicy = await api.saveArchiveCodePolicy({ ...this.codePolicy, padding: Number(this.codePolicy.padding) });
+    }, this.tr('Codice archivio salvato'));
+  }
   editArtwork(a: Artwork): void {
     this.estimateCents=null;
     this.artworkDraft = {
@@ -522,7 +610,39 @@ export class AppComponent implements OnInit {
     this.artworkDialog = true;
   }
   async saveArtwork(): Promise<void> {
-    if (await this.run(() => api.saveArtwork(this.artworkDraft), 'Opera salvata nell’archivio locale')) this.artworkDialog = false;
+    if (this.artworkDraft.id) {
+      if (await this.run(() => api.saveArtwork(this.artworkDraft), this.tr('Opera salvata'))) this.artworkDialog = false;
+      return;
+    }
+    let sale: NewArtworkInput['sale'] = null;
+    if (this.withSale) {
+      const draft = this.newSaleDraft;
+      const amount = draft.amount_eur;
+      const newCollector = draft.collector_id === '__new__';
+      if (amount === null || !Number.isFinite(amount) || amount <= 0 || Math.round(amount * 100) > 100_000_000_000) {
+        this.errorMessage = this.tr('Inserisci un importo maggiore di zero'); return;
+      }
+      if (!draft.collector_id || (newCollector && !(draft.new_collector_name ?? '').trim())) {
+        this.errorMessage = this.tr('Scegli un collezionista o inserisci il nome del nuovo'); return;
+      }
+      const tax = Math.round(draft.taxes_eur * 100);
+      const shipping = Math.round(draft.shipping_eur * 100);
+      if (![tax, shipping].every(v => Number.isFinite(v) && v >= 0) || tax + shipping > Math.round(amount * 100)) {
+        this.errorMessage = this.tr('Importo tasse (€)') + ' / ' + this.tr('Spese spedizione (€)'); return;
+      }
+      sale = {
+        collector_id: newCollector ? null : draft.collector_id,
+        new_collector_name: newCollector ? (draft.new_collector_name ?? '').trim() : null,
+        amount_cents: Math.round(amount * 100), sold_at: draft.sold_at, notes: draft.notes,
+        tax_cents: tax, shipping_cents: shipping
+      };
+    }
+    const { id: _unused, ...record } = this.artworkDraft;
+    const input: NewArtworkInput = {
+      artwork: { ...record, code: null, status: this.withSale ? 'sold' : record.status },
+      cover_path: this.newCoverPath, gallery_paths: this.newGalleryPaths, sale
+    };
+    if (await this.run(() => api.createArtworkFull(input), this.tr('Opera salvata'))) this.artworkDialog = false;
   }
   async deleteArtwork(a: Artwork): Promise<void> {
     if (!window.confirm(`Eliminare definitivamente l'opera "${a.title}"? Questa operazione non è reversibile.`)) return;
@@ -661,13 +781,103 @@ export class AppComponent implements OnInit {
       this.change.detectChanges();
     }
   }
-  newCollector(): void { this.collectorDraft = freshCollector(); this.collectorDialog = true; }
-  editCollector(c: Collector): void {
-    this.collectorDraft = { id: c.id, name: c.name, email: c.email, phone: c.phone, address: c.address, notes: c.notes };
+  initials(c: Collector): string {
+    return ((c.first_name.slice(0, 1) + (c.last_name ?? '').slice(0, 1)) || c.name.slice(0, 1)).toUpperCase();
+  }
+  get profileImage(): CollectorImage | null { return this.collectorImages.find(i => i.kind === 'PROFILE') ?? null; }
+  get profilePreview(): string { const p = this.profileImage; return p ? (this.collectorPreviews[p.id] ?? '') : ''; }
+  get otherCollectorImages(): CollectorImage[] { return this.collectorImages.filter(i => i.kind === 'PHOTO'); }
+  newCollector(): void {
+    this.collectorDraft = freshCollector();
+    this.collectorImages = []; this.collectorPreviews = {};
+    this.newCollectorProfile = null; this.newCollectorPhotos = [];
     this.collectorDialog = true;
   }
+  editCollector(c: Collector): void {
+    this.collectorDraft = {
+      id: c.id, first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone,
+      address: c.address, notes: c.notes, birth_date: c.birth_date, birth_time: c.birth_time,
+      birth_place: c.birth_place, instagram: c.instagram, facebook: c.facebook, tiktok: c.tiktok,
+      website: c.website, linkedin: c.linkedin
+    };
+    this.collectorImages = []; this.collectorPreviews = {};
+    this.collectorDialog = true;
+    void this.loadCollectorImages(c.id);
+  }
+  private async loadCollectorImages(collectorId: string): Promise<void> {
+    try {
+      const images = await api.listCollectorImages(collectorId);
+      if (this.collectorDraft.id !== collectorId) return;
+      this.collectorImages = images;
+      await Promise.all(images.map(async image => {
+        try { this.collectorPreviews[image.id] = await api.collectorImageData(image.id); }
+        catch { /* shown without a preview */ }
+      }));
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
   async saveCollector(): Promise<void> {
-    if (await this.run(() => api.saveCollector(this.collectorDraft), 'Collezionista salvato')) this.collectorDialog = false;
+    if (this.collectorDraft.id) {
+      if (await this.run(() => api.saveCollector(this.collectorDraft), this.tr('Collezionista salvato'))) this.collectorDialog = false;
+      return;
+    }
+    const { id: _unused, ...record } = this.collectorDraft;
+    if (await this.run(() => api.createCollectorFull({
+      collector: record, profile_path: this.newCollectorProfile, photo_paths: this.newCollectorPhotos
+    }), this.tr('Collezionista salvato'))) this.collectorDialog = false;
+  }
+  async pickCollectorProfile(): Promise<void> {
+    try {
+      const path = await this.pickPhoto(this.tr('Scegli foto profilo…'));
+      if (path) this.newCollectorProfile = path;
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  private async pickPhotos(title: string): Promise<string[]> {
+    const selected = await open({ directory: false, multiple: true, title,
+      filters: [{ name: 'JPEG / PNG / WebP', extensions: ['jpg', 'jpeg', 'png', 'webp'] }] });
+    return Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [];
+  }
+  async pickCollectorPhotos(): Promise<void> {
+    try {
+      const paths = await this.pickPhotos(this.tr('Aggiungi fotografie…'));
+      this.newCollectorPhotos = [...new Set([...this.newCollectorPhotos, ...paths])].slice(0, 20);
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  removeNewCollectorPhoto(index: number): void { this.newCollectorPhotos = this.newCollectorPhotos.filter((_, i) => i !== index); }
+  async setCollectorProfile(): Promise<void> {
+    const id = this.collectorDraft.id;
+    if (!id || this.busy) return;
+    try {
+      const path = await this.pickPhoto(this.tr('Scegli foto profilo…'));
+      if (!path) return;
+      if (await this.run(() => api.addCollectorImageFromPath(id, path, 'PROFILE'), this.tr('Foto profilo salvata'))) {
+        await this.loadCollectorImages(id);
+      }
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async addCollectorPhotos(): Promise<void> {
+    const id = this.collectorDraft.id;
+    if (!id || this.busy) return;
+    try {
+      const paths = (await this.pickPhotos(this.tr('Aggiungi fotografie…'))).slice(0, 20 - this.otherCollectorImages.length);
+      if (!paths.length) return;
+      if (await this.run(async () => { for (const path of paths) await api.addCollectorImageFromPath(id, path, 'PHOTO'); },
+        this.tr('Fotografie aggiunte'))) {
+        await this.loadCollectorImages(id);
+      }
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async deleteCollectorImage(image: CollectorImage): Promise<void> {
+    if (!window.confirm(this.tr('Eliminare questa fotografia aggiuntiva?'))) return;
+    const id = this.collectorDraft.id;
+    if (await this.run(() => api.deleteCollectorImage(image.id), this.tr('Fotografia eliminata')) && id) {
+      delete this.collectorPreviews[image.id];
+      await this.loadCollectorImages(id);
+    }
   }
   async deleteCollector(c: Collector): Promise<void> {
     if (!window.confirm(`Eliminare il contatto "${c.name}"?`)) return;

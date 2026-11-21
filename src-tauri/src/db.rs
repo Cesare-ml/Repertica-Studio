@@ -1,6 +1,9 @@
 use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
+/// Version written by this build (`PRAGMA user_version`).
+pub const SCHEMA_VERSION: i64 = 9;
+
 pub struct Database {
     pub conn: Mutex<Connection>,
     pub directory: PathBuf,
@@ -12,7 +15,7 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     let conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 6 {
+    if version > SCHEMA_VERSION {
         return Err(format!("Archivio creato da una versione più recente (schema {version})").into());
     }
     if version == 0 {
@@ -215,6 +218,121 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;"
         )?;
     }
+    if version < 7 {
+        // Automatic archive codes: one policy row and a forward-only counter per prefix and scope.
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS archive_code_policy (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                prefix TEXT NOT NULL DEFAULT 'ART' CHECK(length(prefix) BETWEEN 1 AND 12 AND prefix NOT GLOB '*[^A-Z0-9]*'),
+                scope TEXT NOT NULL DEFAULT 'GLOBAL' CHECK(scope IN ('GLOBAL','YEARLY')),
+                padding INTEGER NOT NULL DEFAULT 4 CHECK(padding BETWEEN 2 AND 8),
+                separator TEXT NOT NULL DEFAULT '-' CHECK(separator IN ('-','.','_'))
+            );
+            INSERT OR IGNORE INTO archive_code_policy(singleton) VALUES(1);
+            CREATE TABLE IF NOT EXISTS archive_code_sequences (
+                scope_key TEXT PRIMARY KEY,
+                last_value INTEGER NOT NULL CHECK(last_value >= 0)
+            );
+            PRAGMA user_version=7;
+            COMMIT;"
+        )?;
+    }
+    if version < 8 {
+        // Richer collector records and their photographs (profile photo plus further photos).
+        let existing: Vec<String> = {
+            let mut statement = conn.prepare("SELECT name FROM pragma_table_info('collectors')")?;
+            let names = statement.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+            names
+        };
+        let mut script = String::from("BEGIN IMMEDIATE;");
+        for column in ["first_name", "last_name", "birth_date", "birth_time", "birth_place",
+                       "instagram", "facebook", "tiktok", "website", "linkedin"] {
+            if !existing.iter().any(|name| name == column) {
+                script.push_str(&format!("ALTER TABLE collectors ADD COLUMN {column} TEXT;"));
+            }
+        }
+        script.push_str(
+            "UPDATE collectors SET first_name=name WHERE first_name IS NULL;
+            CREATE TABLE IF NOT EXISTS collector_images (
+                id TEXT PRIMARY KEY,
+                collector_id TEXT NOT NULL REFERENCES collectors(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL CHECK(kind IN ('PROFILE','PHOTO')),
+                image_path TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_collector_profile_photo
+                ON collector_images(collector_id) WHERE kind='PROFILE';
+            CREATE INDEX IF NOT EXISTS idx_collector_images_owner
+                ON collector_images(collector_id, created_at, id);
+            PRAGMA user_version=8;
+            COMMIT;");
+        conn.execute_batch(&script)?;
+    }
+    if version < 9 {
+        // Configurable split of sale proceeds. The three historical shares become the three
+        // default parts and every existing sale keeps exactly the shares it was recorded with.
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS allocation_settings (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))
+            );
+            INSERT OR IGNORE INTO allocation_settings(singleton,enabled) VALUES(1,1);
+            CREATE TABLE IF NOT EXISTS allocation_parts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 60),
+                share_bp INTEGER NOT NULL CHECK(share_bp BETWEEN 0 AND 10000),
+                pays_expenses INTEGER NOT NULL DEFAULT 0 CHECK(pays_expenses IN (0,1)),
+                position INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1))
+            );
+            INSERT OR IGNORE INTO allocation_parts(id,name,share_bp,pays_expenses,position,active)
+                SELECT 'personal','Personale',personal_bp,0,1,1 FROM studio_settings WHERE singleton=1;
+            INSERT OR IGNORE INTO allocation_parts(id,name,share_bp,pays_expenses,position,active)
+                SELECT 'activity','Attività',activity_bp,1,2,1 FROM studio_settings WHERE singleton=1;
+            INSERT OR IGNORE INTO allocation_parts(id,name,share_bp,pays_expenses,position,active)
+                SELECT 'savings','Risparmio',savings_bp,1,3,1 FROM studio_settings WHERE singleton=1;
+            CREATE TABLE IF NOT EXISTS sale_allocations (
+                sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+                part_id TEXT NOT NULL REFERENCES allocation_parts(id) ON DELETE RESTRICT,
+                share_bp INTEGER NOT NULL CHECK(share_bp BETWEEN 0 AND 10000),
+                PRIMARY KEY(sale_id,part_id)
+            );
+            INSERT OR IGNORE INTO sale_allocations(sale_id,part_id,share_bp)
+                SELECT f.sale_id,'personal',f.personal_bp FROM sale_finances f
+                WHERE NOT EXISTS (SELECT 1 FROM sale_allocations a WHERE a.sale_id=f.sale_id);
+            INSERT OR IGNORE INTO sale_allocations(sale_id,part_id,share_bp)
+                SELECT f.sale_id,'activity',f.activity_bp FROM sale_finances f
+                WHERE NOT EXISTS (SELECT 1 FROM sale_allocations a WHERE a.sale_id=f.sale_id AND a.part_id='activity')
+                  AND EXISTS (SELECT 1 FROM sale_allocations a WHERE a.sale_id=f.sale_id AND a.part_id='personal');
+            INSERT OR IGNORE INTO sale_allocations(sale_id,part_id,share_bp)
+                SELECT f.sale_id,'savings',f.savings_bp FROM sale_finances f
+                WHERE NOT EXISTS (SELECT 1 FROM sale_allocations a WHERE a.sale_id=f.sale_id AND a.part_id='savings')
+                  AND EXISTS (SELECT 1 FROM sale_allocations a WHERE a.sale_id=f.sale_id AND a.part_id='personal');
+            CREATE TABLE IF NOT EXISTS expenses_v9 (
+                id TEXT PRIMARY KEY,
+                expense_date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+                fund TEXT REFERENCES allocation_parts(id) ON DELETE RESTRICT,
+                supplier TEXT,
+                purchase_url TEXT,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT OR IGNORE INTO expenses_v9(id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at)
+                SELECT id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at FROM expenses;
+            DROP TABLE expenses;
+            ALTER TABLE expenses_v9 RENAME TO expenses;
+            CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+            CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
+            PRAGMA user_version=9;
+            COMMIT;"
+        )?;
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -234,7 +352,7 @@ mod tests {
         {
             let c = db.conn.lock().unwrap();
             let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-            assert_eq!(v, 6);
+            assert_eq!(v, SCHEMA_VERSION);
             c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('x','Test','a','a')",[]).unwrap();
         }
         drop(db);
@@ -300,7 +418,7 @@ mod tests {
         let migrated = open(dir.path().into()).unwrap();
         let c = migrated.conn.lock().unwrap();
         let v: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(v,6);
+        assert_eq!(v,SCHEMA_VERSION);
         let n: i64 = c.query_row("SELECT count(*) FROM sale_finances WHERE sale_id='s'",[],|r|r.get(0)).unwrap();
         assert_eq!(n,1);
     }
@@ -328,7 +446,7 @@ mod tests {
         let upgraded = open(temp.path().into()).unwrap();
         let conn = upgraded.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(version,6);
+        assert_eq!(version,SCHEMA_VERSION);
         let image: String = conn.query_row("SELECT image_path FROM artworks WHERE id='a'",[],|r|r.get(0)).unwrap();
         assert_eq!(image,"media/primary.jpg");
         assert!(conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
@@ -371,7 +489,7 @@ mod tests {
             ("z".into(),3,"media/z.png".into())]);
         assert_eq!(c.query_row("SELECT sort_order FROM artwork_images WHERE id='other'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         let version: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(version,6);
+        assert_eq!(version,SCHEMA_VERSION);
     }
     #[test]
     fn v5_to_v6_adds_empty_attachment_table_without_changing_receipts() {
@@ -393,7 +511,7 @@ mod tests {
         let upgraded = open(temp.path().into()).unwrap();
         let c = upgraded.conn.lock().unwrap();
         let version:i64 = c.pragma_query_value(None, "user_version", |r|r.get(0)).unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, SCHEMA_VERSION);
         let paid:i64 = c.query_row("SELECT amount_cents FROM sale_receipts WHERE id='r'",[],|r|r.get(0)).unwrap();
         assert_eq!(paid, 400);
         let attachments:i64 = c.query_row("SELECT count(*) FROM sale_receipt_attachments",[],|r|r.get(0)).unwrap();
@@ -403,10 +521,38 @@ mod tests {
             rusqlite::params!["0".repeat(64)]).is_err());
     }
     #[test]
+    fn v7_to_v8_keeps_collector_names_and_adds_photo_storage() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = open(temp.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("INSERT INTO collectors(id,name,email,created_at,updated_at) VALUES('old','Mario Bianchi','m@example.org','t','t')", []).unwrap();
+            c.execute_batch("DROP TABLE collector_images;
+                DROP INDEX IF EXISTS idx_collector_profile_photo;
+                ALTER TABLE collectors DROP COLUMN first_name;
+                ALTER TABLE collectors DROP COLUMN last_name;
+                ALTER TABLE collectors DROP COLUMN linkedin;
+                PRAGMA user_version=7;").unwrap();
+        }
+        drop(db);
+        let upgraded = open(temp.path().into()).unwrap();
+        let c = upgraded.conn.lock().unwrap();
+        let (name, first, last, email): (String, String, Option<String>, String) = c.query_row(
+            "SELECT name,first_name,last_name,email FROM collectors WHERE id='old'", [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
+        assert_eq!((name.as_str(), first.as_str(), last, email.as_str()), ("Mario Bianchi", "Mario Bianchi", None, "m@example.org"));
+        let version: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        c.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES('i','old','PROFILE','media/a.jpg','t')", []).unwrap();
+        assert!(c.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES('j','old','PROFILE','media/b.jpg','t')", []).is_err(), "one profile photo per collector");
+        assert!(c.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES('k','old','BANNER','media/c.jpg','t')", []).is_err());
+        assert!(c.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES('l','nobody','PHOTO','media/d.jpg','t')", []).is_err());
+    }
+    #[test]
     fn newer_schema_is_not_downgraded() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
-        db.conn.lock().unwrap().pragma_update(None, "user_version", 7).unwrap();
+        db.conn.lock().unwrap().pragma_update(None, "user_version", SCHEMA_VERSION + 1).unwrap();
         drop(db);
         assert!(open(dir.path().into()).is_err());
     }
