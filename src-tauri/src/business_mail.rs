@@ -109,8 +109,9 @@ fn remove_key(id:&str,protocol:&str)->Result<(),String>{
 pub fn mail_list_accounts(db:State<'_,Database>)->Result<Vec<MailAccount>,String>{
     let conn=db.conn.lock().map_err(db_error)?;
     let mut stmt=conn.prepare("SELECT config_json FROM mail_accounts ORDER BY email COLLATE NOCASE").map_err(db_error)?;
-    stmt.query_map([],|r|r.get::<_,String>(0)).map_err(db_error)?
-        .map(|v|serde_json::from_str(&v.map_err(db_error)?).map_err(db_error)).collect()
+    let result=stmt.query_map([],|r|r.get::<_,String>(0)).map_err(db_error)?
+        .map(|v|serde_json::from_str(&v.map_err(db_error)?).map_err(db_error)).collect();
+    result
 }
 #[tauri::command]
 pub fn mail_save_account(db:State<'_,Database>,input:MailAccountInput)->Result<MailAccount,String>{
@@ -339,8 +340,9 @@ pub fn mail_list_drafts(db:State<'_,Database>,account_id:String)->Result<Vec<Mai
     let conn=db.conn.lock().map_err(db_error)?;
     let mut stmt=conn.prepare("SELECT payload_json FROM mail_drafts WHERE account_id=?1 ORDER BY updated_at DESC")
         .map_err(db_error)?;
-    stmt.query_map([account_id],|r|r.get::<_,String>(0)).map_err(db_error)?
-        .map(|s|serde_json::from_str(&s.map_err(db_error)?).map_err(db_error)).collect()
+    let result=stmt.query_map([account_id],|r|r.get::<_,String>(0)).map_err(db_error)?
+        .map(|s|serde_json::from_str(&s.map_err(db_error)?).map_err(db_error)).collect();
+    result
 }
 #[tauri::command]
 pub fn mail_save_draft(db:State<'_,Database>,input:MailDraftInput)->Result<MailDraft,String>{
