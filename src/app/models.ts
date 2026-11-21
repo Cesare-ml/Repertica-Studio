@@ -29,7 +29,7 @@ export interface GalleryImage {
 
 export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header';
 export interface MediaIssue {
-  artworkId: string; imageId: string | null; role: 'primary' | 'gallery';
+  artworkId: string; imageId: string | null; role: 'primary' | 'gallery' | 'certificate';
   path: string; problem: MediaProblem;
 }
 export interface MediaAudit {
