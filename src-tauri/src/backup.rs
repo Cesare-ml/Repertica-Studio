@@ -157,6 +157,20 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
         references.extend(gallery.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
             .collect::<Result<Vec<_>, _>>().map_err(error)?);
     }
+    // Certificates freeze the cover at issue time. After replacing the live
+    // cover, its historical file can be referenced only by this snapshot.
+    // Preserve backward compatibility with malformed legacy snapshots: their
+    // media references cannot be determined, so do not invent any.
+    let mut certificates = conn.prepare("SELECT snapshot_json FROM certificates").map_err(error)?;
+    let snapshots = certificates.query_map([], |r| r.get::<_, String>(0)).map_err(error)?;
+    for row in snapshots {
+        let json = row.map_err(error)?;
+        if let Ok(snapshot) = serde_json::from_str::<serde_json::Value>(&json) {
+            if let Some(image_path) = snapshot.get("image_path").and_then(|value| value.as_str()) {
+                references.push(image_path.to_string());
+            }
+        }
+    }
     Ok((schema, counts, references))
 }
 fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
@@ -465,6 +479,49 @@ mod tests {
         assert!(inspect_backup_core(folder).is_err());
         assert!(restore_backup_core(&db, folder).is_err());
     }
+    #[test]
+    fn certificate_historical_photo_is_required_after_cover_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        // A certificate was issued with the old cover. The artwork now has
+        // another cover and no gallery row references the original file.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO certificates
+                (id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('cert','a','RS-1','2026-11-21','Artist',
+                '{\"image_path\":\"media/example.png\"}','t')", []).unwrap();
+            conn.execute("UPDATE artworks SET image_path='media/current.png' WHERE id='a'", []).unwrap();
+        }
+        fs::write(db.directory.join("media/current.png"), b"current cover").unwrap();
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        assert_eq!(backup.files, 3);
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // Deliberately remove the historical image AND its manifest record.
+        // Hashes and the live artwork cover are still fine: only the immutable
+        // certificate snapshot can reveal the missing dependency.
+        let manifest_path = folder.join(MANIFEST_FILE);
+        let mut manifest: Manifest = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest.files.retain(|entry| entry.path != "media/example.png");
+        fs::remove_file(folder.join("media/example.png")).unwrap();
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("media/example.png"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        let conn = db.conn.lock().unwrap();
+        let cover: String = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(cover, "media/current.png");
+        assert!(db.directory.join("media/example.png").is_file());
+    }
+
     #[test]
     fn receipts_are_included_in_verified_backup_and_survive_restore() {
         let tmp = tempfile::tempdir().unwrap();
