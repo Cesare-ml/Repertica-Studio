@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (seconda ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (terza ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -11,11 +11,13 @@ Aggiornato: **2026-11-21** (seconda ricognizione). Stato delle proposte: **Propo
 | [REPS-UX-003](REPS-UX-003-costo-e-margine-per-opera.md) | Scheda economica per opera e costi attribuiti | P2 | Proposta — da valutare |
 | [REPS-UX-004](REPS-UX-004-rapporti-stato-conservazione.md) | Rapporti di condizione e conservazione, con confronti datati | P2 | Proposta — da valutare |
 | [REPS-UX-005](REPS-UX-005-edizioni-multipli-serie-numerate.md) | Edizioni numerate, multipli e varianti con esemplari individuali | P2 | Proposta — da valutare |
+| [REPS-UX-006](REPS-UX-006-incarichi-opere-su-richiesta.md) | Incarichi per opere su richiesta, brief versionati e avanzamento | P2 | Proposta — da valutare |
+| [REPS-UX-007](REPS-UX-007-dossier-presentazione-opere.md) | Dossier e schede di presentazione con dati condivisi selettivamente | P1–P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
 - [README principale](../../../README.md), [MVP](../../MVP.md), [economia e lingue](../../ECONOMY-I18N.md): catalogazione, ricerca, anagrafica collezionisti, vendite, certificati immutabili, backup in cartelle scelte, ripristino, suggerimento prezzo con coefficiente e statistiche mensili esistono già come funzionalità o sviluppi documentati.
-- [Issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13): incassi reali, documenti di acquisto, spese ricorrenti ed export CSV finanziario sono proposte già presenti; nessuna delle cinque idee le ripropone come novità.
+- [Issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13): incassi reali, documenti di acquisto, spese ricorrenti ed export CSV finanziario sono proposte già presenti; nessuna delle sette idee le ripropone come novità.
 - [Issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5): import da Gestionale Opere, non duplicato.
 - [Issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) e [#4](https://github.com/Cesare-ml/Repertica-Studio/issues/4): MCP locale e updater firmati appartengono al filone tecnico.
 - Alla **prima** ricognizione sul branch `main` non esisteva ancora `docs/idee/`; la PR #14 ha introdotto il primo catalogo di gestione e UX. Le successive ricognizioni lavorano sulla medesima PR documentale in bozza.
@@ -30,6 +32,15 @@ Le nuove proposte completano due lacune non coperte dalle prime schede o dalle i
 - [Issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) comprende commissioni, incassi, documenti e cashflow: non viene duplicata in queste schede.
 - Nessuna priorità proposta costituisce approvazione o incarico di implementazione.
 
+## Terza ricognizione (21 novembre 2026)
+
+Dopo aver riletto il branch `main` (README, MVP, ECONOMY-I18N, DATA-PORTABILITY e modelli UI) e le schede aggiornate nelle PR documentali [#14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) e [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), si approfondiscono due **processi differenti** senza riproporre funzionalità esistenti:
+
+- **REPS-UX-006 — Incarichi per opere su richiesta:** brief e revisioni su opere **non ancora realizzate**, con fasi creative e conversione solo manuale in una scheda opera. Non è UX-002 (trattative/offerte su opere esistenti), non è UX-003 (attribuzione spese), né [issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) (commissioni economiche, incassi e documenti). Nessuna registrazione automatica di ricavi, acconti o certificati.
+- **REPS-UX-007 — Dossier di presentazione e schede condivisibili:** documenti narrativi/visivi locali con scelta esplicita dei **soli dati divulgabili**, distinti dai certificati numerati immutabili già presenti, dai cinque CSV integrali e da TECH-001 (portabilità semantica). Non crea un sito, un canale di invio o una piattaforma marketing.
+- **Filone tecnico rispettato:** TECH-001…005 riguardano portabilità, automazioni, diagnostica, ricerca federata e anteprime. Le nuove schede parlano **solo di UX e processi d'uso** e possono, in futuro e se approvate, interoperare con tali strumenti senza modificarne definizioni o file.
+- **Validazione ancora necessaria:** l'effettiva domanda degli artisti che lavorano su incarico e la frequenza di condivisione dossier sono ipotesi; le priorità restano provvisorie. Tutte le sette schede sono **Proposta — da valutare**.
+
 ## Criteri editoriali
 
 1. Ogni idea deve aggiungere un **processo professionale distinto**, non rinominare una funzione già presente. Chi propone cita la differenza rispetto all'MVP e alle issue.
@@ -42,4 +53,4 @@ Le nuove proposte completano due lacune non coperte dalle prime schede o dalle i
 
 ## Sequenza di valutazione suggerita (non autorizzazione)
 
-Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004) e **edizioni e multipli** (005), due domini potenzialmente specialistici. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
+Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
