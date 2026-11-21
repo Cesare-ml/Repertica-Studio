@@ -12,7 +12,7 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     let conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 3 {
+    if version > 4 {
         return Err(format!("Archivio creato da una versione più recente (schema {version})").into());
     }
     if version == 0 {
@@ -142,6 +142,42 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;"
         )?;
     }
+    if version < 4 {
+        // No migration is allowed to infer that a historical sale was paid.
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE sale_receipts (
+                id TEXT PRIMARY KEY,
+                sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE RESTRICT,
+                received_at TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents BETWEEN 1 AND 100000000000),
+                method TEXT NOT NULL CHECK(method IN ('bank_transfer','cash','card','other')),
+                reference TEXT CHECK(reference IS NULL OR length(reference) <= 200),
+                notes TEXT CHECK(notes IS NULL OR length(notes) <= 2000),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_sale_receipts_sale ON sale_receipts(sale_id,received_at,id);
+            CREATE TRIGGER sale_receipts_limit_insert BEFORE INSERT ON sale_receipts BEGIN
+                SELECT CASE WHEN
+                  (SELECT COALESCE(SUM(amount_cents),0) FROM sale_receipts WHERE sale_id=NEW.sale_id)
+                  + NEW.amount_cents > (SELECT amount_cents FROM sales WHERE id=NEW.sale_id)
+                  THEN RAISE(ABORT,'receipt_exceeds_sale') END;
+            END;
+            CREATE TRIGGER sale_receipts_limit_update BEFORE UPDATE OF amount_cents,sale_id ON sale_receipts BEGIN
+                SELECT CASE WHEN
+                  (SELECT COALESCE(SUM(amount_cents),0) FROM sale_receipts
+                   WHERE sale_id=NEW.sale_id AND id<>OLD.id)
+                  + NEW.amount_cents > (SELECT amount_cents FROM sales WHERE id=NEW.sale_id)
+                  THEN RAISE(ABORT,'receipt_exceeds_sale') END;
+            END;
+            CREATE TRIGGER sales_no_shrink_below_receipts BEFORE UPDATE OF amount_cents ON sales
+                WHEN NEW.amount_cents <
+                (SELECT COALESCE(SUM(amount_cents),0) FROM sale_receipts WHERE sale_id=OLD.id)
+                BEGIN SELECT RAISE(ABORT,'sale_below_receipts'); END;
+            PRAGMA user_version=4;
+            COMMIT;"
+        )?;
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -161,7 +197,7 @@ mod tests {
         {
             let c = db.conn.lock().unwrap();
             let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-            assert_eq!(v, 3);
+            assert_eq!(v, 4);
             c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('x','Test','a','a')",[]).unwrap();
         }
         drop(db);
@@ -218,7 +254,7 @@ mod tests {
         let migrated = open(dir.path().into()).unwrap();
         let c = migrated.conn.lock().unwrap();
         let v: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(v,3);
+        assert_eq!(v,4);
         let n: i64 = c.query_row("SELECT count(*) FROM sale_finances WHERE sale_id='s'",[],|r|r.get(0)).unwrap();
         assert_eq!(n,1);
     }
@@ -245,7 +281,7 @@ mod tests {
         let upgraded = open(temp.path().into()).unwrap();
         let conn = upgraded.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(version,3);
+        assert_eq!(version,4);
         let image: String = conn.query_row("SELECT image_path FROM artworks WHERE id='a'",[],|r|r.get(0)).unwrap();
         assert_eq!(image,"media/primary.jpg");
         assert!(conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
@@ -260,7 +296,7 @@ mod tests {
     fn newer_schema_is_not_downgraded() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
-        db.conn.lock().unwrap().pragma_update(None, "user_version", 4).unwrap();
+        db.conn.lock().unwrap().pragma_update(None, "user_version", 5).unwrap();
         drop(db);
         assert!(open(dir.path().into()).is_err());
     }

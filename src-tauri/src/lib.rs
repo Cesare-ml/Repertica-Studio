@@ -5,6 +5,7 @@ mod export;
 mod finance;
 mod gallery;
 mod models;
+mod receipts;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -50,6 +51,10 @@ pub fn run() {
             finance::delete_expense,
             finance::finance_overview,
             finance::price_preview,
+            receipts::list_sale_receipts,
+            receipts::record_sale_receipt,
+            receipts::delete_sale_receipt,
+            receipts::list_sale_balances,
             export::export_ledger_csv
         ])
         .run(tauri::generate_context!())
