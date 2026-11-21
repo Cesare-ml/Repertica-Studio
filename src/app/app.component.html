@@ -4,7 +4,7 @@
     <p class="side-caption">{{ tr('IL TUO STUDIO') }}</p>
     <nav [attr.aria-label]="tr('Sezioni principali')">
       <button type="button" *ngFor="let item of sections" [class.active]="section === item.id"
-        (click)="navigate(item.id)"><span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>{{ tr(item.label) }}</button>
+        (click)="navigate(item.id)"><span class="nav-icon" [ngClass]="'nav-icon--' + item.id" aria-hidden="true"></span>{{ tr(item.label) }}</button>
     </nav>
     <div class="sidebar-bottom">
       <div class="offline-dot"><span></span> {{ tr('Archivio sul tuo computer') }}</div>
