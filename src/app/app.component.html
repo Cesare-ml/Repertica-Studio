@@ -80,6 +80,7 @@
               <span *ngIf="!salesByArtwork[a.id]">—</span></td>
             <td class="actions"><button class="small" type="button" (click)="editArtwork(a)">{{ tr('Modifica') }}</button>
               <label class="small upload-btn">{{ tr('Foto') }}<input type="file" accept="image/jpeg,image/png,image/webp" (change)="onImage($event,a)" hidden></label>
+              <button class="small" type="button" (click)="openGallery(a)">{{ tr('Galleria') }}</button>
               <button class="small danger-text" type="button" (click)="deleteArtwork(a)">{{ tr('Elimina') }}</button></td>
           </tr></tbody></table>
         <div class="empty-state" *ngIf="!visibleArtworks.length"><strong>{{ tr('Nessuna opera trovata') }}</strong><p>{{ tr('Modifica i filtri o la ricerca per visualizzare altre opere.') }}</p>
@@ -298,6 +299,29 @@
     </div>
     <p class="form-note">{{ tr('Dopo aver salvato l\'opera puoi associarle una fotografia direttamente nell\'archivio.') }}</p>
     <div class="dialog-bottom"><button class="secondary" type="button" (click)="artworkDialog=false">{{ tr('Annulla') }}</button><button class="primary" type="button" [disabled]="busy || !artworkDraft.code.trim() || !artworkDraft.title.trim()" (click)="saveArtwork()">{{ tr('Salva opera') }}</button></div>
+  </div>
+</div>
+
+<div class="overlay" *ngIf="galleryArtwork" role="dialog" aria-modal="true" aria-labelledby="gallery-title">
+  <div class="dialog wide">
+    <div class="dialog-top"><h2 id="gallery-title">{{ tr('Fotografie dell’opera') }} · {{ galleryArtwork.title }}</h2>
+      <button class="close" type="button" (click)="closeGallery()" [attr.aria-label]="tr('Chiudi')">×</button></div>
+    <p class="form-note">{{ tr('La foto principale resta nell’archivio. Qui puoi aggiungere fino a 20 fotografie complementari, tutte conservate localmente e nei backup.') }}</p>
+    <div class="gallery-upload">
+      <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span><input maxlength="300" [(ngModel)]="galleryCaption"></label>
+      <label class="secondary upload-btn" [class.disabled]="busy || galleryImages.length >= 20">{{ tr('Aggiungi fotografia') }}
+        <input type="file" accept="image/jpeg,image/png,image/webp" (change)="addGalleryPhoto($event)" [disabled]="busy || galleryImages.length >= 20" hidden></label>
+    </div>
+    <div class="gallery-grid" *ngIf="galleryImages.length; else emptyGallery">
+      <div class="gallery-photo" *ngFor="let img of galleryImages">
+        <img *ngIf="galleryPreviews[img.id]" [src]="galleryPreviews[img.id]" [alt]="img.caption || galleryArtwork.title">
+        <button class="secondary" type="button" *ngIf="!galleryPreviews[img.id]" (click)="loadGalleryPreview(img)">{{ tr('Visualizza foto') }}</button>
+        <p>{{ img.caption || tr('Senza didascalia') }}</p>
+        <button class="small danger-text" type="button" [disabled]="busy" (click)="removeGalleryPhoto(img)">{{ tr('Elimina') }}</button>
+      </div>
+    </div>
+    <ng-template #emptyGallery><p class="empty-state">{{ tr('Nessuna fotografia aggiuntiva.') }}</p></ng-template>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="closeGallery()">{{ tr('Chiudi') }}</button></div>
   </div>
 </div>
 
