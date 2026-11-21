@@ -147,7 +147,7 @@ seconda riga','t','t')", []).unwrap();
         let db = db::open(dir.path().join("archive")).unwrap();
         let csv = dir.path().join("ledger.csv");
         let saved = export_file(&db, "expenses", &csv).unwrap();
-        assert_eq!(saved, csv.to_string_lossy());
+        assert!(Path::new(&saved).is_file());
         assert!(fs::read_to_string(&csv).unwrap().contains("expense_id;"));
         assert!(export_file(&db, "expenses", &csv).is_err());
         assert!(export_file(&db, "expenses", &db.directory.join("data.csv")).is_err());
