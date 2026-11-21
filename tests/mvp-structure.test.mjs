@@ -43,7 +43,7 @@ test('gallery IPC, schema v3 and backup consistency are wired', () => {
   assert.match(db, /CREATE TABLE IF NOT EXISTS artwork_images/);
   assert.match(db, /PRAGMA user_version=3/);
   assert.match(backup, /SELECT image_path FROM artwork_images/);
-  assert.match(backup, /1\.\.=5/);
+  assert.match(backup, /1\.\.=6/);
 });
 
 test('gallery sorting commands and schema v5 are available offline', () => {
@@ -66,4 +66,18 @@ test('sale receipt v4 records are exposed through local typed IPC', () => {
     assert.ok(native.includes('receipts::'+command));
     assert.ok(api.includes("'"+command+"'"));
   }
+});
+
+test('receipt PDF/image attachments use offline SQLite v6 and verified backup media', () => {
+  const db = get('src-tauri/src/db.rs'), backup = get('src-tauri/src/backup.rs');
+  const native = get('src-tauri/src/lib.rs'), module = get('src-tauri/src/receipt_attachments.rs');
+  assert.match(db, /CREATE TABLE IF NOT EXISTS sale_receipt_attachments/);
+  assert.match(db, /PRAGMA user_version=6/);
+  for (const command of ['attach_sale_receipt_file','get_sale_receipt_attachment',
+    'sale_receipt_attachment_data','remove_sale_receipt_attachment']) {
+    assert.ok(native.includes('receipt_attachments::' + command));
+  }
+  assert.match(backup, /SELECT media_path FROM sale_receipt_attachments/);
+  assert.match(module, /Sha256::digest/);
+  assert.match(module, /MAX_BYTES: usize = 12 \* 1024 \* 1024/);
 });

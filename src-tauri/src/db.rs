@@ -12,7 +12,7 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     let conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 5 {
+    if version > 6 {
         return Err(format!("Archivio creato da una versione più recente (schema {version})").into());
     }
     if version == 0 {
@@ -197,6 +197,24 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;"
         )?;
     }
+    if version < 6 {
+        // Attachments are separate local files linked to an explicit receipt.
+        // Never infer an attachment from an existing sale or receipt.
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS sale_receipt_attachments (
+                receipt_id TEXT PRIMARY KEY REFERENCES sale_receipts(id) ON DELETE RESTRICT,
+                media_path TEXT NOT NULL UNIQUE,
+                original_name TEXT NOT NULL CHECK(length(original_name) BETWEEN 1 AND 240),
+                mime_type TEXT NOT NULL CHECK(mime_type IN ('application/pdf','image/jpeg','image/png','image/webp')),
+                size_bytes INTEGER NOT NULL CHECK(size_bytes BETWEEN 1 AND 12582912),
+                sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+                created_at TEXT NOT NULL
+            );
+            PRAGMA user_version=6;
+            COMMIT;"
+        )?;
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -216,7 +234,7 @@ mod tests {
         {
             let c = db.conn.lock().unwrap();
             let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-            assert_eq!(v, 5);
+            assert_eq!(v, 6);
             c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('x','Test','a','a')",[]).unwrap();
         }
         drop(db);
@@ -258,6 +276,7 @@ mod tests {
         c.execute_batch("DROP TRIGGER sale_receipts_limit_insert;
             DROP TRIGGER sale_receipts_limit_update;
             DROP TRIGGER sales_no_shrink_below_receipts;
+            DROP TABLE sale_receipt_attachments;
             DROP TABLE sale_receipts;").unwrap();
     }
     #[test]
@@ -281,7 +300,7 @@ mod tests {
         let migrated = open(dir.path().into()).unwrap();
         let c = migrated.conn.lock().unwrap();
         let v: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(v,5);
+        assert_eq!(v,6);
         let n: i64 = c.query_row("SELECT count(*) FROM sale_finances WHERE sale_id='s'",[],|r|r.get(0)).unwrap();
         assert_eq!(n,1);
     }
@@ -309,7 +328,7 @@ mod tests {
         let upgraded = open(temp.path().into()).unwrap();
         let conn = upgraded.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(version,5);
+        assert_eq!(version,6);
         let image: String = conn.query_row("SELECT image_path FROM artworks WHERE id='a'",[],|r|r.get(0)).unwrap();
         assert_eq!(image,"media/primary.jpg");
         assert!(conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
@@ -352,13 +371,42 @@ mod tests {
             ("z".into(),3,"media/z.png".into())]);
         assert_eq!(c.query_row("SELECT sort_order FROM artwork_images WHERE id='other'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         let version: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(version,5);
+        assert_eq!(version,6);
+    }
+    #[test]
+    fn v5_to_v6_adds_empty_attachment_table_without_changing_receipts() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = open(temp.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','Opera','t','t')", []).unwrap();
+            c.execute("INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Persona','t','t')", []).unwrap();
+            c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',1000,'2026-11-21','t')", []).unwrap();
+            c.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('r','s','2026-11-21',400,'cash','t')", []).unwrap();
+            c.execute_batch("DROP TABLE sale_receipt_attachments; PRAGMA user_version=5;").unwrap();
+        }
+        drop(db);
+        let upgraded = open(temp.path().into()).unwrap();
+        let c = upgraded.conn.lock().unwrap();
+        let version:i64 = c.pragma_query_value(None, "user_version", |r|r.get(0)).unwrap();
+        assert_eq!(version, 6);
+        let paid:i64 = c.query_row("SELECT amount_cents FROM sale_receipts WHERE id='r'",[],|r|r.get(0)).unwrap();
+        assert_eq!(paid, 400);
+        let attachments:i64 = c.query_row("SELECT count(*) FROM sale_receipt_attachments",[],|r|r.get(0)).unwrap();
+        assert_eq!(attachments, 0);
+        assert!(c.execute("INSERT INTO sale_receipt_attachments(receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
+            VALUES('unknown','media/receipt-unknown.pdf','unknown.pdf','application/pdf',8,?1,'t')",
+            rusqlite::params!["0".repeat(64)]).is_err());
     }
     #[test]
     fn newer_schema_is_not_downgraded() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
-        db.conn.lock().unwrap().pragma_update(None, "user_version", 6).unwrap();
+        db.conn.lock().unwrap().pragma_update(None, "user_version", 7).unwrap();
         drop(db);
         assert!(open(dir.path().into()).is_err());
     }
