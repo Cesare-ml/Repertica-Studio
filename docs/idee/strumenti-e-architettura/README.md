@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (undicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (dodicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -20,6 +20,7 @@ Data ricognizione: **2026-11-21** (undicesima ricognizione). Stato uniforme: **P
 | [REPS-TECH-012](REPS-TECH-012-migrazioni-archivio-preflight-copia-sicurezza.md) | Preflight read-only e checkpoint integrale verificato **prima** dell'aggiornamento dello schema SQLite, con recupero non distruttivo | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-013](REPS-TECH-013-copie-fotografiche-condivisibili-privacy-metadati.md) | Copie fotografiche condivisibili con privacy dei metadati e originali intatti | P2 | Proposta — da valutare |
 | [REPS-TECH-014](REPS-TECH-014-bridge-mcp-locale-lettura-permessi.md) | Bridge MCP locale STDIO in lettura con scope minimo, consensi revocabili e confine esplicito con gli host IA esterni (approfondisce issue #3) | P1–P2 | Proposta — da valutare |
+| [REPS-TECH-015](REPS-TECH-015-diagnostica-assistenza-locale-report-privato.md) | Diagnostica per assistenza **solo su richiesta**, codice errore e report tecnico minimo senza dati dell'archivio, senza telemetria (coordinata con issue #12) | P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -90,7 +91,7 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 ## Regole per le prossime ricognizioni
 
 1. Consultare `main`, issue e PR aperte; confrontare le schede di entrambi i filoni prima di aggiungerne altre. Se un problema è già risolto, aggiornare la scheda indicando il cambiamento, non produrre un doppione.
-2. Assegnare ID successivi `REPS-TECH-014`, `015`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
+2. Assegnare ID successivi `REPS-TECH-016`, `017`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
 3. Valutare sempre dati personali, assenza di lock-in, formati aperti, multilingua (lingua OS, fallback inglese), funzionamento offline-first, assenza di account o abbonamenti e scelta libera della cartella.
 4. Modificare **solo Markdown dentro questa cartella**, usando un branch e una PR esclusivamente documentali. Non toccare `docs/idee/gestione-e-ux/`; niente merge automatici, modifiche al codice, issue operative o assegnazioni implicite.
 5. Se emergono trade-off inconciliabili, registrarli come domanda al proprietario: non decidere in sua vece.
@@ -123,3 +124,13 @@ Riesaminati il branch `main` (README, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`,
 - **Confine di privacy essenziale:** l'assenza di porte di rete nel bridge non impedisce a un **client MCP/IA esterno** di trasmettere a servizi online i dati letti. Gli ambiti vanno applicati nel backend, non dedotti da `readOnlyHint`, nomi dei client o etichette UI. Default disabilitato, sola lettura, revoca, niente SQL/path arbitrari. L'esecuzione di un client con gli stessi privilegi dell'utente non viene resa innocua dall'API MCP.
 - **Nessun doppione:** TECH-002 riguarda automazioni interne avviate dall'app, TECH-001 scambio completo, TECH-004 ricerca federata di backup e TECH-008 filtri nell'interfaccia; UX-001…018 riguardano processi gestionali e non vengono modificati. Priorità P1–P2 **solo proposta**, non un incarico. La scheda distingue requisiti già documentati, ipotesi e decisioni per il proprietario.
 - **Perimetro:** questo indice e la scheda sono esclusivamente Markdown sotto `docs/idee/strumenti-e-architettura/`. Nessun codice, build, workflow, dipendenza, altra cartella, issue operativa o merge. Tutte le **14 proposte** restano nello stato **«Proposta — da valutare»**; PR [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) aperta e in bozza.
+
+
+## Dodicesima ricognizione — 21 novembre 2026
+
+Nuova lettura diretta di `main`: [README](../../../README.md), [MVP](../../MVP.md), [portabilità](../../DATA-PORTABILITY.md), [economia e i18n](../../ECONOMY-I18N.md), [`src-tauri/src/commands.rs`](../../../src-tauri/src/commands.rs), [`src-tauri/src/lib.rs`](../../../src-tauri/src/lib.rs), [`src/app/api.ts`](../../../src/app/api.ts), [`src/app/app.component.ts`](../../../src/app/app.component.ts), [`src/app/i18n.ts`](../../../src/app/i18n.ts); confrontati i precedenti **14** studi tecnici, le **19** schede della [PR gestione e UX #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) e le issue aperte, in particolare [#12 sulla localizzazione/codifica degli errori](https://github.com/Cesare-ml/Repertica-Studio/issues/12).
+
+- **[REPS-TECH-015](REPS-TECH-015-diagnostica-assistenza-locale-report-privato.md) — Diagnostica per assistenza con report minimo e condivisione soltanto volontaria.** I comandi Rust esaminati restituiscono numerosi errori testuali, mentre Angular li presenta come messaggi di stringa; non risulta un **rapporto tecnico generale esportabile e minimizzato**. Per problemi su cartelle USB/NAS, backup, schema incompatibile o salvataggio CSV, la proposta studia un codice copiabile e, se realmente utile, un report JSON on-demand con anteprima, senza dati di opere/clienti, percorsi, hash, file o log grezzi. **Nessuna telemetria né invio a terzi.**
+- **Confini documentali:** la [issue #12](https://github.com/Cesare-ml/Repertica-Studio/issues/12) riguarda già errori tipizzati e traduzioni; qui non si crea un secondo incarico di localizzazione, ma si descrive il possibile consumo dei codici nel report. TECH-003 verifica i media, TECH-009 i backup, TECH-012 la prevenzione di migrazioni rischiose, TECH-014 il bridge MCP: nessuno è un report generale di supporto. Nessuna proposta UX è ripetuta o modificata.
+- **Limiti/rischi:** un rapporto non dimostra integrità del database, non ripara errori e non può essere generato dall'interfaccia se l'avvio fallisce prima di Angular; un eventuale fallback nativo richiederebbe progettazione separata. In una app offline anche l'utente può scegliere di condividere un report: anteprima e minimizzazione per allowlist sono essenziali. La domanda reale e l'utilità del file rispetto al semplice codice vanno testate prima di approvare.
+- **Stato:** priorità P2 ipotetica, **Proposta — da valutare**, nessun mandato, issue operativa o merge. Sono stati modificati **solo Markdown in questa cartella**, nella [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), da lasciare in bozza.
