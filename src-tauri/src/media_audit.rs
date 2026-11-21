@@ -194,11 +194,11 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
         let mut stmt = conn.prepare(
             "SELECT artwork_id, media_path, size_bytes, sha256 FROM artwork_raw_files ORDER BY artwork_id"
         ).map_err(error)?;
-        stmt.query_map([], |row| Ok(RawReference {
+        let rows = stmt.query_map([], |row| Ok(RawReference {
             artwork_id: row.get(0)?, path: row.get(1)?,
             size_bytes: row.get(2)?, sha256: row.get(3)?,
-        })).map_err(error)?
-            .collect::<Result<Vec<_>, _>>().map_err(error)?
+        })).map_err(error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(error)?
     };
 
     // Invalid certificate snapshots cannot be trusted to expose a historic image.
