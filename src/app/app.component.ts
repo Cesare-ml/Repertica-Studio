@@ -315,7 +315,8 @@ export class AppComponent implements OnInit {
       unreadable: 'File non leggibile',
       not_regular: 'File non regolare o collegamento simbolico',
       invalid_size: 'Dimensione file non valida',
-      invalid_header: 'Formato o intestazione non valida'
+      invalid_header: 'Formato o intestazione non valida',
+      invalid_snapshot: 'Snapshot del certificato non valido'
     };
     return this.tr(labels[problem]);
   }

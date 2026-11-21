@@ -27,7 +27,7 @@ export interface GalleryImage {
   caption: string | null; created_at: string; sort_order: number;
 }
 
-export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header';
+export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header' | 'invalid_snapshot';
 export interface MediaIssue {
   artworkId: string; imageId: string | null; role: 'primary' | 'gallery' | 'certificate';
   path: string; problem: MediaProblem;

@@ -33,3 +33,15 @@ test('the active audit includes historic certificate images with their own visib
   assert.match(source('src/app/app.component.html'), /Fotografia del certificato/);
   assert.match(source('src/app/i18n.ts'), /"Fotografia del certificato": "Certificate photograph"/);
 });
+
+test('historic certificate snapshots with invalid JSON or image paths are surfaced without exposing their contents', () => {
+  const rust = source('src-tauri/src/media_audit.rs');
+  assert.match(rust, /fn malformed_certificate_snapshots_are_reported_without_exposing_or_changing_json/);
+  assert.match(rust, /problem: "invalid_snapshot"/);
+  assert.match(rust, /path: "snapshot_json"\.into\(\)/);
+  assert.match(source('src/app/models.ts'), /'invalid_snapshot'/);
+  assert.match(source('src/app/app.component.ts'), /invalid_snapshot: 'Snapshot del certificato non valido'/);
+  assert.match(source('src/app/app.component.html'), /issue\.role === 'certificate' && issue\.imageId/);
+  const translations = source('src/app/i18n.ts');
+  assert.equal((translations.match(/"Snapshot del certificato non valido":/g) || []).length, 4);
+});
