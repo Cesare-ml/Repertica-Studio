@@ -21,7 +21,7 @@ Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** co
 - I CSV contengono **dati personali in chiaro**. Conservare e condividere responsabilmente.
 - Il formato CSV è destinato a analisi e interoperabilità **in sola lettura**, non è un formato di reimportazione transazionale. Le immagini, i file associati e l'intero schema SQLite non sono contenuti nei CSV: per una copia completa portabile usare sempre **Impostazioni → Backup** e la sua verifica SHA-256.
 - L'esportazione `sales` registra vendite **non necessariamente incassate**: non deve essere descritta come saldo bancario.
-- **Stato interfaccia**: i pulsanti di esportazione per vendite e spese esistono già. I tre registri aggiuntivi sono disponibili nel comando Tauri, ma richiedono ancora collegamento ai pulsanti dell'interfaccia Angular; questo intervento evita deliberatamente i file UI e di migrazione modificati dalla PR parallela della galleria (#17).
+- **Interfaccia**: ciascuna delle sezioni Opere, Collezionisti, Certificati, Vendite e Acquisti e spese dispone del pulsante CSV. Il dialogo nativo propone un nome `ReperticaStudio-<registro>-AAAA-MM-GG.csv` e lascia scegliere qualsiasi cartella accessibile. Se il percorso è già occupato, il backend rifiuta la sovrascrittura e mostra un errore; scegliere un nuovo nome. Le esportazioni includono **tutti** i record, anche se nell'interfaccia sono attivi filtri o un anno specifico.
 
 ## Collaudo
 

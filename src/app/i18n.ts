@@ -17,6 +17,12 @@ const EN: Record<string,string> = {
   'Eliminare questa fotografia aggiuntiva?': 'Delete this additional photograph?',
   'Fotografia eliminata': 'Photograph deleted',
 
+  'Esporta opere CSV': 'Export artworks CSV',
+  'Esporta collezionisti CSV': 'Export collectors CSV',
+  'Esporta certificati CSV': 'Export certificates CSV',
+  'Registro opere esportato in CSV locale.': 'Artwork register exported to local CSV.',
+  'Registro collezionisti esportato in CSV locale.': 'Collector register exported to local CSV.',
+  'Registro certificati esportato in CSV locale.': 'Certificate register exported to local CSV.',
   'Esporta vendite CSV': 'Export sales CSV',
   'Esporta spese CSV': 'Export expenses CSV',
   'Registro vendite esportato in CSV locale.': 'Sales register exported to local CSV.',
@@ -190,6 +196,11 @@ const EN: Record<string,string> = {
   'Registrato il':'Recorded on','Nessun dato per questo anno':'No data for this year'
 };
 const ES:Record<string,string> = {
+  'Esporta opere CSV':'Exportar obras CSV','Esporta collezionisti CSV':'Exportar coleccionistas CSV',
+  'Esporta certificati CSV':'Exportar certificados CSV',
+  'Registro opere esportato in CSV locale.':'Registro de obras exportado a CSV local.',
+  'Registro collezionisti esportato in CSV locale.':'Registro de coleccionistas exportado a CSV local.',
+  'Registro certificati esportato in CSV locale.':'Registro de certificados exportado a CSV local.',
  'Panoramica':'Resumen','Opere':'Obras','Collezionisti':'Coleccionistas','Vendite':'Ventas','Certificati':'Certificados',
  'Impostazioni':'Configuración','Economia':'Economía','Economia dello studio':'Economía del estudio',
  'Spese':'Gastos','Ricavi lordi':'Ventas brutas','Netto vendite':'Ventas netas','Margine':'Margen',
@@ -212,6 +223,11 @@ const ES:Record<string,string> = {
  'Importo (€) *':'Importe (€) *','Importo spesa (€)':'Importe del gasto (€)'
 };
 const FR:Record<string,string> = {
+  'Esporta opere CSV':'Exporter les œuvres en CSV','Esporta collezionisti CSV':'Exporter les collectionneurs en CSV',
+  'Esporta certificati CSV':'Exporter les certificats en CSV',
+  'Registro opere esportato in CSV locale.':'Registre des œuvres exporté en CSV local.',
+  'Registro collezionisti esportato in CSV locale.':'Registre des collectionneurs exporté en CSV local.',
+  'Registro certificati esportato in CSV locale.':'Registre des certificats exporté en CSV local.',
  'Panoramica':'Vue d’ensemble','Opere':'Œuvres','Collezionisti':'Collectionneurs','Vendite':'Ventes',
  'Certificati':'Certificats','Impostazioni':'Paramètres','Economia':'Finances',
  'Economia dello studio':'Finances de l’atelier','Spese':'Dépenses','Ricavi lordi':'Ventes brutes',
@@ -236,6 +252,11 @@ const FR:Record<string,string> = {
  'Importo (€) *':'Montant (€) *','Importo spesa (€)':'Montant de la dépense (€)'
 };
 const DE:Record<string,string> = {
+  'Esporta opere CSV':'Werke als CSV exportieren','Esporta collezionisti CSV':'Sammler als CSV exportieren',
+  'Esporta certificati CSV':'Zertifikate als CSV exportieren',
+  'Registro opere esportato in CSV locale.':'Werkregister lokal als CSV exportiert.',
+  'Registro collezionisti esportato in CSV locale.':'Sammlerregister lokal als CSV exportiert.',
+  'Registro certificati esportato in CSV locale.':'Zertifikatsregister lokal als CSV exportiert.',
  'Panoramica':'Übersicht','Opere':'Werke','Collezionisti':'Sammler','Vendite':'Verkäufe',
  'Certificati':'Zertifikate','Impostazioni':'Einstellungen','Economia':'Finanzen',
  'Economia dello studio':'Atelier-Finanzen','Spese':'Ausgaben','Ricavi lordi':'Bruttoumsatz',
