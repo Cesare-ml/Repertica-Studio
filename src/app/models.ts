@@ -22,6 +22,11 @@ export type ArtworkInput = Pick<Artwork,
   'height_cm' | 'depth_cm' | 'description' | 'location' | 'status'
 > & { id?: string };
 
+export interface GalleryImage {
+  id: string; artwork_id: string; image_path: string;
+  caption: string | null; created_at: string;
+}
+
 export interface Collector {
   id: string; name: string; email: string | null; phone: string | null;
   address: string | null; notes: string | null; created_at: string; updated_at: string;
