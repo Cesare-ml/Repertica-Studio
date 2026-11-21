@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (settima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (ottava ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -20,6 +20,7 @@ Aggiornato: **2026-11-21** (settima ricognizione). Stato delle proposte: **Propo
 | [REPS-UX-012](REPS-UX-012-affidamenti-conto-vendita-rendiconti.md) | Affidamenti in conto vendita e rendiconti commerciali agli intermediari | P1–P2 | Proposta — da valutare |
 | [REPS-UX-013](REPS-UX-013-resi-annullamenti-rettifiche-vendite.md) | Resi, annullamenti e rettifiche post-vendita con cronologia e tutele | P1 | Proposta — da valutare |
 | [REPS-UX-014](REPS-UX-014-rubrica-relazioni-professionali.md) | Rubrica soggetti professionali, ruoli multipli e storico contatti trasversale | P1–P2 | Proposta — da valutare |
+| [REPS-UX-015](REPS-UX-015-ricognizioni-inventariali-discrepanze.md) | Ricognizioni inventariali e discrepanze di presenza fisica delle opere | P1–P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -85,6 +86,15 @@ Riletti `main` (README, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `docs/DATA-PORTAB
 - **Limiti riconosciuti:** non è ancora provato che il pubblico target abbia bisogno di una rubrica strutturata invece di note e recapiti; qualunque migrazione dell'anagrafica attuale richiederebbe validazioni, tutela degli UUID e prova di ripristino. È esplicitamente esclusa la cattura automatica di messaggi, l'invio a contatti o la profilazione.
 - **Perimetro editoriale:** modificati soltanto questa scheda e l'indice, esclusivamente Markdown in `docs/idee/gestione-e-ux/`. Nessuna modifica all'altro filone, nessun codice, issue implementativa, approvazione o merge. Stato invariato: **Proposta — da valutare**.
 
+## Ottava ricognizione (21 novembre 2026)
+
+Riesaminati `main` (README, MVP, ECONOMY-I18N, DATA-PORTABILITY, `src/app/models.ts`), le quattordici schede del filone UX e le dieci del filone tecnico della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). Una sola nuova proposta, senza ipotesi spacciate per funzionalità presenti:
+
+- **[REPS-UX-015](REPS-UX-015-ricognizioni-inventariali-discrepanze.md) — Ricognizioni inventariali:** permette di valutare un processo di inventario fisico per sessioni, separando opere «non ancora controllate» da opere «non rinvenute dopo controllo», e distinguendo snapshot iniziale, osservazione e catalogo aggiornato. Sul `main` attuale esistono ubicazione testuale e filtri, non un processo di verifica fisica periodica.
+- **Non si duplica UX-001:** la ricognizione non è un registro di movimenti e non cambia automaticamente ubicazione o custodia. Si distingue anche da UX-004 (condizione), UX-009 (mostre), UX-008 (materiali) e dalle viste salvate TECH-008 o cronologia metadati TECH-010. Nessuna modifica ai file del filone tecnico.
+- **Rischi verificabili:** un oggetto non controllato non è «smarrito»; una osservazione non prova proprietà o consegna. Snapshot/live, codici duplicati, privacy delle ubicazioni ed export selettivo richiederebbero attenzione prima di qualsiasi sviluppo.
+- **Da validare:** frequenza e ampiezza delle ricognizioni reali, utilità per artisti individuali rispetto a gallerie, grado di dettaglio delle osservazioni. Priorità P1–P2 esclusivamente suggerita. Stato **Proposta — da valutare**, senza implementazione, approvazione o assegnazione.
+
 ## Criteri editoriali
 
 1. Ogni idea deve aggiungere un **processo professionale distinto**, non rinominare una funzione già presente. Chi propone cita la differenza rispetto all'MVP e alle issue.
@@ -97,4 +107,4 @@ Riletti `main` (README, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `docs/DATA-PORTAB
 
 ## Sequenza di valutazione suggerita (non autorizzazione)
 
-Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. Infine valutare **scorte e consumi materiali** (008) soltanto se acquisti e giacenze ricorrenti sono una necessità reale, e **progetti espositivi** (009) soltanto se l'organizzazione di mostre è abbastanza frequente da giustificare un modulo dedicato. Considerare **diritti e crediti di riproduzione** (010) solo dopo una verifica dei casi di pubblicazione più comuni, e **cicli creativi/relazioni fra opere uniche** (011) solo se i semplici filtri testuali sono insufficienti. Infine esaminare **conto vendita/intermediari** (012) se una quota significativa degli utenti opera tramite gallerie; la **tracciabilità di resi e annullamenti** (013) merita valutazione anticipata se si prevedono vendite reali con acconti, dato il rischio di perdere la storia delle rettifiche. La **rubrica trasversale dei contatti professionali** (014) è da valutare solo se i casi reali di curatori, fornitori e gallerie dimostrano i limiti dell'anagrafica collezionisti attuale; evitare un CRM pesante senza evidenze. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
+Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. Infine valutare **scorte e consumi materiali** (008) soltanto se acquisti e giacenze ricorrenti sono una necessità reale, e **progetti espositivi** (009) soltanto se l'organizzazione di mostre è abbastanza frequente da giustificare un modulo dedicato. Considerare **diritti e crediti di riproduzione** (010) solo dopo una verifica dei casi di pubblicazione più comuni, e **cicli creativi/relazioni fra opere uniche** (011) solo se i semplici filtri testuali sono insufficienti. Infine esaminare **conto vendita/intermediari** (012) se una quota significativa degli utenti opera tramite gallerie; la **tracciabilità di resi e annullamenti** (013) merita valutazione anticipata se si prevedono vendite reali con acconti, dato il rischio di perdere la storia delle rettifiche. La **rubrica trasversale dei contatti professionali** (014) è da valutare solo se i casi reali di curatori, fornitori e gallerie dimostrano i limiti dell'anagrafica collezionisti attuale; evitare un CRM pesante senza evidenze. La **ricognizione inventariale** (015) dovrebbe prima essere provata con professionisti che controllano materialmente opere, per accertare se semplici filtri e note siano insufficienti. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
