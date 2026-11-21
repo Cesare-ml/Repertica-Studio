@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (nona ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (decima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -18,13 +18,14 @@ Data ricognizione: **2026-11-21** (nona ricognizione). Stato uniforme: **Propost
 | [REPS-TECH-010](REPS-TECH-010-storico-revisioni-metadati.md) | Cronologia locale delle revisioni dei metadati delle opere e recupero selettivo, senza alterare certificati o vendite | P2 | Proposta — da valutare |
 | [REPS-TECH-011](REPS-TECH-011-profili-multiarchivio-apertura-sicura.md) | Profili di più archivi **attivi ma indipendenti**, apertura e cambio di contesto sicuri, senza merge o sync | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-012](REPS-TECH-012-migrazioni-archivio-preflight-copia-sicurezza.md) | Preflight read-only e checkpoint integrale verificato **prima** dell'aggiornamento dello schema SQLite, con recupero non distruttivo | P1–P2 | Proposta — da valutare |
+| [REPS-TECH-013](REPS-TECH-013-copie-fotografiche-condivisibili-privacy-metadati.md) | Copie fotografiche condivisibili con privacy dei metadati e originali intatti | P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
 Verificati sul branch `main` al **21 novembre 2026**: [README](../../../README.md), [MVP](../../MVP.md), [economia e localizzazione](../../ECONOMY-I18N.md), modelli dati e codice nativo di `db.rs`, `backup.rs`, `export.rs`, `commands.rs`.
 
 - **Già presente**: database locale SQLite, backup completo a cartella scelta con manifest e hash SHA-256, ispezione prima del ripristino e conservazione della copia precedente. Le schede non ripropongono questo sistema.
-- **Già presente**: sei CSV unidirezionali per **opere, collezionisti, certificati, vendite, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
+- **Già presente**: sette CSV unidirezionali per **opere, collezionisti, certificati, vendite, saldi, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
 - **Già pianificato**: [issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5) per migrazione assistita **da Gestionale Opere**; TECH-001 è indipendente dalla fonte, non realizza l'esportatore privato e propone prima importazione in archivio vuoto.
 - **Già pianificato**: [issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) per MCP **STDIO read-only**. TECH-002 non è un server MCP: descrive un eventuale sistema di regole **interne** all'app, attivato su esplicita autorizzazione.
 - **Già pianificato**: [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) per aggiornamenti firmati. Nessuna proposta li riguarda.
@@ -88,7 +89,7 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 ## Regole per le prossime ricognizioni
 
 1. Consultare `main`, issue e PR aperte; confrontare le schede di entrambi i filoni prima di aggiungerne altre. Se un problema è già risolto, aggiornare la scheda indicando il cambiamento, non produrre un doppione.
-2. Assegnare ID successivi `REPS-TECH-011`, `012`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
+2. Assegnare ID successivi `REPS-TECH-014`, `015`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
 3. Valutare sempre dati personali, assenza di lock-in, formati aperti, multilingua (lingua OS, fallback inglese), funzionamento offline-first, assenza di account o abbonamenti e scelta libera della cartella.
 4. Modificare **solo Markdown dentro questa cartella**, usando un branch e una PR esclusivamente documentali. Non toccare `docs/idee/gestione-e-ux/`; niente merge automatici, modifiche al codice, issue operative o assegnazioni implicite.
 5. Se emergono trade-off inconciliabili, registrarli come domanda al proprietario: non decidere in sua vece.
@@ -101,3 +102,13 @@ Dopo una nuova lettura di [`main`](../../../README.md), [MVP](../../MVP.md), [po
 - **Confini anti-doppione:** non ripete TECH-009 (catalogo/verifica periodica dei backup), TECH-010 (revisioni dei metadati), TECH-001 (formato di interscambio), TECH-011 (profili di più archivi), [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) (aggiornamenti software firmati) o [issue #7](https://github.com/Cesare-ml/Repertica-Studio/issues/7) (collaudo backup). Non altera il catalogo gestione/UX, che tratta processi professionali.
 - **Rischio da non esagerare:** transazioni e ripristini esistenti proteggono già vari scenari, e non risulta dimostrata una perdita reale. La proposta richiede studio del preflight davvero read-only, scelta libera della cartella, disponibilità spazio, interruzioni e test su filesystem. P1–P2 è soltanto un suggerimento, **non un'autorizzazione**.
 - **Perimetro:** aggiunti solo la nuova scheda Markdown e questo indice sotto `docs/idee/strumenti-e-architettura/`. Nessun codice, test, workflow, impostazione o documento dell'altra attività è stato cambiato. La [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta in bozza e non deve essere unita automaticamente.
+
+## Decima ricognizione — 21 novembre 2026
+
+Riletti nuovamente `main` ([MVP](../../MVP.md), [DATA-PORTABILITY](../../DATA-PORTABILITY.md), [`commands.rs`](../../../src-tauri/src/commands.rs), [`gallery.rs`](../../../src-tauri/src/gallery.rs)), i dodici studi tecnici, l'indice delle diciassette proposte UX della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) e le issue aperte. È stata selezionata **una** proposta concreta e circoscritta, senza aprire un nuovo filone di sviluppo.
+
+- **[REPS-TECH-013](REPS-TECH-013-copie-fotografiche-condivisibili-privacy-metadati.md) — Copie fotografiche condivisibili con controllo dei metadati.** Il caricamento attuale di JPEG/PNG/WebP (copertina e galleria) salva i byte originali dopo verifiche di dimensione e firma; non c'è nel codice esaminato un'operazione che crei copie pubblicabili con analisi/rimozione di metadati EXIF/IPTC/XMP. Questa è una **possibile esposizione solo se l'utente condivide successivamente i file**, non un'accusa di trasmissione dati da parte dell'app, che lavora localmente. La proposta conserva originali, riferimenti storici dei certificati e backup, e usa conversione/verifica locale su copie distinte, con chiaro limite: togliere metadati non anonimizza i pixel né accerta diritti di pubblicazione.
+- **Confini anti-doppione:** TECH-003 verifica l'archivio, TECH-005 riguarda miniature per prestazioni, TECH-001 il formato semantico, mentre UX-007 progetta *quali contenuti* presentare e UX-010 documenta diritti/crediti. TECH-013 riguarda invece il **trattamento tecnico dei metadati delle copie destinate all'esterno**, senza pubblicazione o invio automatici. Nessun file del filone UX è stato modificato.
+- **Verifica di attualità:** [DATA-PORTABILITY](../../DATA-PORTABILITY.md) documenta ora **sette** tipi di esportazione CSV, incluso `balances` (saldi delle vendite). I riferimenti a cinque o sei CSV nelle ricognizioni storiche rappresentano stati precedenti, non il totale corrente. Il nuovo studio non duplica questi CSV né i backup.
+- **Rischi e validazioni:** prove con fixture sintetiche nei tre formati, orientamento EXIF, fedeltà cromatica/ICC, pulizia dei chunk, output non sovrascritto, difesa da file malevoli e collaudo su cartelle rimovibili. Prima di decidere, verificare con utenti reali se inviano spesso foto a terzi e se preferiscono uno strumento esterno. **P2 è un suggerimento, non un mandato.**
+- **Perimetro:** modificati esclusivamente Markdown di questa cartella sulla [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), da lasciare **in bozza, non unita**. Nessun codice, test, build, workflow, impostazione, dipendenza o issue operativa modificati. Stato uniforme **Proposta — da valutare**.
