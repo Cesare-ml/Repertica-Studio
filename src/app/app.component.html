@@ -173,6 +173,23 @@
         <div class="metric"><span>{{ tr('Spese') }}</span><strong>{{ euros(finances?.expense_cents || 0) }}</strong><small>{{ tr('Spese registrate') }}</small></div>
         <div class="metric"><span>{{ tr('Margine') }}</span><strong>{{ euros(finances?.margin_cents || 0) }}</strong><small>{{ tr('Netto vendite meno spese') }}</small></div>
       </div>
+      <div class="panel finance-summary" *ngIf="receiptYear">
+        <div class="panel-heading"><div>
+          <h3>{{ tr('Incassi dichiarati per mese') }}</h3>
+          <p>{{ tr('Incassi inseriti manualmente raggruppati per data di incasso: non sono estratti conto né saldi bancari verificati.') }}</p>
+        </div></div>
+        <div class="finance-balances">
+          <div><span>{{ tr('Totale incassi dichiarati') }}</span><strong>{{ euros(receiptYear.total_cents) }}</strong></div>
+          <div><span>{{ tr('Operazioni registrate') }}</span><strong>{{ receiptYear.count }}</strong></div>
+        </div>
+        <div class="finance-month-table table-scroll">
+          <table><thead><tr><th>{{ tr('Mese') }}</th><th>{{ tr('Incassato') }}</th><th>{{ tr('Operazioni registrate') }}</th></tr></thead>
+            <tbody><tr *ngFor="let month of receiptYear.months">
+              <td>{{ monthName(month.month) }}</td><td>{{ euros(month.amount_cents) }}</td><td>{{ month.count }}</td>
+            </tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="panel finance-chart">
         <div class="panel-heading"><div><h3>{{ tr('Andamento mensile') }}</h3><p>{{ tr('Ricavi mensili e spese mensili, in euro') }}</p></div></div>
         <div class="chart-legend"><span class="legend-revenue"></span> {{ tr('Ricavi lordi') }} <span class="legend-expense"></span> {{ tr('Spese') }}</div>

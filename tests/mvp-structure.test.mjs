@@ -52,6 +52,12 @@ test('gallery sorting commands and schema v5 are available offline', () => {
   assert.match(get('src/app/api.ts'), /'move_artwork_gallery_image'/);
   assert.match(get('src/app/app.component.html'), /moveGalleryPhoto/);
 });
+test('annual receipt summaries have a native typed IPC and a separate finance panel', () => {
+  assert.match(get('src-tauri/src/lib.rs'), /receipts::receipt_year_overview/);
+  assert.match(get('src/app/api.ts'), /'receipt_year_overview'/);
+  assert.match(get('src/app/app.component.html'), /receiptYear\.months/);
+  assert.match(get('src/app/app.component.ts'), /api\.receiptYearOverview\(this\.financeYear\)/);
+});
 test('sale receipt v4 records are exposed through local typed IPC', () => {
   const schema=get('src-tauri/src/db.rs'),native=get('src-tauri/src/lib.rs'),api=get('src/app/api.ts');
   assert.match(schema, /CREATE TABLE sale_receipts/);

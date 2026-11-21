@@ -19,10 +19,17 @@ registro del fatturato. L'esportazione CSV `receipts` è ora disponibile dalla s
 identificativi di vendita, opera e collezionista, data, importo esatto in
 centesimi, metodo e riferimenti; include tutti gli incassi senza filtri.
 Non equivale a estratto conto bancario, documento fiscale o backup
-ripristinabile. I report di cassa mensili sono incrementi successivi.
+ripristinabile.
+
+La pagina **Economia** espone ora un riepilogo aggiuntivo degli **incassi dichiarati
+per mese**, con dodici mesi, importi in centesimi e conteggio delle operazioni,
+raggruppati per data `received_at` e **non** per data della vendita. Il riepilogo
+include anche i mesi senza incassi (zero), non interpreta vendite come pagamenti e
+non include spese come se fossero pagate. È un rapporto delle sole registrazioni
+manuali, non un estratto conto né un saldo di cassa verificato.
 
 Comandi Tauri: `list_sale_receipts`, `record_sale_receipt`,
-`delete_sale_receipt`, `list_sale_balances`.
+`delete_sale_receipt`, `list_sale_balances`, `receipt_year_overview`.
 Le cifre indicano incassi **dichiarati dall'utente**, non verificati con
 banche né documenti fiscali. Nessun collegamento online.
 

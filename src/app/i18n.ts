@@ -5,6 +5,10 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  "Incassi dichiarati per mese": "Declared receipts by month",
+  "Incassi inseriti manualmente raggruppati per data di incasso: non sono estratti conto né saldi bancari verificati.": "Manually entered receipts grouped by receipt date; these are not bank statements or verified bank balances.",
+  "Totale incassi dichiarati": "Total declared receipts",
+  "Operazioni registrate": "Recorded transactions",
   'Sposta prima': 'Move earlier',
   'Sposta dopo': 'Move later',
   'Ordine fotografie aggiornato': 'Photo order updated',
@@ -228,6 +232,10 @@ const EN: Record<string,string> = {
   'Registrato il':'Recorded on','Nessun dato per questo anno':'No data for this year'
 };
 const ES:Record<string,string> = {
+  "Incassi dichiarati per mese": "Cobros declarados por mes",
+  "Incassi inseriti manualmente raggruppati per data di incasso: non sono estratti conto né saldi bancari verificati.": "Cobros introducidos manualmente agrupados por fecha de cobro; no son extractos ni saldos bancarios verificados.",
+  "Totale incassi dichiarati": "Total de cobros declarados",
+  "Operazioni registrate": "Operaciones registradas",
   'Sposta prima': 'Mover antes',
   'Sposta dopo': 'Mover después',
   'Ordine fotografie aggiornato': 'Orden de fotos actualizado',
@@ -286,6 +294,10 @@ const ES:Record<string,string> = {
  'Importo (€) *':'Importe (€) *','Importo spesa (€)':'Importe del gasto (€)'
 };
 const FR:Record<string,string> = {
+  "Incassi dichiarati per mese": "Encaissements déclarés par mois",
+  "Incassi inseriti manualmente raggruppati per data di incasso: non sono estratti conto né saldi bancari verificati.": "Encaissements saisis manuellement regroupés par date ; il ne s’agit ni de relevés ni de soldes bancaires vérifiés.",
+  "Totale incassi dichiarati": "Total des encaissements déclarés",
+  "Operazioni registrate": "Opérations enregistrées",
   'Sposta prima': 'Déplacer avant',
   'Sposta dopo': 'Déplacer après',
   'Ordine fotografie aggiornato': 'Ordre des photos mis à jour',
@@ -346,6 +358,10 @@ const FR:Record<string,string> = {
  'Importo (€) *':'Montant (€) *','Importo spesa (€)':'Montant de la dépense (€)'
 };
 const DE:Record<string,string> = {
+  "Incassi dichiarati per mese": "Monatlich erfasste Zahlungseingänge",
+  "Incassi inseriti manualmente raggruppati per data di incasso: non sono estratti conto né saldi bancari verificati.": "Manuell eingetragene Zahlungseingänge nach Eingangsdatum; keine Kontoauszüge oder geprüften Kontostände.",
+  "Totale incassi dichiarati": "Erfasste Zahlungseingänge gesamt",
+  "Operazioni registrate": "Erfasste Vorgänge",
   'Sposta prima': 'Nach vorne',
   'Sposta dopo': 'Nach hinten',
   'Ordine fotografie aggiornato': 'Fotoreihenfolge aktualisiert',

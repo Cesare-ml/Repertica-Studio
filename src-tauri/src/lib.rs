@@ -57,6 +57,7 @@ pub fn run() {
             receipts::record_sale_receipt,
             receipts::delete_sale_receipt,
             receipts::list_sale_balances,
+            receipts::receipt_year_overview,
             export::export_ledger_csv
         ])
         .run(tauri::generate_context!())

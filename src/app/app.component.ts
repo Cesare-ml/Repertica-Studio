@@ -13,7 +13,7 @@ import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
-  SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance
+  SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
@@ -86,6 +86,7 @@ export class AppComponent implements OnInit {
   };
   expenses: Expense[] = [];
   finances: FinanceOverview | null = null;
+  receiptYear: ReceiptYearOverview | null = null;
   financeYear = new Date().getFullYear();
   financeYears = Array.from({length: 8}, (_,i)=>new Date().getFullYear()-i);
   settings: StudioSettings = {
@@ -232,14 +233,15 @@ export class AppComponent implements OnInit {
     this.loading = true;
     try {
       const [artworks, collectors, sales, certificates, overview, dataPath, expenses, finances,
-        receipts, balances] = await Promise.all([
+        receipts, balances, receiptYear] = await Promise.all([
         api.listArtworks(), api.listCollectors(), api.listSales(), api.listCertificates(),
         api.overview(), api.dataDirectory(), api.listExpenses(), api.financeOverview(this.financeYear),
-        api.listSaleReceipts(), api.listSaleBalances()
+        api.listSaleReceipts(), api.listSaleBalances(), api.receiptYearOverview(this.financeYear)
       ]);
       this.artworks=artworks; this.collectors=collectors; this.sales=sales; this.certificates=certificates;
       this.overview=overview; this.dataPath=dataPath; this.expenses=expenses; this.finances=finances;
       this.receipts=receipts;
+      this.receiptYear=receiptYear;
       this.balancesBySale=Object.fromEntries(balances.map(b=>[b.sale_id,b]));
       // Build indexes once per refresh instead of scanning the full sales register for every row.
       const indexes = buildSaleIndexes(this.sales);
@@ -359,7 +361,9 @@ export class AppComponent implements OnInit {
   }
   async loadFinanceYear(): Promise<void> {
     try {
-      this.finances = await api.financeOverview(this.financeYear);
+      [this.finances,this.receiptYear] = await Promise.all([
+        api.financeOverview(this.financeYear), api.receiptYearOverview(this.financeYear)
+      ]);
       this.errorMessage = '';
     } catch (e) { this.errorMessage = this.error(e); }
     this.change.detectChanges();

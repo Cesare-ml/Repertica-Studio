@@ -83,6 +83,48 @@ fn delete_core(c:&Connection,id:&str)->Result<(),String>{
     }
     Ok(())
 }
+
+#[derive(Debug,Clone,Serialize)]
+pub struct MonthlyReceipt {
+    pub month:String,pub amount_cents:i64,pub count:i64,
+}
+#[derive(Debug,Clone,Serialize)]
+pub struct ReceiptYearOverview {
+    pub year:i32,pub months:Vec<MonthlyReceipt>,pub total_cents:i64,pub count:i64,
+}
+// This report is grouped by receipt date, NOT by sale date. No sale is
+// considered paid until an explicit receipt exists in sale_receipts.
+fn receipt_year_overview_core(c:&Connection,year:i32)->Result<ReceiptYearOverview,String>{
+    if !(1900..=2200).contains(&year){return Err("Invalid receipt report year".into())}
+    let mut months=(1..=12).map(|m|MonthlyReceipt{
+        month:format!("{year}-{m:02}"),amount_cents:0,count:0
+    }).collect::<Vec<_>>();
+    let start=format!("{year}-01-01");
+    let end=format!("{}-01-01",year+1);
+    let mut query=c.prepare("SELECT substr(received_at,1,7),SUM(amount_cents),COUNT(*)
+        FROM sale_receipts WHERE received_at>=?1 AND received_at<?2
+        GROUP BY substr(received_at,1,7) ORDER BY 1").map_err(err)?;
+    let records=query.query_map(params![start,end],|r|Ok((
+        r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?
+    ))).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+    let mut total_cents=0i64;
+    let mut count=0i64;
+    for (month,amount,items) in records {
+        let slot=months.iter_mut().find(|m|m.month==month)
+            .ok_or_else(||"Invalid stored receipt month".to_string())?;
+        slot.amount_cents=amount;
+        slot.count=items;
+        total_cents=total_cents.checked_add(amount).ok_or("Receipt total exceeds integer range")?;
+        count=count.checked_add(items).ok_or("Receipt count exceeds integer range")?;
+    }
+    Ok(ReceiptYearOverview{year,months,total_cents,count})
+}
+#[tauri::command]
+pub fn receipt_year_overview(db:State<'_,Database>,year:i32)->Result<ReceiptYearOverview,String>{
+    let c=db.conn.lock().map_err(err)?;
+    receipt_year_overview_core(&c,year)
+}
+
 #[tauri::command]
 pub fn list_sale_receipts(db:State<'_,Database>)->Result<Vec<SaleReceipt>,String>{
     let c=db.conn.lock().map_err(err)?;list_core(&c)
@@ -146,6 +188,40 @@ mod tests{
         assert!(c.execute("UPDATE sale_receipts SET amount_cents=12002 WHERE id='r1'",[]).is_err());
         assert!(c.execute("UPDATE sales SET amount_cents=9999 WHERE id='s'",[]).is_err());
         assert_eq!(list_core(&c).unwrap().len(),1);
+    }
+
+    #[test]
+    fn receipt_year_overview_uses_collection_date_not_sale_date_and_includes_empty_months(){
+        let temp=tempfile::tempdir().unwrap();
+        let db=crate::db::open(temp.path().into()).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        setup(&c);
+        let november=record_core(&mut c,input(3000)).unwrap();
+        let mut december=input(1001);
+        december.received_at="2026-12-02".into();
+        record_core(&mut c,december).unwrap();
+        let mut next_year=input(8000);
+        next_year.received_at="2027-01-01".into();
+        record_core(&mut c,next_year).unwrap();
+
+        let current=receipt_year_overview_core(&c,2026).unwrap();
+        assert_eq!(current.year,2026);
+        assert_eq!(current.months.len(),12);
+        assert_eq!((current.total_cents,current.count),(4001,2));
+        assert_eq!((current.months[10].amount_cents,current.months[10].count),(3000,1));
+        assert_eq!((current.months[11].amount_cents,current.months[11].count),(1001,1));
+        assert_eq!((current.months[0].amount_cents,current.months[0].count),(0,0));
+        let later=receipt_year_overview_core(&c,2027).unwrap();
+        assert_eq!((later.total_cents,later.count),(8000,1));
+        let empty=receipt_year_overview_core(&c,2025).unwrap();
+        assert_eq!((empty.total_cents,empty.count),(0,0));
+        assert!(empty.months.iter().all(|m|m.amount_cents==0 && m.count==0));
+
+        delete_core(&c,&november.id).unwrap();
+        assert_eq!(receipt_year_overview_core(&c,2026).unwrap().total_cents,1001);
+        assert_eq!(balances_core(&c).unwrap()[0].outstanding_cents,3000);
+        assert!(receipt_year_overview_core(&c,1899).is_err());
+        assert!(receipt_year_overview_core(&c,2201).is_err());
     }
     #[test]
     fn v3_migration_does_not_invent_historical_receipts(){
