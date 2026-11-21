@@ -121,7 +121,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     ).map_err(error)?;
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
-    if !(1..=3).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    if !(1..=4).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
     let mut counts = [0_i64; 4];
     for (i, table) in ["artworks", "collectors", "sales", "certificates"].iter().enumerate() {
         counts[i] = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).map_err(error)?;
@@ -143,7 +143,7 @@ fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
         return Err("Manifest del backup troppo grande".into());
     }
     let value: Manifest = serde_json::from_slice(&fs::read(&manifest_path).map_err(error)?).map_err(error)?;
-    if value.format != FORMAT || value.format_version != FORMAT_VERSION || !(1..=3).contains(&value.schema_version) {
+    if value.format != FORMAT || value.format_version != FORMAT_VERSION || !(1..=4).contains(&value.schema_version) {
         return Err("Questo backup non è compatibile con Repertica Studio".into());
     }
     if value.files.len() > 1_000_000 { return Err("Troppi file nel backup".into()); }
@@ -396,7 +396,7 @@ mod tests {
         let destination = tmp.path().join("disk");
         fs::create_dir(&destination).unwrap();
         let backup = create_backup_core(&db, &destination).unwrap();
-        assert_eq!(backup.schema_version, 3);
+        assert_eq!(backup.schema_version, 4);
         assert_eq!(backup.files, 3);
         assert!(backup.verified);
 
@@ -408,6 +408,34 @@ mod tests {
         fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
         assert!(inspect_backup_core(folder).is_err());
         assert!(restore_backup_core(&db, folder).is_err());
+    }
+    #[test]
+    fn receipts_are_included_in_verified_backup_and_survive_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',10000,'2026-11-21','t')",[]).unwrap();
+            conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('r','s','2026-11-21',3500,'bank_transfer','t')",[]).unwrap();
+        }
+        let destination=tmp.path().join("removable");
+        fs::create_dir(&destination).unwrap();
+        let backup=create_backup_core(&db,&destination).unwrap();
+        assert_eq!(backup.schema_version,4);
+        assert!(backup.verified);
+        {
+            let conn=db.conn.lock().unwrap();
+            conn.execute("DELETE FROM sale_receipts WHERE id='r'",[]).unwrap();
+        }
+        restore_backup_core(&db,Path::new(&backup.directory)).unwrap();
+        let conn=db.conn.lock().unwrap();
+        let received:i64=conn.query_row("SELECT amount_cents FROM sale_receipts WHERE id='r'",[],|r|r.get(0)).unwrap();
+        assert_eq!(received,3500);
+        let foreign_keys:i64=conn.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get(0)).unwrap();
+        assert_eq!(foreign_keys,0);
     }
     #[test]
     fn corrupted_media_is_rejected_before_restore() {

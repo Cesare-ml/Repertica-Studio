@@ -12,7 +12,8 @@ import type { ArtworkOrder } from './archive-filters';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
-  StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage
+  StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
+  SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
@@ -75,6 +76,14 @@ export class AppComponent implements OnInit {
   artworks: Artwork[] = [];
   collectors: Collector[] = [];
   sales: Sale[] = [];
+  receipts: SaleReceipt[] = [];
+  balancesBySale: Record<string, SaleBalance> = {};
+  selectedReceiptSale: Sale | null = null;
+  receiptDraft = {
+    amount_eur: null as number | null, received_at: today(),
+    method: 'bank_transfer' as SaleReceiptMethod,
+    reference: null as string | null, notes: null as string | null
+  };
   expenses: Expense[] = [];
   finances: FinanceOverview | null = null;
   financeYear = new Date().getFullYear();
@@ -222,11 +231,16 @@ export class AppComponent implements OnInit {
   async refresh(): Promise<void> {
     this.loading = true;
     try {
-      [this.artworks, this.collectors, this.sales, this.certificates, this.overview, this.dataPath,
-        this.expenses, this.finances] = await Promise.all([
+      const [artworks, collectors, sales, certificates, overview, dataPath, expenses, finances,
+        receipts, balances] = await Promise.all([
         api.listArtworks(), api.listCollectors(), api.listSales(), api.listCertificates(),
-        api.overview(), api.dataDirectory(), api.listExpenses(), api.financeOverview(this.financeYear)
+        api.overview(), api.dataDirectory(), api.listExpenses(), api.financeOverview(this.financeYear),
+        api.listSaleReceipts(), api.listSaleBalances()
       ]);
+      this.artworks=artworks; this.collectors=collectors; this.sales=sales; this.certificates=certificates;
+      this.overview=overview; this.dataPath=dataPath; this.expenses=expenses; this.finances=finances;
+      this.receipts=receipts;
+      this.balancesBySale=Object.fromEntries(balances.map(b=>[b.sale_id,b]));
       // Build indexes once per refresh instead of scanning the full sales register for every row.
       const indexes = buildSaleIndexes(this.sales);
       this.salesByCollector = indexes.byCollector;
@@ -591,6 +605,41 @@ export class AppComponent implements OnInit {
   async deleteSale(sale: Sale): Promise<void> {
     if (!window.confirm(`Eliminare la vendita di "${sale.artwork_title}"? L'opera tornerà disponibile.`)) return;
     await this.run(() => api.deleteSale(sale.id), 'Vendita eliminata');
+  }
+  balanceForSale(sale: Sale): SaleBalance {
+    return this.balancesBySale[sale.id] ?? {
+      sale_id:sale.id, sale_cents:sale.amount_cents, received_cents:0,
+      outstanding_cents:sale.amount_cents
+    };
+  }
+  saleReceipts(saleId: string): SaleReceipt[] {
+    return this.receipts.filter(receipt=>receipt.sale_id===saleId);
+  }
+  openSaleReceipts(sale: Sale): void {
+    this.selectedReceiptSale=sale;
+    const remaining=this.balanceForSale(sale).outstanding_cents;
+    this.receiptDraft={amount_eur:remaining>0?remaining/100:null,
+      received_at:today(),method:'bank_transfer',reference:null,notes:null};
+  }
+  async saveSaleReceipt(): Promise<void> {
+    const sale=this.selectedReceiptSale;
+    const value=this.receiptDraft.amount_eur;
+    const cents=value===null?NaN:Math.round(value*100);
+    if (!sale || !Number.isFinite(cents) || !Number.isSafeInteger(cents) ||
+        cents<=0 || cents>this.balanceForSale(sale).outstanding_cents) {
+      this.errorMessage=this.tr('Importo incasso non valido');return;
+    }
+    const input: SaleReceiptInput={sale_id:sale.id,amount_cents:cents,
+      received_at:this.receiptDraft.received_at,method:this.receiptDraft.method,
+      reference:this.receiptDraft.reference,notes:this.receiptDraft.notes};
+    if (await this.run(()=>api.recordSaleReceipt(input),this.tr('Incasso registrato'))) {
+      const remaining=this.balanceForSale(sale).outstanding_cents;
+      this.receiptDraft.amount_eur=remaining>0?remaining/100:null;
+    }
+  }
+  async deleteSaleReceipt(receipt: SaleReceipt): Promise<void> {
+    if (!window.confirm(this.tr('Confermi eliminazione incasso?'))) return;
+    await this.run(()=>api.deleteSaleReceipt(receipt.id),this.tr('Incasso eliminato'));
   }
   newCertificate(): void {
     this.certificateDraft = {
