@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-fn err(e: impl std::fmt::Display) -> String { e.to_string() }
+fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn valid_date(s:&str)->bool {
     NaiveDate::parse_from_str(s,"%Y-%m-%d")
         .map(|d|d.format("%Y-%m-%d").to_string()==s).unwrap_or(false)

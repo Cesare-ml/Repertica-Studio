@@ -6,7 +6,7 @@ use rusqlite::{types::ValueRef, Connection};
 use std::{fs::{self, OpenOptions}, io::Write, path::Path};
 use tauri::State;
 
-fn error(e: impl std::fmt::Display) -> String { e.to_string() }
+fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 
 // Spreadsheet formula injection is possible even inside quoted CSV cells.
 // Prefix user-controlled strings that Excel/LibreOffice could evaluate.
@@ -151,7 +151,7 @@ fn export_file(db: &Database, kind: &str, destination: &Path) -> Result<String, 
         let _ = fs::remove_file(&target);
         return Err(format!("Esportazione CSV incompleta: {e}"));
     }
-    Ok(target.to_string_lossy().into_owned())
+    Ok(crate::util::display_path(&target))
 }
 
 #[tauri::command]

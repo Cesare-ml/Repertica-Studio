@@ -55,7 +55,7 @@ pub struct RestoreSummary {
     pub previous_archive: String,
 }
 
-fn error(e: impl std::fmt::Display) -> String { e.to_string() }
+fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn unique_name(prefix: &str) -> String {
     format!("{}-{}-{}", prefix, Utc::now().format("%Y%m%d-%H%M%S"), Uuid::new_v4().simple())
 }
@@ -68,7 +68,7 @@ fn rollback_folder(data_dir: &Path) -> Result<PathBuf, String> {
 fn check_regular(path: &Path) -> Result<(), String> {
     let typ = fs::symlink_metadata(path).map_err(error)?.file_type();
     if !typ.is_file() || typ.is_symlink() {
-        return Err(format!("Il backup contiene un file non regolare: {}", path.display()));
+        return Err(format!("Il backup contiene un file non regolare: {}", crate::util::display_path(path)));
     }
     Ok(())
 }
@@ -252,7 +252,7 @@ fn check_unlisted_media(root: &Path, recorded: &HashSet<String>) -> Result<(), S
         let name = file_name.to_str().ok_or("Nome file media non valido nel backup")?;
         let kind = entry.file_type().map_err(error)?;
         if !safe_filename(name) || !kind.is_file() || kind.is_symlink() {
-            return Err(format!("Elemento media non regolare nel backup: {}", entry.path().display()));
+            return Err(format!("Elemento media non regolare nel backup: {}", crate::util::display_path(&entry.path())));
         }
         let relative = format!("media/{name}");
         if !recorded.contains(&relative) {
@@ -291,7 +291,7 @@ pub fn inspect_backup_core(folder: &Path) -> Result<BackupSummary, String> {
         }
     }
     Ok(BackupSummary {
-        directory: directory.to_string_lossy().into_owned(),
+        directory: crate::util::display_path(&directory),
         created_at: manifest.created_at,
         files: manifest.files.len(),
         total_bytes: total,
@@ -436,7 +436,7 @@ pub fn restore_backup_core(db: &Database, folder: &Path) -> Result<RestoreSummar
             // Retain the entire previous archive (including WAL/media) rather than
             // deleting anything. If renaming fails the fixed rollback directory remains.
             let saved = if fs::rename(&rollback, &previous).is_ok() { previous } else { rollback };
-            Ok(RestoreSummary { restored: summary, previous_archive: saved.to_string_lossy().into_owned() })
+            Ok(RestoreSummary { restored: summary, previous_archive: crate::util::display_path(&saved) })
         }
         Err(e) => {
             let rejected = parent.join(unique_name(".repertica-rejected-restore"));
@@ -514,8 +514,9 @@ mod tests {
         assert_eq!(backup.artworks, 1);
         assert_eq!(backup.files, 2);
         assert!(backup.verified);
-        // The summary reports a canonical path (`\\?\` prefixed on Windows).
-        assert!(Path::new(&backup.directory).starts_with(fs::canonicalize(&destination).unwrap()));
+        // The summary reports a canonical path without the Windows verbatim prefix.
+        assert!(Path::new(&backup.directory).starts_with(crate::util::display_path(&fs::canonicalize(&destination).unwrap())));
+        assert!(!backup.directory.starts_with(r"\\?\"), "users must not see verbatim prefixes");
         {
             let conn = db.conn.lock().unwrap();
             conn.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('d','Dopo il backup','now','now')",[]).unwrap();

@@ -30,6 +30,26 @@
           <p>{{ tr('Opere, relazioni e vendite in un unico spazio privato. Nessun account, nessuna sincronizzazione obbligatoria.') }}</p></div>
         <button type="button" class="primary" (click)="navigate('artworks'); newArtwork()" [disabled]="!initialized">{{ tr('+ Nuova opera') }}</button>
       </div>
+      <aside class="panel guide" *ngIf="showGuide" aria-labelledby="guide-title">
+        <div class="guide-head">
+          <div><p class="eyebrow">{{ tr('BENVENUTO NEL TUO ARCHIVIO') }}</p><h3 id="guide-title">{{ tr('Benvenuto in Repertica Studio') }}</h3>
+            <p>{{ tr('Tutto resta sul tuo computer: nessun account, nessun server. Ecco come iniziare in cinque passi.') }}</p></div>
+        </div>
+        <ol class="guide-steps">
+          <li><div><strong>{{ tr('Opere') }}</strong><p>{{ tr('Registra la tua prima opera con codice e titolo, poi aggiungi la fotografia principale e, se vuoi, una galleria.') }}</p></div>
+            <button type="button" class="small" (click)="navigate('artworks')">{{ tr('Vai alle opere') }}</button></li>
+          <li><div><strong>{{ tr('Collezionisti') }}</strong><p>{{ tr('Aggiungi chi acquista le tue opere. Solo il nome è obbligatorio; l’email è facoltativa.') }}</p></div>
+            <button type="button" class="small" (click)="navigate('collectors')">{{ tr('Vai ai collezionisti') }}</button></li>
+          <li><div><strong>{{ tr('Vendite') }}</strong><p>{{ tr('Collega un’opera disponibile a un collezionista: l’opera diventa «Venduta». Gli incassi, anche a rate, si registrano dopo.') }}</p></div>
+            <button type="button" class="small" (click)="navigate('sales')">{{ tr('Vai alle vendite') }}</button></li>
+          <li><div><strong>{{ tr('Certificati') }}</strong><p>{{ tr('Emetti un certificato numerato e stampalo o salvalo in PDF. Dopo l’emissione non si può modificare.') }}</p></div>
+            <button type="button" class="small" (click)="navigate('certificates')">{{ tr('Vai ai certificati') }}</button></li>
+          <li><div><strong>{{ tr('Backup del tuo archivio') }}</strong><p>{{ tr('In Impostazioni scegli una cartella (anche una chiavetta USB) e crea una copia verificata. I dati sono solo su questo computer: fai backup spesso.') }}</p></div>
+            <button type="button" class="small" (click)="navigate('settings')">{{ tr('Vai alle impostazioni') }}</button></li>
+        </ol>
+        <div class="guide-foot"><button type="button" class="primary" (click)="dismissGuide()">{{ tr('Ho capito, nascondi la guida') }}</button>
+          <small>{{ tr('Puoi riaprire questa guida in qualsiasi momento da Impostazioni.') }}</small></div>
+      </aside>
       <div class="metrics">
         <div class="metric"><span>{{ tr('Opere in archivio') }}</span><strong>{{ overview.artworks }}</strong><small>{{ tr('Nel database locale') }}</small></div>
         <div class="metric"><span>{{ tr('Collezionisti') }}</span><strong>{{ overview.collectors }}</strong><small>{{ tr('Contatti personali') }}</small></div>
@@ -56,6 +76,7 @@
           <button class="secondary" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
           <button class="primary" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button>
         </div></div>
+      <p class="hint" *ngIf="!artworks.length">{{ tr('Suggerimento: dopo aver creato un’opera usa «Foto» per la copertina e «Galleria» per altre fotografie (fino a 20).') }}</p>
       <div class="filter-row archive-filters">
         <input type="search" [placeholder]="tr('Titolo, codice, tecnica, ubicazione, collezionista…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca opere')">
         <label class="filter-control"><span>{{ tr('Stato') }}</span><select [(ngModel)]="artworkStatusFilter" [attr.aria-label]="tr('Filtra opere per stato')">
@@ -83,7 +104,7 @@
               (click)="openCollectorFromArtwork(a.id)" [attr.aria-label]="'Apri il collezionista ' + sale.collector_name">{{ sale.collector_name }}</button>
               <span *ngIf="!salesByArtwork[a.id]">—</span></td>
             <td class="actions"><button class="small" type="button" (click)="editArtwork(a)">{{ tr('Modifica') }}</button>
-              <label class="small upload-btn">{{ tr('Foto') }}<input type="file" accept="image/jpeg,image/png,image/webp" (change)="onImage($event,a)" hidden></label>
+              <button class="small" type="button" [disabled]="busy" (click)="chooseCoverPhoto(a)">{{ tr('Foto') }}</button>
               <button class="small" type="button" (click)="openGallery(a)">{{ tr('Galleria') }}</button>
               <button class="small danger-text" type="button" (click)="deleteArtwork(a)">{{ tr('Elimina') }}</button></td>
           </tr></tbody></table>
@@ -124,7 +145,7 @@
             </tr>
           </ng-container>
         </tbody></table>
-        <div class="empty-state" *ngIf="!visibleCollectors.length">{{ tr('Nessun contatto corrisponde alla ricerca.') }}</div></div>
+        <div class="empty-state" *ngIf="!visibleCollectors.length">{{ collectors.length ? tr('Nessun contatto corrisponde alla ricerca.') : tr('Non hai ancora collezionisti. Aggiungi chi acquista le tue opere: serve per registrare le vendite. L’email è facoltativa.') }}</div></div>
     </section>
 
     <section *ngIf="section === 'sales'" class="page">
@@ -143,7 +164,7 @@
           <td class="money">{{ euros(balanceForSale(s).outstanding_cents) }}</td>
           <td class="actions"><button class="small" type="button" (click)="openSaleReceipts(s)">{{ tr('Gestisci incassi') }}</button>
             <button class="small danger-text" type="button" (click)="deleteSale(s)">{{ tr('Annulla vendita') }}</button></td></tr></tbody></table>
-        <div class="empty-state" *ngIf="!sales.length">{{ tr('Nessuna vendita ancora registrata.') }}</div></div>
+        <div class="empty-state" *ngIf="!sales.length"><strong>{{ tr('Nessuna vendita ancora registrata.') }}</strong><p>{{ tr('Per registrare una vendita servono un’opera disponibile e un collezionista. Gli incassi si aggiungono dopo, anche in più rate.') }}</p></div></div>
     </section>
 
     <section *ngIf="section === 'certificates'" class="page">
@@ -156,7 +177,7 @@
       <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Numero') }}</th><th>{{ tr('Opera') }}</th><th>{{ tr('Artista') }}</th><th>{{ tr('Emesso il') }}</th><th>{{ tr('Documento') }}</th></tr></thead>
         <tbody><tr *ngFor="let c of certificates"><td><strong>{{ c.serial }}</strong></td><td>{{ c.artwork_title }}</td><td>{{ c.artist_name }}</td>
           <td>{{ date(c.issued_at) }}</td><td class="actions"><button class="small" type="button" (click)="printCertificate(c)">{{ tr('Stampa / PDF') }}</button></td></tr></tbody></table>
-        <div class="empty-state" *ngIf="!certificates.length">{{ tr('Non hai ancora emesso certificati.') }}</div></div>
+        <div class="empty-state" *ngIf="!certificates.length"><strong>{{ tr('Non hai ancora emesso certificati.') }}</strong><p>{{ tr('Il certificato congela i dati dell’opera al momento dell’emissione e poi non si può più modificare: controlla la scheda prima di emetterlo.') }}</p></div></div>
     </section>
 
 
@@ -257,6 +278,18 @@
             </ul>
             <p *ngIf="audit.truncated">{{ tr('Sono visualizzati soltanto i primi 100 problemi.') }}</p>
           </div>
+        </div>
+        <div class="backup-block">
+          <h3>{{ tr('Guida di primo avvio') }}</h3><p>{{ tr('Mostra di nuovo i suggerimenti di benvenuto nella Panoramica.') }}</p>
+          <button type="button" class="secondary" (click)="reopenGuide()">{{ tr('Mostra la guida') }}</button>
+        </div>
+        <div class="backup-block mcp-block">
+          <h3>{{ tr('Assistenti IA locali (MCP)') }}</h3>
+          <p>{{ tr('Permette a un assistente IA installato sul tuo computer di consultare l’archivio in sola lettura, per esempio per cercare opere o riassumere le vendite. Non può modificare nulla; email, telefoni, indirizzi, note private e fotografie non vengono condivisi.') }}</p>
+          <p class="hint">{{ tr('Attenzione: ciò che l’assistente legge può essere inviato al suo fornitore. Usa solo assistenti di cui ti fidi.') }}</p>
+          <p>{{ tr('Aggiungi questa configurazione ai server MCP del tuo assistente (per esempio Claude Desktop) e riavvia l’assistente.') }}</p>
+          <pre class="mcp-config" *ngIf="mcpSetup" tabindex="0">{{ mcpConfigJson }}</pre>
+          <button type="button" class="secondary" (click)="copyMcpConfig()" [disabled]="!mcpSetup">{{ tr('Copia configurazione') }}</button>
         </div>
         <div class="backup-block economy-settings">
           <h3>{{ tr('Lingua dell’app') }}</h3><p>{{ tr('La lingua iniziale segue quella del sistema operativo. Se non disponibile, Repertica usa l\'inglese.') }}</p>
@@ -361,8 +394,7 @@
     <p class="form-note">{{ tr('La foto principale e le fotografie aggiuntive restano nel tuo archivio locale e nei backup. Puoi scegliere una foto aggiuntiva come nuova copertina.') }}</p>
     <div class="gallery-upload">
       <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span><input maxlength="300" [(ngModel)]="galleryCaption"></label>
-      <label class="secondary upload-btn" [class.disabled]="busy || galleryImages.length >= 20">{{ tr('Aggiungi fotografia') }}
-        <input type="file" accept="image/jpeg,image/png,image/webp" (change)="addGalleryPhoto($event)" [disabled]="busy || galleryImages.length >= 20" hidden></label>
+      <button class="secondary" type="button" [disabled]="busy || galleryImages.length >= 20" (click)="addGalleryPhoto()">{{ tr('Aggiungi fotografia') }}</button>
     </div>
     <div class="gallery-grid" *ngIf="galleryImages.length; else emptyGallery">
       <div class="gallery-photo" *ngFor="let img of galleryImages; let i = index">

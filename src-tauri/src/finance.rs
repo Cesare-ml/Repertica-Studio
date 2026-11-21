@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-fn error(e: impl std::fmt::Display) -> String { e.to_string() }
+fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn date_ok(date: &str) -> bool {
     NaiveDate::parse_from_str(date, "%Y-%m-%d")
         .map(|d| d.format("%Y-%m-%d").to_string() == date)

@@ -1,11 +1,11 @@
 use crate::{db::Database, models::*};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use chrono::{Datelike, NaiveDate, Utc};
+use chrono::{Datelike, Local, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};use std::{fs, path::Component};
 use tauri::State;
 use uuid::Uuid;
 
-fn err(e: impl std::fmt::Display) -> String { e.to_string() }
+fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn now() -> String { Utc::now().to_rfc3339() }
 fn clean(value: Option<String>, max: usize) -> Result<Option<String>, String> {
     match value {
@@ -233,6 +233,9 @@ pub fn list_certificates(db: State<'_, Database>) -> Result<Vec<Certificate>, St
 }
 #[tauri::command]
 pub fn issue_certificate(db: State<'_, Database>, input: CertificateInput) -> Result<Certificate, String> {
+    issue_certificate_core(&db, input)
+}
+fn issue_certificate_core(db: &Database, input: CertificateInput) -> Result<Certificate, String> {
     let artist_name=required(input.artist_name,240,"Nome dell'artista")?;
     let collector_name=clean(input.collector_name,240)?;
     let notes=clean(input.notes,10_000)?;
@@ -242,10 +245,13 @@ pub fn issue_certificate(db: State<'_, Database>, input: CertificateInput) -> Re
     let snapshot_json=serde_json::to_string(&artwork).map_err(err)?;
     tx.execute("UPDATE certificate_counter SET last_number=last_number+1 WHERE singleton=1",[]).map_err(err)?;
     let number:i64=tx.query_row("SELECT last_number FROM certificate_counter WHERE singleton=1",[],|r|r.get(0)).map_err(err)?;
-    let serial=format!("RS-{}-{number:06}",Utc::now().year());
+    // The issue date and serial year follow the artist's local calendar, not UTC:
+    // a certificate signed on 31 December evening must not carry the next year.
+    let today=Local::now();
+    let serial=format!("RS-{}-{number:06}",today.year());
     let id=Uuid::new_v4().to_string();
     let stamp=now();
-    let issued_at=Utc::now().format("%Y-%m-%d").to_string();
+    let issued_at=today.format("%Y-%m-%d").to_string();
     tx.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,created_at)
         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![id,input.artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,stamp]).map_err(err)?;
@@ -287,11 +293,33 @@ pub(crate) fn image_used_by_certificate(conn: &Connection, artwork_id: &str, ima
     Ok(false)
 }
 
+pub(crate) const MAX_IMAGE_BYTES: usize = 12 * 1024 * 1024;
+/// Read a picture chosen with the native file dialog. The size is checked from file
+/// metadata before reading, so an oversized file never travels through memory or IPC.
+pub(crate) fn read_image_file(source: &str) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let path = std::path::Path::new(source);
+    if !path.is_absolute() { return Err("Seleziona la fotografia tramite il dialogo di sistema".into()); }
+    let metadata = fs::symlink_metadata(path).map_err(err)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("La fotografia non è un file regolare".into());
+    }
+    if metadata.len() == 0 || metadata.len() > MAX_IMAGE_BYTES as u64 {
+        return Err("Immagine vuota o troppo grande (massimo 12 MiB)".into());
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    fs::File::open(path).map_err(err)?.take(MAX_IMAGE_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(err)?;
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES { return Err("Immagine vuota o troppo grande (massimo 12 MiB)".into()); }
+    Ok(bytes)
+}
 fn save_artwork_image_core(db: &Database, artwork_id: &str, data_base64: &str) -> Result<(), String> {
     if data_base64.len()>16_800_000 { return Err("Immagine troppo grande (massimo 12 MiB)".into()); }
     let bytes=STANDARD.decode(data_base64).map_err(|_|"Immagine non valida".to_string())?;
-    if bytes.len()>12*1024*1024 || bytes.is_empty() { return Err("Immagine troppo grande o vuota".into()); }
-    let (ext,_mime)=image_type(&bytes).ok_or_else(||"Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
+    save_artwork_image_bytes(db, artwork_id, &bytes)
+}
+fn save_artwork_image_bytes(db: &Database, artwork_id: &str, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len()>MAX_IMAGE_BYTES || bytes.is_empty() { return Err("Immagine troppo grande o vuota".into()); }
+    let (ext,_mime)=image_type(bytes).ok_or_else(||"Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
     let conn=db.conn.lock().map_err(err)?;
     let old=artwork_by_id(&conn,artwork_id)?.image_path;
     // Resolve historical dependencies before touching SQLite or the filesystem.
@@ -303,7 +331,7 @@ fn save_artwork_image_core(db: &Database, artwork_id: &str, data_base64: &str) -
     let relative=format!("media/{name}");
     let target=db.directory.join(&relative);
     let tmp=db.directory.join(format!("media/{name}.tmp"));
-    fs::write(&tmp,&bytes).map_err(err)?;
+    fs::write(&tmp,bytes).map_err(err)?;
     if let Err(e)=fs::rename(&tmp,&target) { let _=fs::remove_file(&tmp); return Err(err(e)); }
     if let Err(e)=conn.execute("UPDATE artworks SET image_path=?2,updated_at=?3 WHERE id=?1",params![artwork_id,relative,now()]) {
         let _=fs::remove_file(&target); return Err(err(e));
@@ -318,6 +346,11 @@ fn save_artwork_image_core(db: &Database, artwork_id: &str, data_base64: &str) -
 #[tauri::command]
 pub fn save_artwork_image(db: State<'_, Database>, artwork_id: String, data_base64: String) -> Result<(), String> {
     save_artwork_image_core(&db, &artwork_id, &data_base64)
+}
+#[tauri::command]
+pub fn save_artwork_image_from_path(db: State<'_, Database>, artwork_id: String, source_path: String) -> Result<(), String> {
+    let bytes = read_image_file(&source_path)?;
+    save_artwork_image_bytes(&db, &artwork_id, &bytes)
 }
 fn safe_relative(path: &str) -> bool {
     let p=std::path::Path::new(path);
@@ -535,6 +568,53 @@ mod tests {
         let status: String = conn.query_row("SELECT status FROM artworks WHERE id=?1",
             params![artwork], |r| r.get(0)).unwrap();
         assert_eq!(status, "available");
+    }
+
+    #[test]
+    fn photos_chosen_from_disk_are_checked_before_being_read_and_stored() {
+        let (dir, db, artwork, _collector) = sale_fixture();
+        let picture = dir.path().join("foto.jpg");
+        fs::write(&picture, [0xff, 0xd8, 0xff, 0x09]).unwrap();
+        assert!(read_image_file("foto.jpg").unwrap_err().contains("dialogo"));
+        assert!(read_image_file(dir.path().to_str().unwrap()).unwrap_err().contains("regolare"));
+        let empty = dir.path().join("vuota.png");
+        fs::write(&empty, []).unwrap();
+        assert!(read_image_file(empty.to_str().unwrap()).unwrap_err().contains("12 MiB"));
+        let huge = dir.path().join("enorme.png");
+        fs::write(&huge, vec![0_u8; MAX_IMAGE_BYTES + 1]).unwrap();
+        assert!(read_image_file(huge.to_str().unwrap()).unwrap_err().contains("12 MiB"));
+        let bytes = read_image_file(picture.to_str().unwrap()).unwrap();
+        save_artwork_image_bytes(&db, &artwork, &bytes).unwrap();
+        let stored = {
+            let conn = db.conn.lock().unwrap();
+            artwork_by_id(&conn, &artwork).unwrap().image_path.unwrap()
+        };
+        assert_eq!(fs::read(db.directory.join(stored)).unwrap(), bytes);
+        let text = dir.path().join("note.jpg");
+        fs::write(&text, b"not an image").unwrap();
+        let wrong = read_image_file(text.to_str().unwrap()).unwrap();
+        assert!(save_artwork_image_bytes(&db, &artwork, &wrong).unwrap_err().contains("JPEG"));
+    }
+
+    #[test]
+    fn certificates_use_the_local_calendar_and_unique_increasing_serials() {
+        let (_dir, db, artwork, _collector) = sale_fixture();
+        let input = || CertificateInput {
+            artwork_id: artwork.clone(), artist_name: "Artista".into(),
+            collector_name: None, notes: None,
+        };
+        let first = issue_certificate_core(&db, input()).unwrap();
+        let second = issue_certificate_core(&db, input()).unwrap();
+        let today = Local::now();
+        assert_eq!(first.issued_at, today.format("%Y-%m-%d").to_string());
+        assert!(first.serial.starts_with(&format!("RS-{}-", today.year())), "{}", first.serial);
+        assert!(first.serial.ends_with("000001") && second.serial.ends_with("000002"));
+        assert!(issue_certificate_core(&db, CertificateInput {
+            artwork_id: "missing".into(), artist_name: "A".into(), collector_name: None, notes: None,
+        }).is_err());
+        let counter: i64 = db.conn.lock().unwrap()
+            .query_row("SELECT last_number FROM certificate_counter", [], |r| r.get(0)).unwrap();
+        assert_eq!(counter, 2, "a rejected certificate must not consume a number");
     }
 
     #[test]

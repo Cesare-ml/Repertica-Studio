@@ -37,7 +37,7 @@ struct MediaReference {
     path: String,
 }
 
-fn error(e: impl std::fmt::Display) -> String { e.to_string() }
+fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 
 fn valid_relative(path: &str) -> bool {
     // Only flat, locally generated media paths are accepted; never follow

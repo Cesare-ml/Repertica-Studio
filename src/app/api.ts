@@ -3,7 +3,7 @@ import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
-  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit
+  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -13,11 +13,11 @@ export const api = {
   saveArtwork: (input: ArtworkInput) => invoke<Artwork>('save_artwork', { input }),
   deleteArtwork: (id: string) => invoke<void>('delete_artwork', { id }),
   artworkImage: (artworkId: string) => invoke<string | null>('artwork_image_data', { artworkId }),
-  saveArtworkImage: (artworkId: string, dataBase64: string) =>
-    invoke<void>('save_artwork_image', { artworkId, dataBase64 }),
+  saveArtworkImageFromPath: (artworkId: string, sourcePath: string) =>
+    invoke<void>('save_artwork_image_from_path', { artworkId, sourcePath }),
   listArtworkGallery: (artworkId: string) => invoke<GalleryImage[]>('list_artwork_gallery', { artworkId }),
-  addArtworkGalleryImage: (artworkId: string, dataBase64: string, caption: string | null) =>
-    invoke<GalleryImage>('add_artwork_gallery_image', { artworkId, dataBase64, caption }),
+  addArtworkGalleryImageFromPath: (artworkId: string, sourcePath: string, caption: string | null) =>
+    invoke<GalleryImage>('add_artwork_gallery_image_from_path', { artworkId, sourcePath, caption }),
   updateArtworkGalleryCaption: (imageId: string, caption: string | null) =>
     invoke<GalleryImage>('update_artwork_gallery_caption', { imageId, caption }),
   promoteArtworkGalleryImage: (artworkId: string, imageId: string) =>
@@ -63,5 +63,6 @@ export const api = {
   exportLedgerCsv: (kind: CsvRegisterKind, destination: string) =>
     invoke<string>('export_ledger_csv', {kind, destination}),
   financeOverview: (year: number) => invoke<FinanceOverview>('finance_overview', {year}),
+  mcpSetupInfo: () => invoke<McpSetup>('mcp_setup_info'),
   pricePreview: (widthCm: number, heightCm: number) => invoke<number|null>('price_preview', {widthCm,heightCm})
 };

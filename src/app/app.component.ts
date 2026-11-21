@@ -14,7 +14,7 @@ import type {
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
-  MediaAudit, MediaIssue, ReceiptAttachment
+  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
@@ -131,6 +131,9 @@ export class AppComponent implements OnInit {
   restoreCandidate: BackupSummary | null = null;
   lastRestore: RestoreSummary | null = null;
   mediaAudit: MediaAudit | null = null;
+  showGuide = false;
+  private readonly guideKey = 'repertica-first-run-guide';
+  mcpSetup: McpSetup | null = null;
 
   thumbnails: Record<string, string> = {};
   galleryArtwork: Artwork | null = null;
@@ -176,6 +179,7 @@ export class AppComponent implements OnInit {
       this.languageChoice = stored.ui_language ?? 'system';
       this.applyLanguage(chooseLanguage(stored.ui_language ?? system ?? navigator.language));
       this.initialized = true;
+      this.showGuide = !this.guideDismissed();
       await this.refresh();
     } catch (error) {
       this.errorMessage = this.error(error);
@@ -193,6 +197,41 @@ export class AppComponent implements OnInit {
       this.artworkOrder = 'recent';
     }
     if (section === 'collectors') this.expandedCollectorId = null;
+    if (section === 'settings' && this.initialized && !this.mcpSetup) void this.loadMcpSetup();
+  }
+  private guideDismissed(): boolean {
+    try { return localStorage.getItem(this.guideKey) === 'done'; } catch { return false; }
+  }
+  dismissGuide(): void {
+    try { localStorage.setItem(this.guideKey, 'done'); } catch { /* the guide simply reappears next time */ }
+    this.showGuide = false;
+  }
+  reopenGuide(): void {
+    try { localStorage.removeItem(this.guideKey); } catch { /* ignore */ }
+    this.navigate('overview');
+    this.showGuide = true;
+  }
+  async loadMcpSetup(): Promise<void> {
+    try {
+      this.mcpSetup = await api.mcpSetupInfo();
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    }
+    this.change.detectChanges();
+  }
+  get mcpConfigJson(): string {
+    const setup = this.mcpSetup;
+    if (!setup) return '';
+    return JSON.stringify({ mcpServers: { 'repertica-studio': { command: setup.command, args: setup.args } } }, null, 2);
+  }
+  async copyMcpConfig(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.mcpConfigJson);
+      this.notice = this.tr('Configurazione copiata');
+    } catch {
+      this.errorMessage = this.tr('Impossibile copiare: seleziona il testo e copialo a mano');
+    }
+    this.change.detectChanges();
   }
   get currentTitle(): string {
     return this.tr(this.sections.find(item => item.id === this.section)?.label ?? 'Repertica Studio');
@@ -490,25 +529,26 @@ export class AppComponent implements OnInit {
     await this.run(() => api.deleteArtwork(a.id), 'Opera eliminata');
     delete this.thumbnails[a.id];
   }
-  async onImage(event: Event, artwork: Artwork): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-    if (file.size > 12 * 1024 * 1024) {
-      this.errorMessage = 'Immagine troppo grande: massimo 12 MiB'; input.value = ''; return;
+  private async pickPhoto(title: string): Promise<string | null> {
+    const selected = await open({
+      directory: false, multiple: false, title,
+      filters: [{ name: 'JPEG / PNG / WebP', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
+    });
+    return typeof selected === 'string' ? selected : null;
+  }
+  async chooseCoverPhoto(artwork: Artwork): Promise<void> {
+    if (this.busy || !this.initialized) return;
+    try {
+      const path = await this.pickPhoto(this.tr('Foto'));
+      if (!path) return;
+      if (await this.run(() => api.saveArtworkImageFromPath(artwork.id, path), this.tr('Immagine principale salvata'))) {
+        delete this.thumbnails[artwork.id];
+        this.thumbnails[artwork.id] = (await api.artworkImage(artwork.id)) ?? '';
+      }
+    } catch (error) {
+      this.errorMessage = this.error(error);
     }
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-      reader.onerror = () => reject(new Error('Impossibile leggere il file locale'));
-      reader.readAsDataURL(file);
-    }).catch(error => { this.errorMessage = this.error(error); return ''; });
-    if (!base64) { input.value = ''; return; }
-    if (await this.run(() => api.saveArtworkImage(artwork.id, base64), 'Immagine principale salvata')) {
-      delete this.thumbnails[artwork.id];
-      this.thumbnails[artwork.id] = (await api.artworkImage(artwork.id)) ?? '';
-    }
-    input.value = '';
+    this.change.detectChanges();
   }
   async openGallery(artwork: Artwork): Promise<void> {
     if (this.busy) return;
@@ -572,21 +612,14 @@ export class AppComponent implements OnInit {
     }
     this.change.detectChanges();
   }
-  async addGalleryPhoto(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
+  async addGalleryPhoto(): Promise<void> {
     const artwork = this.galleryArtwork;
-    if (!file || !artwork) return;
+    if (!artwork || this.busy || this.galleryImages.length >= 20) return;
     try {
-      if (file.size > 12 * 1024 * 1024) throw new Error('Immagine troppo grande: massimo 12 MiB');
-      const dataBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
-        reader.onerror = () => reject(new Error('Impossibile leggere il file locale'));
-        reader.readAsDataURL(file);
-      });
+      const path = await this.pickPhoto(this.tr('Aggiungi fotografia'));
+      if (!path || this.galleryArtwork?.id !== artwork.id) return;
       if (await this.run(
-        () => api.addArtworkGalleryImage(artwork.id, dataBase64, this.galleryCaption),
+        () => api.addArtworkGalleryImageFromPath(artwork.id, path, this.galleryCaption),
         this.tr('Fotografia aggiunta alla galleria')
       )) {
         this.galleryImages = await api.listArtworkGallery(artwork.id);
@@ -594,10 +627,8 @@ export class AppComponent implements OnInit {
       }
     } catch (error) {
       this.errorMessage = this.error(error);
-    } finally {
-      input.value = '';
-      this.change.detectChanges();
     }
+    this.change.detectChanges();
   }
   async makeGalleryPrimary(image: GalleryImage): Promise<void> {
     const artwork = this.galleryArtwork;

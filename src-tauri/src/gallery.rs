@@ -13,7 +13,7 @@ pub struct GalleryImage {
     id: String, artwork_id: String, image_path: String,
     caption: Option<String>, created_at: String, sort_order: i64,
 }
-fn err(e: impl std::fmt::Display) -> String { e.to_string() }
+fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn row(r: &Row<'_>) -> rusqlite::Result<GalleryImage> {
     Ok(GalleryImage { id: r.get(0)?, artwork_id: r.get(1)?, image_path: r.get(2)?,
         caption: r.get(3)?, created_at: r.get(4)?, sort_order: r.get(5)? })
@@ -65,8 +65,16 @@ pub fn list_artwork_gallery(db: State<'_, Database>, artwork_id: String) -> Resu
 pub fn add_artwork_gallery_image(db: State<'_, Database>, artwork_id: String, data_base64: String, caption: Option<String>) -> Result<GalleryImage, String> {
     if data_base64.len() > 16_800_000 { return Err("Immagine troppo grande (massimo 12 MiB)".into()); }
     let bytes = STANDARD.decode(&data_base64).map_err(|_| "Immagine non valida")?;
-    if bytes.is_empty() || bytes.len() > 12 * 1024 * 1024 { return Err("Immagine vuota o troppo grande".into()); }
-    let (ext, _) = mime(&bytes).ok_or("Sono consentite solo immagini JPEG, PNG o WebP")?;
+    add_gallery_bytes(&db, &artwork_id, &bytes, caption)
+}
+#[tauri::command]
+pub fn add_artwork_gallery_image_from_path(db: State<'_, Database>, artwork_id: String, source_path: String, caption: Option<String>) -> Result<GalleryImage, String> {
+    let bytes = crate::commands::read_image_file(&source_path)?;
+    add_gallery_bytes(&db, &artwork_id, &bytes, caption)
+}
+fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Option<String>) -> Result<GalleryImage, String> {
+    if bytes.is_empty() || bytes.len() > crate::commands::MAX_IMAGE_BYTES { return Err("Immagine vuota o troppo grande".into()); }
+    let (ext, _) = mime(bytes).ok_or("Sono consentite solo immagini JPEG, PNG o WebP")?;
     let caption = normalize_caption(caption)?;
     let conn = db.conn.lock().map_err(err)?;
     let count: i64 = conn.query_row("SELECT count(*) FROM artwork_images WHERE artwork_id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
@@ -77,7 +85,7 @@ pub fn add_artwork_gallery_image(db: State<'_, Database>, artwork_id: String, da
     let relative = format!("media/{}.{}", Uuid::new_v4(), ext);
     let target = db.directory.join(&relative);
     let temp = db.directory.join(format!("{relative}.tmp"));
-    fs::write(&temp, &bytes).map_err(err)?;
+    fs::write(&temp, bytes).map_err(err)?;
     if let Err(e) = fs::rename(&temp, &target) { let _ = fs::remove_file(&temp); return Err(err(e)); }
     let stamp = Utc::now().to_rfc3339();
     if let Err(e) = conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)

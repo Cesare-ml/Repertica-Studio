@@ -13,6 +13,7 @@ Gestionale artistico **gratuito, open source e locale**, realizzato con Angular 
 - **Collezionisti**: anagrafica privata e note. Dalla lista si possono consultare le opere acquistate e aprirle nell'archivio; dalle opere vendute si può raggiungere il relativo collezionista.
 - **Vendite**: registrazione importi in centesimi, cliente e opera associati; una vendita per opera nella prima versione.
 - **Certificati**: registro immutabile con numero progressivo univoco, fotografia della scheda al momento dell'emissione e stampa/salvataggio PDF tramite dialogo di stampa.
+- **Assistenti IA locali (MCP)**: server opzionale in sola lettura via STDIO (`--mcp`), senza rete e senza contatti né fotografie; configurazione pronta in Impostazioni. Vedi [docs/MCP.md](docs/MCP.md).
 - **Offline**: SQLite incorporato e fotografie nella cartella privata dell'applicazione.
 - **Backup e ripristino**: selezione di qualsiasi cartella accessibile (anche disco esterno/NAS), backup SQLite e media con manifest SHA-256, verifica e ripristino con conservazione dell'archivio precedente.
 - **Aggiornamenti firmati**: architettura predisposta; da abilitare solo quando verrà configurata una chiave di firma e pubblicate release compatibili.

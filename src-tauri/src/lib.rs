@@ -1,12 +1,14 @@
 mod backup;
 mod commands;
-mod db;
+pub mod db;
 mod export;
 mod finance;
 mod gallery;
 mod media_audit;
 mod models;
 mod receipts;
+mod util;
+pub mod mcp;
 mod receipt_attachments;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,8 +40,10 @@ pub fn run() {
             commands::data_directory,
             commands::save_artwork_image,
             commands::artwork_image_data,
+            commands::save_artwork_image_from_path,
             gallery::list_artwork_gallery,
             gallery::add_artwork_gallery_image,
+            gallery::add_artwork_gallery_image_from_path,
             gallery::update_artwork_gallery_caption,
             gallery::promote_artwork_gallery_image,
             gallery::move_artwork_gallery_image,
@@ -66,7 +70,8 @@ pub fn run() {
             receipt_attachments::sale_receipt_attachment_data,
             receipt_attachments::remove_sale_receipt_attachment,
             receipt_attachments::export_sale_receipt_attachment,
-            export::export_ledger_csv
+            export::export_ledger_csv,
+            mcp::mcp_setup_info
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");

@@ -35,7 +35,7 @@ test('gallery IPC, schema v3 and backup consistency are wired', () => {
   const db = get('src-tauri/src/db.rs');
   const backup = get('src-tauri/src/backup.rs');
   const api = get('src/app/api.ts');
-  for (const command of ['list_artwork_gallery', 'add_artwork_gallery_image',
+  for (const command of ['list_artwork_gallery', 'add_artwork_gallery_image_from_path',
     'artwork_gallery_image_data', 'delete_artwork_gallery_image']) {
     assert.match(native, new RegExp('gallery::' + command));
     assert.ok(api.includes("'" + command + "'"));
@@ -92,4 +92,36 @@ test('backup closes the manifest handle before publishing the folder (Windows re
   const closing = backup.indexOf('Windows refuses to');
   const rename = backup.indexOf('fs::rename(&partial, &target)');
   assert.ok(closing > 0 && rename > closing);
+});
+
+test('photos are picked with the native dialog and read by path, not pushed as base64 through the UI', () => {
+  const ui = get('src/app/app.component.ts');
+  const html = get('src/app/app.component.html');
+  const api = get('src/app/api.ts');
+  assert.doesNotMatch(html, /type="file"/);
+  assert.doesNotMatch(ui, /readAsDataURL/);
+  assert.match(api, /'save_artwork_image_from_path'/);
+  assert.match(get('src-tauri/src/lib.rs'), /commands::save_artwork_image_from_path/);
+});
+
+test('local MCP server is read-only, STDIO-only and started with --mcp', () => {
+  const source = get('src-tauri/src/mcp.rs');
+  const mcp = source.slice(0, source.indexOf('#[cfg(test)]')); // production code only
+  const main = get('src-tauri/src/main.rs');
+  assert.match(main, /"--mcp"/);
+  assert.match(mcp, /SQLITE_OPEN_READ_ONLY/);
+  assert.match(mcp, /query_only/);
+  assert.doesNotMatch(mcp, /TcpListener|UdpSocket|reqwest|hyper|tokio/);
+  assert.doesNotMatch(mcp, /INSERT |UPDATE |DELETE |DROP |ALTER /);
+  assert.match(get('src-tauri/src/lib.rs'), /mcp::mcp_setup_info/);
+});
+
+test('first-run guide can be dismissed, reopened and covers backups', () => {
+  const html = get('src/app/app.component.html');
+  const ui = get('src/app/app.component.ts');
+  assert.match(html, /showGuide/);
+  assert.match(html, /dismissGuide\(\)/);
+  assert.match(html, /reopenGuide\(\)/);
+  assert.match(ui, /localStorage/);
+  assert.match(html, /Assistenti IA locali \(MCP\)/);
 });

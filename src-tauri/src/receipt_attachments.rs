@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 const MAX_BYTES: usize = 12 * 1024 * 1024;
 const FIELDS: &str = "receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at";
-fn err(e: impl std::fmt::Display) -> String { e.to_string() }
+fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReceiptAttachment {
@@ -226,7 +226,7 @@ fn export_core(db: &Database, receipt_id: &str, destination: &Path) -> Result<St
         let _ = fs::remove_file(&target);
         return Err(err(e));
     }
-    Ok(target.to_string_lossy().into_owned())
+    Ok(crate::util::display_path(&target))
 }
 #[tauri::command]
 pub fn export_sale_receipt_attachment(
@@ -262,9 +262,10 @@ mod tests {
         assert_eq!(saved.size_bytes, 16);
         assert!(data_core(&db, "r").unwrap().starts_with("data:application/pdf;base64,"));
         let exported = tmp.path().join("copy.pdf");
-        // The reported path is canonical (`\\?\` prefixed on Windows).
+        // The reported path is canonical without the Windows verbatim prefix.
         let reported = export_core(&db, "r", &exported).unwrap();
-        assert_eq!(Path::new(&reported), fs::canonicalize(&exported).unwrap());
+        assert_eq!(reported, crate::util::display_path(&fs::canonicalize(&exported).unwrap()));
+        assert!(!reported.starts_with(r"\\?\"));
         assert_eq!(fs::read(&exported).unwrap(), b"%PDF-1.7\nreceipt");
         assert!(export_core(&db, "r", &exported).is_err()); // never overwrite
         assert!(export_core(&db, "r", &tmp.path().join("wrong.png")).is_err());

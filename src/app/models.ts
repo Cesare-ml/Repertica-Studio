@@ -116,3 +116,5 @@ export interface ReceiptYearOverview {
 export interface SaleBalance {
   sale_id: string; sale_cents: number; received_cents: number; outstanding_cents: number;
 }
+
+export interface McpSetup { command: string; args: string[]; dataDir: string; }

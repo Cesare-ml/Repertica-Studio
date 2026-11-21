@@ -21,8 +21,8 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 - Certificato esportabile come PDF tramite stampa di sistema (o stampante PDF), non ancora PDF/A firmato digitalmente.
 - Sono supportate immagini principali e fino a 20 immagini aggiuntive per opera, nei formati PNG, JPEG o WebP, massimo 12 MiB per immagine. Le immagini aggiuntive hanno didascalia facoltativa e sono caricate solo su richiesta in anteprima.
 - La migrazione da PostgreSQL del Gestionale Opere non è ancora automatizzata.
-- Backup e ripristino locali ora disponibili in impostazioni, con snapshot SQLite e media, verifica SHA-256, integrità SQLite e copia di sicurezza prima del ripristino. La suite Rust (63 test, backup e ripristino compresi) è stata eseguita con successo su Windows 11 il 2026-11-21 e ora gira anche nella CI `windows-latest`; in precedenza 13 test di backup fallivano su Windows perché `manifest.json` restava aperto durante la rinomina della cartella. Mancano ancora test di accettazione dell'app installata su Windows/macOS e su dischi esterni/NAS reali; restano da sviluppare versionamento di immagini, gestione multivaluta, IVA, transazioni multi-opera e fatture.
-- Nessun server MCP nella build MVP iniziale: rimane obiettivo successivo, da includere come processo locale read-only con permessi rigorosi.
+- Backup e ripristino locali ora disponibili in impostazioni, con snapshot SQLite e media, verifica SHA-256, integrità SQLite e copia di sicurezza prima del ripristino. La suite Rust (oltre 80 test, backup e ripristino compresi) è stata eseguita con successo su Windows 11 il 2026-11-21 e ora gira anche nella CI `windows-latest`; in precedenza 13 test di backup fallivano su Windows perché `manifest.json` restava aperto durante la rinomina della cartella. Mancano ancora test di accettazione dell'app installata su Windows/macOS e su dischi esterni/NAS reali; restano da sviluppare versionamento di immagini, gestione multivaluta, IVA, transazioni multi-opera e fatture.
+- Server MCP locale **in sola lettura** via STDIO (`Repertica Studio --mcp`), senza porte di rete e senza dati di contatto o fotografie: vedi [MCP.md](MCP.md). Resta da collaudare con assistenti reali (per esempio Claude Desktop) sui tre sistemi operativi.
 - Gli aggiornamenti firmati via GitHub Releases non vengono abilitati prima di release, generazione chiavi e test su tutte le piattaforme.
 - Non usare ancora come archivio di produzione unico.
 
@@ -38,12 +38,11 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 
 ## Prossimi lavori
 
-1. Collaudo integrato su Windows/macOS/Linux, test su USB/NAS e gestione degli errori di disco pieno per backup e ripristino (formato a cartelle versionate con manifest, non ZIP).
+1. Collaudo integrato su Windows/macOS/Linux, test su USB/NAS reali (il disco pieno è ora riconosciuto e segnalato con un messaggio chiaro, ma non è stato provato su un'unità realmente piena) (formato a cartelle versionate con manifest, non ZIP).
 2. Importazione opzionale e assistita dal Gestionale Opere, solo da export esplicito e con dati dell'utente.
 3. Migliorare certificati PDF, stampa e firma, ordinamento/gestione avanzata della galleria e ricerche avanzate.
-4. Collegamento MCP locale via STDIO senza aprire porte di rete.
-5. Aggiornamenti Tauri firmati via GitHub Release, solo dopo test end-to-end.
-6. Accessibilità, localizzazione e test UI desktop.
+4. Aggiornamenti Tauri firmati via GitHub Release, solo dopo test end-to-end.
+5. Accessibilità, localizzazione completa e test UI desktop.
 
 ## Backup e ripristino (incremento 0.1.x)
 
@@ -80,3 +79,12 @@ Non è ancora disponibile la gestione di più archivi **simultaneamente** nella 
 - Gli snapshot storici dei certificati con JSON malformato, struttura diversa da un oggetto o `image_path` di tipo errato sono segnalati come **Snapshot del certificato non valido** (identificativo del certificato e campo `snapshot_json`, mai il contenuto JSON). Un certificato senza fotografia, con `image_path` assente o `null`, è valido per questa verifica e non genera un falso allarme. Il conteggio include ogni riferimento fotografico e ogni snapshot storico non interpretabile; una foto usata da più certificati può essere verificata più volte. La diagnostica rimane di sola lettura e non ripara né riscrive documenti storici.
 - **Limite importante:** non esistono hash storici registrati per ogni fotografia dell'archivio attivo, quindi questo controllo non può garantire che i byte non siano cambiati. Il backup completo dispone invece di un manifest SHA-256 e della relativa verifica.
 - Se il controllo segnala un problema, non cancellare immagini o sovrascrivere backup: recuperare i file da una copia verificata e collaudare il ripristino separatamente.
+
+## Consolidamento (novembre 2026)
+
+- **Errori comprensibili:** vincoli SQLite, trigger, disco pieno, archivio occupato e permessi negati sono tradotti in messaggi d'azione (`src-tauri/src/util.rs`); gli errori sconosciuti restano invariati.
+- **Disco pieno:** un backup o un ripristino interrotto per spazio insufficiente rimuove la cartella parziale e non tocca l'archivio attivo; il messaggio indica di liberare spazio. Il controllo preventivo dello spazio libero non è implementato.
+- **Percorsi:** l'interfaccia non mostra più il prefisso `\\?\` di Windows.
+- **Certificati:** data di emissione e anno del seriale seguono il calendario locale, non UTC.
+- **Fotografie:** copertina e galleria si scelgono con il dialogo di sistema e il file è letto dal programma dopo averne controllato dimensione e tipo; non transita più come base64 nell'interfaccia.
+- **Guida di primo avvio:** pannello di benvenuto nella Panoramica (cinque passi, apribile di nuovo da Impostazioni) e suggerimenti nelle liste vuote. Lo stato «guida nascosta» è salvato nel browser incorporato dell'app, non nell'archivio, quindi non entra nei backup.
