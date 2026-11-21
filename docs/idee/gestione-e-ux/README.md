@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (quindicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (sedicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -28,6 +28,15 @@ Aggiornato: **2026-11-21** (quindicesima ricognizione). Stato delle proposte: **
 | [REPS-UX-020](REPS-UX-020-etichette-inventariali-identificativi-scansionabili.md) | Etichette inventariali stampabili e identificazione locale con codici scansionabili, senza azioni automatiche | P1–P2* | Proposta — da valutare |
 | [REPS-UX-021](REPS-UX-021-acquisizioni-opere-terzi-titolo-documentato.md) | Pratiche di acquisizione di opere da terzi: titolo dichiarato, fonti, acquisti e donazioni senza confondere custodia e pagamenti | P2 | Proposta — da valutare |
 | [REPS-UX-022](REPS-UX-022-opere-composte-componenti-fisici.md) | Opere composte: distinta dei componenti fisici di **una sola opera**, senza confonderli con opere autonome, edizioni o movimenti | P2 | Proposta — da valutare |
+| [REPS-UX-023](REPS-UX-023-prezzi-richiesti-listini-storico.md) | Prezzo richiesto per opera, distinzione dal suggerito/venduto e storico delle revisioni; listino locale condivisibile solo su scelta | P1–P2* | Proposta — da valutare |
+
+## Sedicesima ricognizione (21 novembre 2026) — REPS-UX-023
+
+- **[REPS-UX-023 — Prezzi richiesti, listino e storico delle revisioni](REPS-UX-023-prezzi-richiesti-listini-storico.md):** approfondita un'esigenza commerciale distinta da vendite e formula del coefficiente: conservare il prezzo **richiesto** per una singola opera, le sue rettifiche datate e un listino delle opere disponibili con anteprima dei campi divulgabili. Un prezzo suggerito non viene trasformato automaticamente in listino; né offerte, vendite o incassi vengono creati o cambiati.
+- **Verifica su `main`:** README, MVP, ECONOMY-I18N, modelli TypeScript e ricerca nel repository confermano il suggerimento per superficie × tariffa × coefficiente, la registrazione delle vendite in EUR e gli incassi distinti, ma non evidenziano un campo o un registro dei **prezzi richiesti** in `Artwork`. È una lacuna funzionale per alcuni operatori, **non un bug provato**. Indicazioni di utilizzo professionale in [ITGallery — artwork prices](https://support.itgalleryapp.com/article/766-artwork-prices) e [WrkLst — price lists](https://wrklst.art/product/works), senza adottare i loro modelli SaaS.
+- **Niente doppioni:** UX-002 = offerte individuali e prenotazioni; UX-003 = costo/margine per opera; UX-016 = valutazioni assicurative; UX-012 = conto vendita e commissioni; UX-007 = impaginazione dossier. Nel [filone tecnico PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), TECH-001/008/018 riguardano infrastruttura di interscambio, filtri ed esportazioni: nessuno dei loro file è stato modificato.
+- **Salvaguardie:** storico di listino separato da certificati e importi realizzati, nessun zero inventato per opere non prezzate, stato «su richiesta» distinto, riservatezza dei prezzi interni e anteprima della condivisione. SQLite locale, nessun account/cloud, backup completo nella cartella scelta e lingua OS con fallback inglese. Priorità **P1–P2 soltanto suggerita** per artisti/gallerie che aggiornano listini; verificare prima casi d'uso e valore della cronologia.
+- **Perimetro:** una scheda Markdown nuova e questo indice, entrambi esclusivamente sotto `docs/idee/gestione-e-ux/`. Tutte le **23** idee restano **«Proposta — da valutare»**. Nessuna approvazione, assegnazione, modifica software, issue operativa o merge. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) rimane in bozza.
 
 ## Quindicesima ricognizione (21 novembre 2026) — nuova proposta REPS-UX-022
 
