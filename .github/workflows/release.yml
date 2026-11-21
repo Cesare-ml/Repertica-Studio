@@ -62,6 +62,22 @@ jobs:
           workspaces: src-tauri
       - run: npm install --no-audit --no-fund
       - run: npm run prepare:icons
+      - name: Add the public key to the release configuration
+        # The bundler reads the key from the configuration (the Rust build reads it from the environment).
+        shell: bash
+        env:
+          PUBLIC_KEY: ${{ vars.REPERTICA_UPDATER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const file = 'src-tauri/tauri.release.conf.json';
+            const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const key = (process.env.PUBLIC_KEY || '').trim();
+            if (!key) throw new Error('REPERTICA_UPDATER_PUBLIC_KEY is empty');
+            config.plugins = { updater: { pubkey: key } };
+            fs.writeFileSync(file, JSON.stringify(config, null, 2));
+          "
       - name: Build, sign and publish
         uses: tauri-apps/tauri-action@v0
         env:
