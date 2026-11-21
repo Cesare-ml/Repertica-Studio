@@ -1,6 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
-  Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
+  Artwork, ArtworkInput, Brochure, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup,
@@ -14,6 +14,11 @@ import type { CsvRegisterKind } from './csv-registers';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
 export const api = {
+  listBrochures: () => invoke<Brochure[]>('list_brochures'),
+  saveBrochure: (input: Brochure) => invoke<Brochure>('save_brochure', { input }),
+  deleteBrochure: (id: string) => invoke<void>('delete_brochure', { id }),
+  exportBrochurePdf: (brochureId: string, destination: string) =>
+    invoke<string>('export_brochure_pdf', { brochureId, destination }),
   listArtworks: () => invoke<Artwork[]>('list_artworks'),
   saveArtwork: (input: ArtworkInput) => invoke<Artwork>('save_artwork', { input }),
   createArtworkFull: (input: NewArtworkInput) => invoke<Artwork>('create_artwork_full', { input }),
