@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (settima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (ottava ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -16,6 +16,7 @@ Data ricognizione: **2026-11-21** (settima ricognizione). Stato uniforme: **Prop
 | [REPS-TECH-008](REPS-TECH-008-viste-salvate-filtri-ricerca-locale.md) | Viste nominative, filtri combinati e ricerca strutturata nell'archivio attivo (non federazione) | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-009](REPS-TECH-009-catalogo-verifiche-conservazione-backup.md) | Catalogo, verifica nel tempo e conservazione prudente delle copie di backup complete | P2 | Proposta — da valutare |
 | [REPS-TECH-010](REPS-TECH-010-storico-revisioni-metadati.md) | Cronologia locale delle revisioni dei metadati delle opere e recupero selettivo, senza alterare certificati o vendite | P2 | Proposta — da valutare |
+| [REPS-TECH-011](REPS-TECH-011-profili-multiarchivio-apertura-sicura.md) | Profili di più archivi **attivi ma indipendenti**, apertura e cambio di contesto sicuri, senza merge o sync | P1–P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -75,6 +76,13 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 - **Salvaguardie chiave:** prima fase riservata ai **metadati delle opere**, senza copiatura automatica di recapiti dei collezionisti o byte delle fotografie. Non sostituisce backup e non promette di recuperare record o file eliminati. Ripristinare un campo significa **nuova revisione con confronto preventivo**, mai cancellazione della storia; evitare sovrascritture concorrenti e violazioni del vincolo sulle opere vendute.
 - **Convalide necessarie:** raccogliere esempi reali di errori di catalogazione; misurare costi/volumi e valutare retention/privacy; test transazionali, migrazioni da archivi senza cronologia e backup/restore nativi. Priorità **P2 soltanto suggerita**.
 - **Coordinamento e perimetro:** esaminate le 14 proposte UX-001…014, tutte le precedenti TECH-001…009, le issue aperte e `main` del 21/11/2026. Modificati solo file Markdown di questa cartella; nessuna modifica alla cartella UX, al codice, ai workflow, alle dipendenze o alle configurazioni. **Proposta — da valutare**, senza assegnazione, approvazione o merge.
+
+## Ottava ricognizione — 21 novembre 2026
+
+- **[REPS-TECH-011](REPS-TECH-011-profili-multiarchivio-apertura-sicura.md):** il [MVP](../../MVP.md) esclude esplicitamente la gestione di più archivi nella stessa installazione e [lib.rs](../../../src-tauri/src/lib.rs) apre un solo SQLite all'avvio. Proposta di gestione di **archivi di lavoro indipendenti**, uno solo aperto in scrittura alla volta, con cartella scelta dall'utente, verifica preventiva, cambio controllato e nessun ripristino usato come selettore. Questa capacità è distinta da TECH-004 (consultazione read-only di backup storici), TECH-001 (interscambio) e TECH-009 (catalogo di copie di sicurezza). Prima di svilupparla vanno dimostrati casi d'uso multiarchivio reali e test su disco/USB/NAS.
+- **Rilievo di aggiornamento su TECH-003:** nel `main` è ora disponibile la [diagnostica fotografie read-only](../../../src-tauri/src/media_audit.rs), richiamata da Tauri e documentata in [MVP](../../MVP.md): verifica riferimenti, presenza, dimensioni e intestazioni JPEG/PNG/WebP, con massimo 100 problemi visibili. Non registra hash storici, non riconosce orfani e non recupera i file: la proposta TECH-003 resta **solo parzialmente non realizzata**. La scheda è stata annotata per non riproporre il controllo di base come novità.
+- **Confronto con l'altro filone:** verificate le 15 proposte [UX-001…015, PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Nessuna delle schede affronta la selezione della connessione SQLite attiva. Non sono state alterate le schede UX, né è stata approvata la gestione multiarchivio.
+- **Branch documentale:** [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), ancora in bozza e senza merge; tutti i file modificati in questo filone sono Markdown nella cartella tecnica. Stato uniforme **Proposta — da valutare**.
 
 ## Regole per le prossime ricognizioni
 
