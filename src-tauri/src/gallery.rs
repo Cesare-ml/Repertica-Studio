@@ -91,6 +91,51 @@ pub fn add_artwork_gallery_image(db: State<'_, Database>, artwork_id: String, da
 pub fn update_artwork_gallery_caption(db: State<'_, Database>, image_id: String, caption: Option<String>) -> Result<GalleryImage, String> {
     update_caption_core(&db, &image_id, caption)
 }
+
+/** Promote a gallery photo without copying or deleting media. If a cover exists,
+ * it becomes the gallery image in the same transaction. Certificates may contain
+ * historical media paths, so both original files must remain untouched. */
+fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), String> {
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let new_primary: String = tx.query_row(
+        "SELECT image_path FROM artwork_images WHERE id=?1 AND artwork_id=?2",
+        params![image_id, artwork_id], |r| r.get(0),
+    ).optional().map_err(err)?.ok_or("Fotografia non trovata per questa opera")?;
+    let old_primary: Option<String> = tx.query_row(
+        "SELECT image_path FROM artworks WHERE id=?1",
+        params![artwork_id], |r| r.get(0),
+    ).optional().map_err(err)?.ok_or("Opera non trovata")?;
+
+    // Reject invalid references before changing either side. Never follow media symlinks.
+    for path in std::iter::once(new_primary.as_str()).chain(old_primary.as_deref()) {
+        if !relative_media_path(path) { return Err("Percorso media non valido".into()); }
+        let file_type = fs::symlink_metadata(db.directory.join(path)).map_err(err)?.file_type();
+        if !file_type.is_file() || file_type.is_symlink() {
+            return Err("File media non valido".into());
+        }
+    }
+    if old_primary.as_deref() == Some(new_primary.as_str()) {
+        return Err("Immagini principale e aggiuntiva duplicate".into());
+    }
+
+    tx.execute("UPDATE artworks SET image_path=?2,updated_at=?3 WHERE id=?1",
+        params![artwork_id, new_primary, Utc::now().to_rfc3339()]).map_err(err)?;
+    if let Some(old_path) = old_primary {
+        // The old cover has no caption. Do not retain the promoted photo's
+        // potentially misleading caption on a different image.
+        tx.execute("UPDATE artwork_images SET image_path=?2,caption=NULL WHERE id=?1",
+            params![image_id, old_path]).map_err(err)?;
+    } else {
+        // No old cover to swap: the gallery reference becomes the primary one.
+        tx.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+    }
+    tx.commit().map_err(err)
+}
+#[tauri::command]
+pub fn promote_artwork_gallery_image(db: State<'_, Database>, artwork_id: String, image_id: String) -> Result<(), String> {
+    promote_core(&db, &artwork_id, &image_id)
+}
 #[tauri::command]
 pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
     let conn = db.conn.lock().map_err(err)?;
@@ -178,4 +223,85 @@ mod tests {
         assert!(conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
             VALUES('orphan','missing','media/other.png','t')", []).is_err());
     }
+    #[test]
+    fn promoting_photo_swaps_cover_atomically_and_preserves_both_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        fs::write(db.directory.join("media/cover.png"), b"old cover").unwrap();
+        fs::write(db.directory.join("media/side.png"), b"new cover").unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+                VALUES('a','A','Art','media/cover.png','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('b','B','Other','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at)
+                VALUES('side','a','media/side.png','Back of painting','t')", []).unwrap();
+            assert!(conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('orphan','x','media/other.png','t')", []).is_err());
+        }
+        assert!(promote_core(&db, "b", "side").is_err());
+        assert!(promote_core(&db, "a", "missing").is_err());
+        promote_core(&db, "a", "side").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let main: String = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
+        let (gallery, caption, created): (String, Option<String>, String) = conn.query_row(
+            "SELECT image_path,caption,created_at FROM artwork_images WHERE id='side'",
+            [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(main, "media/side.png");
+        assert_eq!(gallery, "media/cover.png");
+        assert_eq!(caption, None);
+        assert_eq!(created, "t");
+        assert!(db.directory.join(&main).is_file());
+        assert!(db.directory.join(&gallery).is_file());
+        let other: Option<String> = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='b'", [], |r| r.get(0)).unwrap();
+        assert_eq!(other, None);
+    }
+
+    #[test]
+    fn first_cover_promotion_removes_only_gallery_row_not_media() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        fs::write(db.directory.join("media/first.jpg"), b"photo").unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','Art','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('photo','a','media/first.jpg','t')", []).unwrap();
+        }
+        promote_core(&db, "a", "photo").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let main: String = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
+        let remaining: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM artwork_images WHERE artwork_id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(main, "media/first.jpg");
+        assert_eq!(remaining, 0);
+        assert!(db.directory.join(&main).is_file());
+    }
+
+    #[test]
+    fn promotion_rejects_missing_media_without_changing_references() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','Art','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('missing','a','media/missing.png','t')", []).unwrap();
+        }
+        assert!(promote_core(&db, "a", "missing").is_err());
+        let conn = db.conn.lock().unwrap();
+        let main: Option<String> = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(main, None);
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM artwork_images WHERE id='missing'", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+    }
+
 }

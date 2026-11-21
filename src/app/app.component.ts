@@ -550,6 +550,27 @@ export class AppComponent implements OnInit {
       this.change.detectChanges();
     }
   }
+  async makeGalleryPrimary(image: GalleryImage): Promise<void> {
+    const artwork = this.galleryArtwork;
+    if (!artwork || image.artwork_id !== artwork.id || this.busy) return;
+    if (!window.confirm(this.tr('Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.'))) return;
+    const promoted = await this.run(async () => {
+      await api.promoteArtworkGalleryImage(artwork.id, image.id);
+      // Refresh must reload the cover instead of reusing the previous thumbnail.
+      delete this.thumbnails[artwork.id];
+    }, this.tr('Fotografia principale aggiornata'));
+    if (!promoted || this.galleryArtwork?.id !== artwork.id) return;
+    this.galleryArtwork = this.artworks.find(item => item.id === artwork.id) ?? artwork;
+    this.galleryPreviews = {};
+    this.cancelGalleryCaptionEdit();
+    try {
+      this.galleryImages = await api.listArtworkGallery(artwork.id);
+      if (this.galleryImages.length) await this.loadGalleryPreview(this.galleryImages[0]);
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    }
+    this.change.detectChanges();
+  }
   async removeGalleryPhoto(image: GalleryImage): Promise<void> {
     if (!window.confirm(this.tr('Eliminare questa fotografia aggiuntiva?'))) return;
     const artwork = this.galleryArtwork;
