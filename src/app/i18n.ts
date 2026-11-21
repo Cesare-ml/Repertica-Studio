@@ -5,6 +5,18 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  'Galleria': 'Gallery',
+  'Fotografie dell’opera': 'Artwork photographs',
+  'La foto principale resta nell’archivio. Qui puoi aggiungere fino a 20 fotografie complementari, tutte conservate localmente e nei backup.': 'The primary photo remains in the archive. Add up to 20 supplementary photos, stored locally and included in backups.',
+  'Didascalia facoltativa': 'Optional caption',
+  'Aggiungi fotografia': 'Add photo',
+  'Visualizza foto': 'View photo',
+  'Senza didascalia': 'No caption',
+  'Nessuna fotografia aggiuntiva.': 'No additional photographs.',
+  'Fotografia aggiunta alla galleria': 'Photo added to gallery',
+  'Eliminare questa fotografia aggiuntiva?': 'Delete this additional photograph?',
+  'Fotografia eliminata': 'Photograph deleted',
+
   'Esporta vendite CSV': 'Export sales CSV',
   'Esporta spese CSV': 'Export expenses CSV',
   'Registro vendite esportato in CSV locale.': 'Sales register exported to local CSV.',

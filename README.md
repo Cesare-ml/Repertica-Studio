@@ -8,7 +8,7 @@ Gestionale artistico **gratuito, open source e locale**, realizzato con Angular 
 
 ## Funzionalità MVP
 
-- **Opere**: archivio con codice, titolo, tecnica, anno, misure, stato, ubicazione, descrizione e immagine principale. Ricerca anche per supporto, descrizione e nome dell'acquirente, filtri per stato e collezionista, ordinamento per titolo o anno.
+- **Opere**: archivio con codice, titolo, tecnica, anno, misure, stato, ubicazione, descrizione, immagine principale e galleria di fino a 20 fotografie aggiuntive con didascalie. Ricerca anche per supporto, descrizione e nome dell'acquirente, filtri per stato e collezionista, ordinamento per titolo o anno.
 - **Collezionisti**: anagrafica privata e note. Dalla lista si possono consultare le opere acquistate e aprirle nell'archivio; dalle opere vendute si può raggiungere il relativo collezionista.
 - **Vendite**: registrazione importi in centesimi, cliente e opera associati; una vendita per opera nella prima versione.
 - **Certificati**: registro immutabile con numero progressivo univoco, fotografia della scheda al momento dell'emissione e stampa/salvataggio PDF tramite dialogo di stampa.
@@ -37,7 +37,7 @@ Per creare l'app di produzione: `npm run tauri:build`. Sono previsti controlli C
 
 Il database `repertica.sqlite` viene creato automaticamente nella cartella app-local-data di Repertica Studio. Le immagini vengono salvate nella sottocartella `media/`. È possibile visualizzare il percorso in **Impostazioni**. Le operazioni ordinarie non richiedono Internet.
 
-**Backup**: da **Impostazioni → Backup del tuo archivio**, scegli una cartella locale, un'unità USB, un percorso NAS raggiungibile o persino una cartella che contiene altri archivi. L'app crea sempre una sottocartella nuova `ReperticaStudio-backup-...` con `repertica.sqlite`, `media/` e `manifest.json`. Il database è acquisito con `VACUUM INTO` per ottenere uno snapshot coerente anche con journaling WAL. Tutti i file vengono verificati con SHA-256; non serve copiare manualmente SQLite.
+**Backup**: da **Impostazioni → Backup del tuo archivio**, scegli una cartella locale, un'unità USB, un percorso NAS raggiungibile o persino una cartella che contiene altri archivi. L'app crea sempre una sottocartella nuova `ReperticaStudio-backup-...` con `repertica.sqlite`, `media/` e `manifest.json`. Il database è acquisito con `VACUUM INTO` per ottenere uno snapshot coerente anche con journaling WAL. Tutti i file vengono verificati con SHA-256, comprese le immagini aggiuntive della galleria; non serve copiare manualmente SQLite.
 
 **Ripristino**: seleziona una singola sottocartella di backup. Prima di confermare, l'app verifica hash, integrità SQLite e riferimenti delle immagini. Durante il ripristino una copia integrale dell'archivio precedente viene conservata nella cartella padre di quella attiva. Il ripristino **sostituisce** l'archivio in uso, non fonde due archivi diversi.
 
@@ -49,7 +49,7 @@ La logica è stata progettata prendendo come riferimento i domini del repository
 
 - `src/`: interfaccia Angular standalone e comando IPC tipizzato.
 - `src-tauri/src/db.rs`: schema SQLite e inizializzazione.
-- `src-tauri/src/commands.rs`: operazioni native e controlli di integrità.
+- `src-tauri/src/commands.rs` e `gallery.rs`: operazioni native, galleria immagini e controlli di integrità.
 - `docs/MVP.md`: criteri, vincoli e roadmap.
 - `.github/workflows/ci.yml`: verifica TypeScript e Rust.
 

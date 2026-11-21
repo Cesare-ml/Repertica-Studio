@@ -11,7 +11,7 @@ import type { ArtworkOrder } from './archive-filters';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
-  StudioSettings, Expense, ExpenseInput, FinanceOverview
+  StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
@@ -116,6 +116,10 @@ export class AppComponent implements OnInit {
   lastRestore: RestoreSummary | null = null;
 
   thumbnails: Record<string, string> = {};
+  galleryArtwork: Artwork | null = null;
+  galleryImages: GalleryImage[] = [];
+  galleryPreviews: Record<string, string> = {};
+  galleryCaption = '';
   artworkDialog = false;
   collectorDialog = false;
   saleDialog = false;
@@ -322,6 +326,7 @@ export class AppComponent implements OnInit {
     try {
       this.lastRestore = await api.restoreBackup(candidate.directory);
       this.thumbnails = {};
+      this.closeGallery();
       this.restoreCandidate = null;
       await this.refresh();
       this.notice = 'Archivio ripristinato e verificato. Copia precedente: ' + this.lastRestore.previousArchive;
@@ -448,6 +453,72 @@ export class AppComponent implements OnInit {
       this.thumbnails[artwork.id] = (await api.artworkImage(artwork.id)) ?? '';
     }
     input.value = '';
+  }
+  async openGallery(artwork: Artwork): Promise<void> {
+    if (this.busy) return;
+    this.galleryArtwork = artwork;
+    this.galleryImages = [];
+    this.galleryPreviews = {};
+    this.galleryCaption = '';
+    try {
+      this.galleryImages = await api.listArtworkGallery(artwork.id);
+      if (this.galleryImages.length) await this.loadGalleryPreview(this.galleryImages[0]);
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    }
+    this.change.detectChanges();
+  }
+  closeGallery(): void {
+    this.galleryArtwork = null;
+    this.galleryImages = [];
+    this.galleryPreviews = {};
+    this.galleryCaption = '';
+  }
+  async loadGalleryPreview(image: GalleryImage): Promise<void> {
+    if (this.galleryPreviews[image.id]) return;
+    try {
+      const data = await api.artworkGalleryImageData(image.id);
+      if (this.galleryArtwork?.id === image.artwork_id) this.galleryPreviews[image.id] = data;
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    }
+    this.change.detectChanges();
+  }
+  async addGalleryPhoto(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    const artwork = this.galleryArtwork;
+    if (!file || !artwork) return;
+    try {
+      if (file.size > 12 * 1024 * 1024) throw new Error('Immagine troppo grande: massimo 12 MiB');
+      const dataBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+        reader.onerror = () => reject(new Error('Impossibile leggere il file locale'));
+        reader.readAsDataURL(file);
+      });
+      if (await this.run(
+        () => api.addArtworkGalleryImage(artwork.id, dataBase64, this.galleryCaption),
+        this.tr('Fotografia aggiunta alla galleria')
+      )) {
+        this.galleryImages = await api.listArtworkGallery(artwork.id);
+        this.galleryCaption = '';
+      }
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    } finally {
+      input.value = '';
+      this.change.detectChanges();
+    }
+  }
+  async removeGalleryPhoto(image: GalleryImage): Promise<void> {
+    if (!window.confirm(this.tr('Eliminare questa fotografia aggiuntiva?'))) return;
+    const artwork = this.galleryArtwork;
+    if (await this.run(() => api.deleteArtworkGalleryImage(image.id), this.tr('Fotografia eliminata')) && artwork) {
+      delete this.galleryPreviews[image.id];
+      this.galleryImages = await api.listArtworkGallery(artwork.id);
+      this.change.detectChanges();
+    }
   }
   newCollector(): void { this.collectorDraft = freshCollector(); this.collectorDialog = true; }
   editCollector(c: Collector): void {

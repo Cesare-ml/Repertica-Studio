@@ -93,9 +93,20 @@ pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artw
 pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(err)?;
     let old_image = artwork_by_id(&conn, &id)?.image_path;
+    // ON DELETE CASCADE removes gallery rows; clean their local files only after SQL succeeds.
+    let gallery_paths: Vec<String> = {
+        let mut statement = conn.prepare("SELECT image_path FROM artwork_images WHERE artwork_id=?1").map_err(err)?;
+        // Collect while the prepared statement is still alive (rusqlite Rows borrows it).
+        let paths = statement.query_map(params![id], |r| r.get(0)).map_err(err)?
+            .collect::<Result<Vec<_>,_>>().map_err(err)?;
+        paths
+    };
     let affected = conn.execute("DELETE FROM artworks WHERE id=?1",params![id]).map_err(|_|"Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
     if affected == 0 { return Err("Opera non trovata".into()); }
     if let Some(path) = old_image {
+        if safe_relative(&path) { let _ = fs::remove_file(db.directory.join(path)); }
+    }
+    for path in gallery_paths {
         if safe_relative(&path) { let _ = fs::remove_file(db.directory.join(path)); }
     }
     Ok(())

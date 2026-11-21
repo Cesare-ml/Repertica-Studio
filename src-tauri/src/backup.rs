@@ -121,14 +121,19 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     ).map_err(error)?;
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
-    if !(1..=2).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    if !(1..=3).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
     let mut counts = [0_i64; 4];
     for (i, table) in ["artworks", "collectors", "sales", "certificates"].iter().enumerate() {
         counts[i] = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).map_err(error)?;
     }
     let mut statement = conn.prepare("SELECT image_path FROM artworks WHERE image_path IS NOT NULL").map_err(error)?;
-    let references = statement.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
+    let mut references = statement.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
         .collect::<Result<Vec<_>, _>>().map_err(error)?;
+    if schema >= 3 {
+        let mut gallery = conn.prepare("SELECT image_path FROM artwork_images").map_err(error)?;
+        references.extend(gallery.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
+            .collect::<Result<Vec<_>, _>>().map_err(error)?);
+    }
     Ok((schema, counts, references))
 }
 fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
@@ -138,7 +143,7 @@ fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
         return Err("Manifest del backup troppo grande".into());
     }
     let value: Manifest = serde_json::from_slice(&fs::read(&manifest_path).map_err(error)?).map_err(error)?;
-    if value.format != FORMAT || value.format_version != FORMAT_VERSION || !(1..=2).contains(&value.schema_version) {
+    if value.format != FORMAT || value.format_version != FORMAT_VERSION || !(1..=3).contains(&value.schema_version) {
         return Err("Questo backup non è compatibile con Repertica Studio".into());
     }
     if value.files.len() > 1_000_000 { return Err("Troppi file nel backup".into()); }
@@ -376,6 +381,33 @@ mod tests {
         let count: i64 = conn.query_row("SELECT count(*) FROM collectors",[],|r|r.get(0)).unwrap();
         assert_eq!(count, 1);
         assert_eq!(fs::read(db.directory.join("media/example.png")).unwrap(), vec![1,2,3,4]);
+    }
+    #[test]
+    fn gallery_media_is_backed_up_and_verified_by_reference() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at)
+                VALUES('photo2','a','media/secondary.png','Back side','now')",[]).unwrap();
+        }
+        fs::write(db.directory.join("media/secondary.png"), b"example secondary image").unwrap();
+        let destination = tmp.path().join("disk");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        assert_eq!(backup.schema_version, 3);
+        assert_eq!(backup.files, 3);
+        assert!(backup.verified);
+
+        // A manifest containing the DB but omitting a secondary photo cannot pass verification.
+        let folder = Path::new(&backup.directory);
+        let manifest_path = folder.join(MANIFEST_FILE);
+        let mut manifest: Manifest = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest.files.retain(|record| record.path != "media/secondary.png");
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+        assert!(inspect_backup_core(folder).is_err());
+        assert!(restore_backup_core(&db, folder).is_err());
     }
     #[test]
     fn corrupted_media_is_rejected_before_restore() {

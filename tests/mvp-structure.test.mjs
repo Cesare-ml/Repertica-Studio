@@ -29,3 +29,19 @@ test('native CSV export is wired and the Save dialog is explicitly permitted', (
   assert.match(get('src-tauri/src/lib.rs'), /export::export_ledger_csv/);
   assert.match(get('src/app/api.ts'), /'export_ledger_csv'/);
 });
+
+test('gallery IPC, schema v3 and backup consistency are wired', () => {
+  const native = get('src-tauri/src/lib.rs');
+  const db = get('src-tauri/src/db.rs');
+  const backup = get('src-tauri/src/backup.rs');
+  const api = get('src/app/api.ts');
+  for (const command of ['list_artwork_gallery', 'add_artwork_gallery_image',
+    'artwork_gallery_image_data', 'delete_artwork_gallery_image']) {
+    assert.match(native, new RegExp('gallery::' + command));
+    assert.ok(api.includes("'" + command + "'"));
+  }
+  assert.match(db, /CREATE TABLE IF NOT EXISTS artwork_images/);
+  assert.match(db, /PRAGMA user_version=3/);
+  assert.match(backup, /SELECT image_path FROM artwork_images/);
+  assert.match(backup, /1\.\.=3/);
+});
