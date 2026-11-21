@@ -195,10 +195,38 @@ pub fn is_catalogued(conn: &Connection, relative: &str) -> bool {
     conn.query_row("SELECT EXISTS(SELECT 1 FROM media_revisions WHERE image_path=?1)", params![relative], |r| r.get(0)).unwrap_or(false)
 }
 
-/// Delete a picture file unless the media center still owns it.
+// A path may still be used by a legacy row whose media_id was never populated,
+// or by a row whose link was imported incorrectly. Treat SQL failures as in-use.
+fn path_has_live_references(conn: &Connection, relative: &str) -> Result<bool, String> {
+    let referenced: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artworks WHERE image_path=?1)
+          OR EXISTS(SELECT 1 FROM artwork_images WHERE image_path=?1)
+          OR EXISTS(SELECT 1 FROM collector_images WHERE image_path=?1)",
+        params![relative], |r| r.get(0),
+    ).map_err(err)?;
+    if referenced { return Ok(true); }
+    certificate_uses(conn, relative)
+}
+
+fn require_regular_media_dir(directory: &Path) -> Result<(), String> {
+    let kind = fs::symlink_metadata(directory.join("media")).map_err(err)?.file_type();
+    if !kind.is_dir() || kind.is_symlink() {
+        return Err("La cartella media non è una directory locale regolare".into());
+    }
+    Ok(())
+}
+
+/// Delete a legacy picture only when no catalogue, artwork, gallery, collector or
+/// certificate references remain. Cleanup must fail closed rather than lose history.
 pub fn remove_file_unless_catalogued(conn: &Connection, directory: &Path, relative: &str) {
-    if !is_catalogued(conn, relative) && crate::commands::safe_relative(relative) {
-        let _ = fs::remove_file(directory.join(relative));
+    if !crate::commands::safe_relative(relative)
+        || is_catalogued(conn, relative)
+        || path_has_live_references(conn, relative).unwrap_or(true)
+        || require_regular_media_dir(directory).is_err()
+    { return; }
+    let full = directory.join(relative);
+    if fs::symlink_metadata(&full).is_ok_and(|m| m.file_type().is_file()) {
+        let _ = fs::remove_file(full);
     }
 }
 
@@ -206,10 +234,17 @@ fn certificate_uses(conn: &Connection, relative: &str) -> Result<bool, String> {
     let mut statement = conn.prepare("SELECT snapshot_json FROM certificates").map_err(err)?;
     let snapshots = statement.query_map([], |r| r.get::<_, String>(0)).map_err(err)?;
     for snapshot in snapshots {
-        match serde_json::from_str::<serde_json::Value>(&snapshot.map_err(err)?) {
-            Ok(v) if v.get("image_path").and_then(|p| p.as_str()) == Some(relative) => return Ok(true),
-            Err(_) => return Ok(true), // unreadable snapshot: be conservative
-            _ => {}
+        // A malformed snapshot (including a non-object or invalid image_path type)
+        // cannot prove a historical picture is unused: keep the file.
+        let value: serde_json::Value = match serde_json::from_str(&snapshot.map_err(err)?) {
+            Ok(value) => value,
+            Err(_) => return Ok(true),
+        };
+        let Some(fields) = value.as_object() else { return Ok(true); };
+        match fields.get("image_path") {
+            Some(serde_json::Value::String(path)) if path == relative => return Ok(true),
+            Some(serde_json::Value::String(_)) | Some(serde_json::Value::Null) | None => {}
+            Some(_) => return Ok(true),
         }
     }
     Ok(false)
@@ -232,6 +267,7 @@ fn insert_item(conn: &Connection, media_id: &str, original_name: &str, relative:
 /// Register a picture that already sits in the media folder.
 fn register_existing(conn: &Connection, directory: &Path, relative: &str) -> Result<String, String> {
     if !crate::commands::safe_relative(relative) { return Err("Percorso media non valido".into()); }
+    require_regular_media_dir(directory)?;
     let full = directory.join(relative);
     let metadata = fs::symlink_metadata(&full).map_err(err)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() { return Err("File media non valido".into()); }
@@ -247,6 +283,7 @@ fn register_existing(conn: &Connection, directory: &Path, relative: &str) -> Res
 fn register_new(conn: &Connection, directory: &Path, bytes: &[u8], original_name: &str) -> Result<(String, String), String> {
     let (extension, _) = image_type(bytes).ok_or("Sono consentite solo immagini JPEG, PNG e WebP")?;
     let dims = imaging::dimensions(bytes)?;
+    require_regular_media_dir(directory)?;
     let relative = store_media(directory, bytes, extension)?;
     let media_id = Uuid::new_v4().to_string();
     if let Err(e) = insert_item(conn, &media_id, original_name, &relative, bytes, dims, None) {
@@ -316,6 +353,7 @@ fn current_path(conn: &Connection, media_id: &str) -> Result<String, String> {
 
 fn read_media_file(directory: &Path, relative: &str) -> Result<Vec<u8>, String> {
     if !crate::commands::safe_relative(relative) { return Err("Percorso media non valido".into()); }
+    require_regular_media_dir(directory)?;
     let full = directory.join(relative);
     let metadata = fs::symlink_metadata(&full).map_err(err)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() { return Err("File media non valido".into()); }
@@ -460,16 +498,30 @@ pub fn purge_core(db: &Database, media_id: &str) -> Result<(), String> {
     if state != "TRASHED" { return Err("Sposta prima l'immagine nel cestino".into()); }
     if !usages_of(&conn, media_id)?.is_empty() { return Err("L'immagine è in uso e non può essere eliminata".into()); }
     let revisions = revisions_of(&conn, media_id)?;
+    require_regular_media_dir(&db.directory)?;
+    // Check all versions BEFORE deleting the catalogue row. media_id alone is
+    // insufficient: older archives can still link a photo exclusively by path.
     for revision in &revisions {
-        if certificate_uses(&conn, &revision.image_path)? {
-            return Err("Una versione di questa immagine è conservata in un certificato emesso: non può essere eliminata".into());
+        if !crate::commands::safe_relative(&revision.image_path) {
+            return Err("Percorso media non valido: eliminazione annullata".into());
+        }
+        if path_has_live_references(&conn, &revision.image_path)? {
+            return Err("Una scheda, una galleria, un collezionista o un certificato conserva questa fotografia".into());
+        }
+        match fs::symlink_metadata(db.directory.join(&revision.image_path)) {
+            Ok(meta) if !meta.file_type().is_file() => {
+                return Err("Un file della libreria non è regolare: eliminazione annullata".into());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(err(e)),
+            _ => {}
         }
     }
     conn.execute("DELETE FROM media_items WHERE id=?1", params![media_id]).map_err(err)?;
     for revision in &revisions {
         let thumb = db.directory.join("thumbs").join(format!("{}.jpg", revision.id));
         let _ = fs::remove_file(thumb);
-        if crate::commands::safe_relative(&revision.image_path) { let _ = fs::remove_file(db.directory.join(&revision.image_path)); }
+        let _ = fs::remove_file(db.directory.join(&revision.image_path));
     }
     Ok(())
 }
@@ -918,6 +970,72 @@ mod tests {
         set_state_core(&db, &id, true).unwrap();
         assert!(purge_core(&db, &id).unwrap_err().contains("certificato"));
         assert!(db.directory.join(&cover).is_file());
+    }
+
+    #[test]
+    fn purge_refuses_legacy_artwork_and_collector_paths_without_media_links() {
+        let (_dir, db) = setup();
+        let cover = put(&db, "shared.jpg", &jpeg(20, 20, [8, 3, 1]));
+        artwork_with_cover(&db, "a", &cover);
+        sync_references(&db).unwrap();
+        let id = first_item(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE artworks SET image_media_id=NULL WHERE id='a'", []).unwrap();
+        }
+        set_state_core(&db, &id, true).unwrap();
+        assert!(purge_core(&db, &id).unwrap_err().contains("conserva"));
+        assert!(db.directory.join(&cover).is_file());
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE artworks SET image_path=NULL WHERE id='a'", []).unwrap();
+            conn.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Anna','t','t')", []).unwrap();
+            conn.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at)
+                VALUES('p','c','PROFILE',?1,'t')", params![cover]).unwrap();
+        }
+        assert!(purge_core(&db, &id).unwrap_err().contains("conserva"));
+        assert!(db.directory.join(&cover).is_file());
+        db.conn.lock().unwrap().execute("DELETE FROM collector_images WHERE id='p'", []).unwrap();
+        purge_core(&db, &id).unwrap();
+        assert!(!db.directory.join(&cover).exists());
+    }
+
+    #[test]
+    fn legacy_cleanup_preserves_shared_photos_and_unreadable_certificate_history() {
+        let (_dir, db) = setup();
+        let shared = put(&db, "shared.jpg", &jpeg(20, 20, [2, 4, 6]));
+        artwork_with_cover(&db, "a", &shared);
+        {
+            let conn = db.conn.lock().unwrap();
+            remove_file_unless_catalogued(&conn, &db.directory, &shared);
+            assert!(db.directory.join(&shared).exists(), "a live artwork still owns the file");
+            conn.execute("UPDATE artworks SET image_path=NULL WHERE id='a'", []).unwrap();
+            conn.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('k','a','RS-1','2026-11-21','A',?1,'t')", params![r#"{"image_path":17}"#]).unwrap();
+            remove_file_unless_catalogued(&conn, &db.directory, &shared);
+        }
+        assert!(db.directory.join(&shared).exists(), "invalid historical path must never permit deletion");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn purge_rejects_replaced_media_directory_without_deleting_catalogue_or_external_files() {
+        let (_dir, db) = setup();
+        let cover = put(&db, "cover.jpg", &jpeg(20, 20, [4, 5, 6]));
+        artwork_with_cover(&db, "a", &cover);
+        sync_references(&db).unwrap();
+        let id = first_item(&db);
+        db.conn.lock().unwrap().execute("UPDATE artworks SET image_path=NULL,image_media_id=NULL WHERE id='a'", []).unwrap();
+        set_state_core(&db, &id, true).unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::write(external.path().join("cover.jpg"), b"external private file").unwrap();
+        fs::rename(db.directory.join("media"), db.directory.join("media-original")).unwrap();
+        std::os::unix::fs::symlink(external.path(), db.directory.join("media")).unwrap();
+        assert!(purge_core(&db, &id).unwrap_err().contains("cartella media"));
+        assert_eq!(db.conn.lock().unwrap().query_row(
+            "SELECT count(*) FROM media_items WHERE id=?1", params![id], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(fs::read(external.path().join("cover.jpg")).unwrap(), b"external private file");
+        assert!(read_media_file(&db.directory, &cover).is_err());
     }
 
     #[test]
