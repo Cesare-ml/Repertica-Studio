@@ -1,98 +1,124 @@
-# Publishes a signed Windows release: installer plus the `latest.json` feed read by the in-app updater.
-# Start it by pushing a tag such as `v0.2.0` (see docs/RELEASING.md for the one-time key setup).
-# The private signing key lives only in the repository secrets; the public key is a repository variable.
+# Signed Windows releases (installer + latest.json). macOS is intentionally not published.
+# Push a matching vX.Y.Z tag, or manually rerun an existing tag from Actions > Release.
 name: Release
+
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag to build (example: v0.1.0)'
+        required: true
+        type: string
+
 permissions:
   contents: write
+
 concurrency:
-  group: repertica-release-${{ github.ref }}
+  group: repertica-release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
+
 jobs:
   check:
-    name: Check version and keys
+    name: Check release version and signing keys
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout the exact version being published
+        uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
           persist-credentials: false
-      - name: The tag, the app version and the signing setup must agree
+
+      # Allows safe repair of release tooling without moving/rewriting existing tags.
+      - name: Checkout the latest key normalization tool
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: .release-tools
+          persist-credentials: false
+
+      - name: Verify tag, versions and available key material
+        id: validate
         shell: bash
         env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
           PUBLIC_KEY: ${{ vars.REPERTICA_UPDATER_PUBLIC_KEY }}
           PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || {
+            echo "::error::Release tag must be a semantic version such as v0.1.0"
+            exit 1
+          }
+          version="${RELEASE_TAG#v}"
           app="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           pkg="$(node -p "require('./package.json').version")"
           crate="$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')"
-          echo "tag=$tag tauri.conf=$app package.json=$pkg Cargo.toml=$crate"
-          test "$tag" = "$app" && test "$tag" = "$pkg" && test "$tag" = "$crate" || { echo "::error::The tag does not match the version in tauri.conf.json, package.json and Cargo.toml"; exit 1; }
-          test -n "$PUBLIC_KEY" || { echo "::error::Repository variable REPERTICA_UPDATER_PUBLIC_KEY is not set"; exit 1; }
-          test -n "$PRIVATE_KEY" || { echo "::error::Repository secret TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
+          echo "tag=$version tauri.conf=$app package.json=$pkg Cargo.toml=$crate"
+          test "$version" = "$app" && test "$version" = "$pkg" && test "$version" = "$crate" || {
+            echo "::error::Release tag and source code versions do not match"
+            exit 1
+          }
+          test -n "$PUBLIC_KEY" || { echo "::error::REPERTICA_UPDATER_PUBLIC_KEY is missing"; exit 1; }
+          test -n "$PRIVATE_KEY" || { echo "::error::TAURI_SIGNING_PRIVATE_KEY is missing"; exit 1; }
+          # Do not print or publish the key; reject wrong formats before compiling Rust.
+          node .release-tools/scripts/normalize-updater-public-key.mjs --check
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
   publish:
-    name: ${{ matrix.name }}
+    name: Windows x64 installer
     needs: check
-    runs-on: ${{ matrix.runner }}
+    runs-on: windows-latest
     timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows
-            runner: windows-latest
-            args: ''
     env:
       CARGO_INCREMENTAL: '0'
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout the immutable release tag
+        uses: actions/checkout@v4
         with:
+          ref: ${{ needs.check.outputs.tag }}
           persist-credentials: false
+      - name: Checkout public updater key tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: .release-tools
+          persist-credentials: false
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
       - run: npm install --no-audit --no-fund
       - run: npm run prepare:icons
-      - name: Add the public key to the release configuration
-        # The bundler reads the key from the configuration (the Rust build reads it from the environment).
+      - name: Normalize the release public key and patch Tauri config
         shell: bash
         env:
           PUBLIC_KEY: ${{ vars.REPERTICA_UPDATER_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-          node -e "
-            const fs = require('fs');
-            const file = 'src-tauri/tauri.release.conf.json';
-            const config = JSON.parse(fs.readFileSync(file, 'utf8'));
-            const key = (process.env.PUBLIC_KEY || '').trim();
-            if (!key) throw new Error('REPERTICA_UPDATER_PUBLIC_KEY is empty');
-            config.plugins = { updater: { pubkey: key } };
-            fs.writeFileSync(file, JSON.stringify(config, null, 2));
-          "
+          node .release-tools/scripts/normalize-updater-public-key.mjs --write
+
       - name: Build, sign and publish
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          REPERTICA_UPDATER_PUBLIC_KEY: ${{ vars.REPERTICA_UPDATER_PUBLIC_KEY }}
+          # REPERTICA_UPDATER_PUBLIC_KEY is set to the *normalized* value via GITHUB_ENV.
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Repertica Studio ${{ github.ref_name }}'
-          releaseBody: 'Vedi le note di rilascio e il file CHANGELOG per le novità di questa versione.'
+          tagName: ${{ needs.check.outputs.tag }}
+          releaseName: 'Repertica Studio ${{ needs.check.outputs.tag }}'
+          releaseBody: 'Release Windows di Repertica Studio. Consultare README e note di rilascio prima di utilizzare archivi importanti.'
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          # The project has no `tauri` npm script (only tauri:dev / tauri:build), so call the CLI directly.
           tauriScript: npx tauri
-          # The extra config only switches on the signed update packages, which need the private key.
-          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+          args: --config src-tauri/tauri.release.conf.json
