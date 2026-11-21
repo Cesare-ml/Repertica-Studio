@@ -143,7 +143,9 @@ fn data_core(db: &Database, receipt_id: &str) -> Result<String, String> {
     if size == 0 || size > MAX_BYTES as u64 || size != attachment.size_bytes as u64 {
         return Err("Dimensione allegato non valida".into());
     }
-    let bytes = fs::read(&file).map_err(err)?;
+    let mut bytes = Vec::new();
+    File::open(&file).map_err(err)?.take(MAX_BYTES as u64 + 1)
+        .read_to_end(&mut bytes).map_err(err)?;
     if bytes.len() != size as usize || mime(&bytes).map(|(_,m)| m) != Some(attachment.mime_type.as_str()) {
         return Err("Formato allegato non valido".into());
     }
