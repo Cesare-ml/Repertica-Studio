@@ -91,9 +91,9 @@ export interface GalleryImage {
   caption: string | null; created_at: string; sort_order: number; kind: PhotoKind;
 }
 
-export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header' | 'invalid_snapshot';
+export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header' | 'invalid_snapshot' | 'invalid_metadata' | 'hash_mismatch';
 export interface MediaIssue {
-  artworkId: string; imageId: string | null; role: 'primary' | 'gallery' | 'certificate' | 'collector' | 'media';
+  artworkId: string; imageId: string | null; role: 'primary' | 'gallery' | 'certificate' | 'collector' | 'media' | 'raw';
   path: string; problem: MediaProblem;
 }
 export interface MediaAudit {
