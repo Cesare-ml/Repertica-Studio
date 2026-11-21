@@ -9,7 +9,7 @@
 
 Repertica conserva le fotografie in `media/` dentro la cartella privata dell'app e permette immagini principali PNG/JPEG/WebP fino a 12 MiB ([README](../../../README.md), [commands.rs](../../../src-tauri/src/commands.rs)). Il comando di lettura corrente restituisce i dati dell'immagine in **base64**. I backup copiano i media integri e li verificano con SHA-256 ([backup.rs](../../../src-tauri/src/backup.rs)); **non** sono un sistema di anteprime. Per raccolte con migliaia di opere, leggere o decodificare originali interi per mostrare una griglia può aumentare memoria, attese e uso del disco.
 
-La [PR #17](https://github.com/Cesare-ml/Repertica-Studio/pull/17) propone una galleria con più fotografie e caricamento differito, ma è **aperta e non parte di `main`** alla data di questa ricognizione. Questa scheda è **complementare**: non propone un'altra galleria, non ne modifica il design e non presume che le fotografie aggiuntive siano già disponibili.
+La [PR #17](https://github.com/Cesare-ml/Repertica-Studio/pull/17) è stata **integrata in `main`**: la galleria di fino a 20 immagini aggiuntive e il caricamento su richiesta sono già disponibili. Questa scheda è **complementare**: non propone un'altra galleria né ripropone il suo lazy loading, ma considera cache di miniature derivate solo se giustificate da benchmark.
 
 **Destinatari:** fotografi e artisti con più immagini per lavoro, studi con cataloghi estesi, gallerie con grandi inventari e utenti su laptop con spazio/memoria limitati. Validare con archivi sintetici e reali prima di introdurre nuovi livelli di cache.
 
@@ -45,7 +45,7 @@ API **ipotetiche**: `requestPreview(media_ref, variant) -> Pending|Ready|Unavail
 - Non accettare percorso arbitrario dalle schede: risoluzione limitata a media autorizzati, contrasto a `../`, symlink e traversal, validazione dei magic bytes oltre all'estensione, limiti a decompression bomb, pixelloni, memoria/CPU e concorrenza. I file di cache devono essere scritti in cartelle app-owned con nomi generati e pubblicazione atomica.
 - **Privacy:** le anteprime possono ritrarre persone, firme o documenti. Trattarle come dati personali; app-local-data protetta dal profilo OS, possibilità di rimozione, nessuna inclusione in log, report o pacchetti di export predefiniti. Considerare rimozione dei metadati EXIF/GPS **dai derivati** (non dagli originali). L'eliminazione della cache non deve simulare eliminazione degli originali.
 - File originali e cache restano locali anche su USB/NAS montato se in futuro l'archivio si sposta; percorso della cache configurabile solo se necessario, evitando che utenti la confondano con destinazione di backup. Se si consente un percorso diverso, deve essere scelto esplicitamente e mai dentro la cartella di backup.
-- Compatibilità: supportare schema v1/v2 e media già esistenti; prevedere la futura galleria della PR #17 senza introdurre ora schema o limiti nuovi. Non alterare hash, percorsi e manifest dei backup, né lo snapshot immutabile dei certificati. Le copie derivate devono poter essere cancellate, ricostruite e ignorate dopo aggiornamenti dell'app.
+- Compatibilità: supportare schemi v1–v4 e media già esistenti, inclusa la galleria integrata dalla PR #17, senza introdurre ora schema o limiti nuovi. Non alterare hash, percorsi e manifest dei backup, né lo snapshot immutabile dei certificati. Le copie derivate devono poter essere cancellate, ricostruite e ignorate dopo aggiornamenti dell'app.
 - UI in lingua di sistema con fallback inglese e scelta manuale già presente; messaggi sulle distinzioni **originale/anteprima**, peso cache, avanzamento e errori localizzati. Accessibilità: non basare la navigazione su sole immagini; testi alternativi derivati dai metadati dell'opera senza IA, indicatori di caricamento annunciabili, pulsanti da tastiera, opzione di riduzione dell'animazione e nessun salto del focus.
 
 ## Import/export e rapporti con altri strumenti
@@ -56,7 +56,7 @@ API **ipotetiche**: `requestPreview(media_ref, variant) -> Pending|Ready|Unavail
 
 ## Alternative, dipendenze, rischi e complessità
 
-**Alternative:** (A) soltanto lazy loading degli originali, come previsto dalla PR #17: meno manutenzione e sufficiente finché gli archivi rimangono piccoli; (B) miniature soltanto in memoria: semplici ma ricreate dopo ogni avvio e rischiose per RAM; (C) miniature persistenti e quota LRU (questa proposta) con maggiore complessità e privacy. **Non** introdurre la C senza benchmark che mostrino un vantaggio netto.
+**Alternative:** (A) soltanto lazy loading degli originali, come già disponibile dopo la PR #17: meno manutenzione e forse sufficiente finché gli archivi rimangono piccoli; (B) miniature soltanto in memoria: semplici ma ricreate dopo ogni avvio e rischiose per RAM; (C) miniature persistenti e quota LRU (questa proposta) con maggiore complessità e privacy. **Non** introdurre la C senza benchmark che mostrino un vantaggio netto.
 
 **Dipendenze ipotetiche:** pipeline sicura di decoding immagini lato Rust/Tauri o altro componente locale verificato, lettura media on demand, identità stabili dei media, algoritmi di invalidazione e raccolta cache, UI non bloccante, test multi-piattaforma. Non aggiungere librerie prima di scelta esplicita. Rispettare le licenze dei codec e dei componenti open source.
 
@@ -75,7 +75,7 @@ API **ipotetiche**: `requestPreview(media_ref, variant) -> Pending|Ready|Unavail
 
 ## Certezze, ipotesi e domande di revisione
 
-**Certo dal `main` del 2026-11-21:** foto principale in media locale con limite 12 MiB; lettura via base64; backup media con checksum; archiviazione SQLite; UI con ricerca e filtri. La PR #17 con più foto e lazy loading è **aperta**, non implementata su `main`. La diagnostica integrità è già oggetto di TECH-003.
+**Certo dal `main`, ricontrollato il 2026-11-21:** foto principale e fino a 20 aggiuntive per opera, media locali con limite 12 MiB a immagine, lettura via base64 su richiesta, backup con checksum, archiviazione SQLite e UI di ricerca e filtri. La PR #17 è stata **integrata** e non va confusa con la proposta, ancora non approvata, di una cache di miniature persistenti. La diagnostica integrità è già oggetto di TECH-003.
 
 **Ipotesi:** carichi abbastanza grandi da giustificare miniature persistenti, due varianti, quota configurabile e pipeline di generazione. Non è stata misurata oggi la lentezza reale.
 
