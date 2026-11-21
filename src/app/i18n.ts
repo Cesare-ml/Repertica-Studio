@@ -5,7 +5,6 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
-  "Documento": "Document",
   "Allega documento": "Attach document",
   "Documento allegato": "Document attached",
   "Visualizza immagine": "View image",
