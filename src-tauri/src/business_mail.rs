@@ -264,7 +264,7 @@ fn text_part(part:&ParsedMail<'_>,depth:usize)->Option<String>{
     if depth>12{return None;}
     if part.ctype.mimetype.eq_ignore_ascii_case("text/plain") && part.subparts.is_empty(){
         let disposition=part.get_content_disposition();
-        if !disposition.disposition.eq_ignore_ascii_case("attachment"){
+        if !matches!(disposition.disposition,mailparse::DispositionType::Attachment){
             return part.get_body().ok();
         }
     }
@@ -277,7 +277,7 @@ fn count_attachments(part:&ParsedMail<'_>,depth:usize)->usize{
     if depth>12{return 0;}
     if part.subparts.is_empty() {
         let disposition=part.get_content_disposition();
-        return usize::from(disposition.disposition.eq_ignore_ascii_case("attachment")
+        return usize::from(matches!(disposition.disposition,mailparse::DispositionType::Attachment)
             || disposition.params.contains_key("filename"));
     }
     part.subparts.iter().map(|p|count_attachments(p,depth+1)).sum()
