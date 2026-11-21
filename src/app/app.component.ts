@@ -146,6 +146,7 @@ export class AppComponent implements OnInit {
   certificateDraft: CertificateInput = { artwork_id: '', artist_name: '', collector_name: null, notes: null };
   selectedCertificate: Certificate | null = null;
   selectedSnapshot: Artwork | null = null;
+  selectedCertificatePhoto: string | null = null;
 
   constructor(private readonly change: ChangeDetectorRef) {}
   tr(key: string): string { return translate(key, this.language); }
@@ -717,7 +718,7 @@ export class AppComponent implements OnInit {
     const certificate = await this.captureCertificate();
     if (certificate) {
       this.certificateDialog = false;
-      this.showCertificate(certificate);
+      await this.showCertificate(certificate);
     }
   }
   private async captureCertificate(): Promise<Certificate | null> {
@@ -733,14 +734,39 @@ export class AppComponent implements OnInit {
       return null;
     } finally { this.busy = false; this.change.detectChanges(); }
   }
-  showCertificate(c: Certificate): void {
+  async showCertificate(c: Certificate): Promise<void> {
     this.selectedCertificate = c;
+    this.selectedCertificatePhoto = null;
     try { this.selectedSnapshot = JSON.parse(c.snapshot_json) as Artwork; }
     catch { this.selectedSnapshot = null; }
+    if (this.selectedSnapshot?.image_path) {
+      try {
+        const photo = await api.certificateImage(c.id);
+        if (this.selectedCertificate?.id === c.id) this.selectedCertificatePhoto = photo;
+      } catch (error) {
+        if (this.selectedCertificate?.id === c.id) {
+          this.errorMessage = this.tr('Fotografia storica del certificato non disponibile.') + ' ' + this.error(error);
+        }
+      }
+    }
     this.change.detectChanges();
   }
-  printCertificate(c: Certificate): void {
-    this.showCertificate(c);
-    window.setTimeout(() => window.print(), 150);
+  async printCertificate(c: Certificate): Promise<void> {
+    await this.showCertificate(c);
+    if (this.selectedCertificate?.id !== c.id) return;
+    if (!this.selectedSnapshot) {
+      this.errorMessage = this.tr('Impossibile stampare: dati storici del certificato non validi.');
+      this.change.detectChanges();
+      return;
+    }
+    // Printing the current cover would misrepresent the original certificate.
+    if (this.selectedSnapshot?.image_path && !this.selectedCertificatePhoto) {
+      this.errorMessage = this.tr('Impossibile stampare: fotografia storica mancante o non leggibile.');
+      this.change.detectChanges();
+      return;
+    }
+    // Let Angular render the snapshot photo before opening the print dialog.
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    window.print();
   }
 }

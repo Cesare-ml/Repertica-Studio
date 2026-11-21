@@ -58,6 +58,22 @@ test('annual receipt summaries have a native typed IPC and a separate finance pa
   assert.match(get('src/app/app.component.html'), /receiptYear\.months/);
   assert.match(get('src/app/app.component.ts'), /api\.receiptYearOverview\(this\.financeYear\)/);
 });
+test('certificate printing uses snapshot image IPC and waits for its result', () => {
+  const rust = get('src-tauri/src/commands.rs');
+  const native = get('src-tauri/src/lib.rs');
+  const api = get('src/app/api.ts');
+  const ui = get('src/app/app.component.ts');
+  const html = get('src/app/app.component.html');
+  assert.match(native, /commands::certificate_image_data/);
+  assert.match(api, /'certificate_image_data'/);
+  assert.match(rust, /SELECT snapshot_json FROM certificates WHERE id=/);
+  assert.match(rust, /symlink_metadata/);
+  assert.match(ui, /await api\.certificateImage\(c\.id\)/);
+  assert.match(ui, /await this\.showCertificate\(c\)/);
+  assert.match(html, /\[src\]="selectedCertificatePhoto"/);
+  assert.doesNotMatch(ui, /setTimeout\(\(\) => window\.print/);
+});
+
 test('sale receipt v4 records are exposed through local typed IPC', () => {
   const schema=get('src-tauri/src/db.rs'),native=get('src-tauri/src/lib.rs'),api=get('src/app/api.ts');
   assert.match(schema, /CREATE TABLE sale_receipts/);

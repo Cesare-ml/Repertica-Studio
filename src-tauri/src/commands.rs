@@ -309,6 +309,50 @@ pub fn artwork_image_data(db: State<'_, Database>, artwork_id: String) -> Result
     Ok(Some(format!("data:{mime};base64,{}",STANDARD.encode(bytes))))
 }
 
+
+// Resolve the photograph from the immutable certificate snapshot, NOT from the
+// artwork's current cover. This preserves the meaning of already issued records.
+fn certificate_image_data_core(db: &Database, certificate_id: &str) -> Result<Option<String>, String> {
+    let snapshot: String = {
+        let conn = db.conn.lock().map_err(err)?;
+        conn.query_row(
+            "SELECT snapshot_json FROM certificates WHERE id=?1",
+            params![certificate_id],
+            |row| row.get(0),
+        ).map_err(err)?
+    };
+    let value: serde_json::Value = serde_json::from_str(&snapshot).map_err(|_|"Snapshot del certificato non valido".to_string())?;
+    let relative = match value.get("image_path") {
+        None | Some(serde_json::Value::Null) => return Ok(None),
+        Some(serde_json::Value::String(path)) => path.as_str(),
+        _ => return Err("Percorso della fotografia storica non valido".into()),
+    };
+    // Snapshot paths are generated as media/<uuid>.<ext>; never accept
+    // arbitrary paths, nested directories, or symlinks from imported archives.
+    let path = std::path::Path::new(relative);
+    if !safe_relative(relative) || path.components().count() != 2 {
+        return Err("Percorso della fotografia storica non sicuro".into());
+    }
+    let media_root = db.directory.join("media");
+    let media_meta = fs::symlink_metadata(&media_root).map_err(err)?;
+    if !media_meta.file_type().is_dir() || media_meta.file_type().is_symlink() {
+        return Err("Cartella media non sicura".into());
+    }
+    let target = db.directory.join(path);
+    let metadata = fs::symlink_metadata(&target).map_err(err)?;
+    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > 12 * 1024 * 1024 {
+        return Err("Fotografia storica non valida o troppo grande".into());
+    }
+    let bytes = fs::read(target).map_err(err)?;
+    let (_, mime) = image_type(&bytes).ok_or_else(||"Formato della fotografia storica non valido".to_string())?;
+    Ok(Some(format!("data:{mime};base64,{}", STANDARD.encode(bytes))))
+}
+
+#[tauri::command]
+pub fn certificate_image_data(db: State<'_, Database>, certificate_id: String) -> Result<Option<String>, String> {
+    certificate_image_data_core(&db, &certificate_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +381,50 @@ mod tests {
     fn cover_path(db: &Database) -> String {
         let conn = db.conn.lock().unwrap();
         artwork_by_id(&conn, "a").unwrap().image_path.unwrap()
+    }
+
+    #[test]
+    fn certificate_image_reads_historical_cover_instead_of_current_one() {
+        let (_dir, db) = artwork_with_cover();
+        let original = cover_path(&db);
+        let original_bytes = fs::read(db.directory.join(&original)).unwrap();
+        let snapshot = {
+            let conn = db.conn.lock().unwrap();
+            serde_json::to_string(&artwork_by_id(&conn, "a").unwrap()).unwrap()
+        };
+        db.conn.lock().unwrap().execute(
+            "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+             VALUES('historic','a','RS-100','2026-11-21','Artist',?1,'t')",
+            params![snapshot],
+        ).unwrap();
+        save_artwork_image_core(&db, "a", &STANDARD.encode([0xff, 0xd8, 0xff, 0x42])).unwrap();
+        assert_ne!(cover_path(&db), original);
+        assert_eq!(
+            certificate_image_data_core(&db, "historic").unwrap(),
+            Some(format!("data:image/jpeg;base64,{}", STANDARD.encode(original_bytes)))
+        );
+        // Missing historical bytes must NOT silently substitute the new cover.
+        fs::remove_file(db.directory.join(original)).unwrap();
+        assert!(certificate_image_data_core(&db, "historic").is_err());
+    }
+
+    #[test]
+    fn certificate_image_rejects_unsafe_snapshot_and_handles_no_photo() {
+        let (_dir, db) = artwork_with_cover();
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+             VALUES('unsafe','a','RS-101','2026-11-21','Artist',?1,'t')",
+            params![r#"{"image_path":"media/../secret"}"#],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+             VALUES('no-photo','a','RS-102','2026-11-21','Artist',?1,'t')",
+            params![r#"{"image_path":null}"#],
+        ).unwrap();
+        drop(conn);
+        assert!(certificate_image_data_core(&db, "unsafe").is_err());
+        assert_eq!(certificate_image_data_core(&db, "no-photo").unwrap(), None);
     }
 
     #[test]
