@@ -306,6 +306,8 @@
   <div class="dialog wide">
     <div class="dialog-top"><h2 id="gallery-title">{{ tr('Fotografie dell’opera') }} · {{ galleryArtwork.title }}</h2>
       <button class="close" type="button" (click)="closeGallery()" [attr.aria-label]="tr('Chiudi')">×</button></div>
+    <div class="alert error" role="alert" *ngIf="errorMessage">{{ errorMessage }}</div>
+    <div class="alert success" role="status" *ngIf="notice">{{ notice }}</div>
     <p class="form-note">{{ tr('La foto principale resta nell’archivio. Qui puoi aggiungere fino a 20 fotografie complementari, tutte conservate localmente e nei backup.') }}</p>
     <div class="gallery-upload">
       <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span><input maxlength="300" [(ngModel)]="galleryCaption"></label>
