@@ -12,7 +12,7 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     let conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 1 {
+    if version > 2 {
         return Err(format!("Archivio creato da una versione più recente (schema {version})").into());
     }
     if version == 0 {
@@ -80,6 +80,52 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;"
         )?;
     }
+    if version < 2 {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE studio_settings (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                artist_coefficient REAL NOT NULL DEFAULT 1.0 CHECK(artist_coefficient > 0 AND artist_coefficient <= 100000),
+                base_price_cm2_cents INTEGER NOT NULL DEFAULT 16 CHECK(base_price_cm2_cents >= 0 AND base_price_cm2_cents <= 100000),
+                personal_bp INTEGER NOT NULL DEFAULT 3334 CHECK(personal_bp BETWEEN 0 AND 10000),
+                activity_bp INTEGER NOT NULL DEFAULT 3333 CHECK(activity_bp BETWEEN 0 AND 10000),
+                savings_bp INTEGER NOT NULL DEFAULT 3333 CHECK(savings_bp BETWEEN 0 AND 10000),
+                treasury_start_date TEXT,
+                default_tax_bp INTEGER NOT NULL DEFAULT 0 CHECK(default_tax_bp BETWEEN 0 AND 10000),
+                ui_language TEXT CHECK(ui_language IS NULL OR ui_language IN ('it','en','es','fr','de')),
+                CHECK(personal_bp + activity_bp + savings_bp = 10000)
+            );
+            INSERT INTO studio_settings(singleton) VALUES(1);
+            CREATE TABLE sale_finances (
+                sale_id TEXT PRIMARY KEY REFERENCES sales(id) ON DELETE CASCADE,
+                tax_cents INTEGER NOT NULL DEFAULT 0 CHECK(tax_cents >= 0),
+                shipping_cents INTEGER NOT NULL DEFAULT 0 CHECK(shipping_cents >= 0),
+                personal_bp INTEGER NOT NULL,
+                activity_bp INTEGER NOT NULL,
+                savings_bp INTEGER NOT NULL,
+                CHECK(personal_bp + activity_bp + savings_bp = 10000)
+            );
+            INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+                SELECT id,3334,3333,3333 FROM sales;
+            CREATE TABLE expenses (
+                id TEXT PRIMARY KEY,
+                expense_date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+                fund TEXT NOT NULL CHECK(fund IN ('activity','savings')),
+                supplier TEXT,
+                purchase_url TEXT,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX idx_expenses_date ON expenses(expense_date);
+            CREATE INDEX idx_expenses_category ON expenses(category);
+            PRAGMA user_version=2;
+            COMMIT;"
+        )?;
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -99,7 +145,7 @@ mod tests {
         {
             let c = db.conn.lock().unwrap();
             let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-            assert_eq!(v, 1);
+            assert_eq!(v, 2);
             c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('x','Test','a','a')",[]).unwrap();
         }
         drop(db);
@@ -138,10 +184,41 @@ mod tests {
         assert!(c.execute("DELETE FROM collectors WHERE id='c'",[]).is_err());
     }
     #[test]
+    fn finance_migration_preserves_old_sales() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(dir.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES('a','X','Art','t','t')",[]).unwrap();
+            c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Collector','t','t')",[]).unwrap();
+            c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s','a','c',9000,'2026-02-11','t')",[]).unwrap();
+            c.execute("DELETE FROM studio_settings",[]).unwrap();
+            c.execute("DROP TABLE sale_finances",[]).unwrap();
+            c.execute("DROP TABLE expenses",[]).unwrap();
+            c.execute("DROP TABLE studio_settings",[]).unwrap();
+            c.pragma_update(None,"user_version",1).unwrap();
+        }
+        drop(db);
+        let migrated = open(dir.path().into()).unwrap();
+        let c = migrated.conn.lock().unwrap();
+        let v: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
+        assert_eq!(v,2);
+        let n: i64 = c.query_row("SELECT count(*) FROM sale_finances WHERE sale_id='s'",[],|r|r.get(0)).unwrap();
+        assert_eq!(n,1);
+    }
+    #[test]
+    fn financial_percentages_must_sum_to_one_hundred() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(dir.path().into()).unwrap();
+        let c = db.conn.lock().unwrap();
+        assert!(c.execute("UPDATE studio_settings SET personal_bp=5000 WHERE singleton=1",[]).is_err());
+        assert!(c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,created_at,updated_at) VALUES('x','2026-10-01','materials','Brushes',100,'other','t','t')",[]).is_err());
+    }
+    #[test]
     fn newer_schema_is_not_downgraded() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
-        db.conn.lock().unwrap().pragma_update(None, "user_version", 2).unwrap();
+        db.conn.lock().unwrap().pragma_update(None, "user_version", 3).unwrap();
         drop(db);
         assert!(open(dir.path().into()).is_err());
     }

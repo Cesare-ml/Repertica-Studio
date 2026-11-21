@@ -68,3 +68,13 @@ Il workflow [macOS builds (Intel + Apple Silicon)](.github/workflows/build-macos
 3. Ogni artifact include il `.dmg` e il file SHA-256 per verificarlo.
 
 Il workflow esegue anche compilazioni sul branch `main` quando il codice dell'app cambia. I DMG sono **build di prova con firma ad hoc**, non notarizzate da Apple. macOS Gatekeeper potrebbe impedire l'apertura o mostrare avvisi: non presentarle come release pubbliche verificate. Nessuna release GitHub o aggiornamento automatico viene pubblicato da questa Action. Per una distribuzione ufficiale senza avvisi occorreranno Developer ID, notarizzazione e test su dispositivi reali.
+
+## Economia dello studio e lingue (in sviluppo)
+
+- **Multilingua**: italiano, inglese, spagnolo, francese e tedesco, con scelta automatica dalla lingua del sistema e fallback inglese. È possibile selezionare manualmente la lingua nelle impostazioni.
+- **Coefficiente artista**: in Impostazioni → Prezzi delle opere, tariffa per cm² e moltiplicatore d'artista. Anteprima orientativa del prezzo su una scheda opera.
+- **Economia**: andamento mensile, ricavi lordi e netti registrati, ripartizione personale/attività/risparmio, spese e acquisti materiali con fornitore e categoria.
+- Le quote in percentuale vengono fissate per ogni nuova vendita; il programma non cambia retroattivamente la ripartizione delle vendite precedenti.
+- La tesoreria è un riepilogo gestionale, non sostituisce la contabilità fiscale né determina automaticamente somme incassate.
+
+Per formule, convenzioni e limitazioni: [Economia e localizzazione](docs/ECONOMY-I18N.md).

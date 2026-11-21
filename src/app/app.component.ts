@@ -2,16 +2,19 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { isTauri } from '@tauri-apps/api/core';
+import { locale as osLocale } from '@tauri-apps/plugin-os';
+import { AppLanguage, chooseLanguage, translate } from './i18n';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
 import type { ArtworkOrder } from './archive-filters';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
-  Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary
+  Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
+  StudioSettings, Expense, ExpenseInput, FinanceOverview
 } from './models';
 
-type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'settings';
+type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
   code: '', title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
@@ -40,9 +43,21 @@ export class AppComponent implements OnInit {
     { id: 'collectors', label: 'Collezionisti', icon: '♧' },
     { id: 'sales', label: 'Vendite', icon: '◇' },
     { id: 'certificates', label: 'Certificati', icon: '▤' },
+    { id: 'finance', label: 'Economia', icon: '▥' },
     { id: 'settings', label: 'Impostazioni', icon: '⚙' }
   ];
   readonly statusLabels = statusLabels;
+  language: AppLanguage = 'en';
+  systemLanguage: AppLanguage = chooseLanguage(typeof navigator !== 'undefined' ? navigator.language : 'en');
+  languageChoice = 'system';
+  readonly languageOptions = [
+    {code:'system',name:'System / Sistema'},
+    {code:'en',name:'English'},
+    {code:'it',name:'Italiano'},
+    {code:'es',name:'Español'},
+    {code:'fr',name:'Français'},
+    {code:'de',name:'Deutsch'}
+  ];
   section: Section = 'overview';
   initialized = false;
   loading = true;
@@ -59,6 +74,39 @@ export class AppComponent implements OnInit {
   artworks: Artwork[] = [];
   collectors: Collector[] = [];
   sales: Sale[] = [];
+  expenses: Expense[] = [];
+  finances: FinanceOverview | null = null;
+  financeYear = new Date().getFullYear();
+  financeYears = Array.from({length: 8}, (_,i)=>new Date().getFullYear()-i);
+  settings: StudioSettings = {
+    artist_coefficient:1,base_price_cm2_cents:16,personal_bp:3334,activity_bp:3333,
+    savings_bp:3333,treasury_start_date:null,default_tax_bp:0,ui_language:null
+  };
+  settingsDraft: StudioSettings = {...this.settings};
+  rateEuro = .16;
+  personalPercent = 33.34;
+  activityPercent = 33.33;
+  savingsPercent = 33.33;
+  defaultTaxPercent = 0;
+  estimateCents: number | null = null;
+  expenseDialog = false;
+  readonly expenseCategories = [
+    {code:'painting-materials',label:'Materiali pittura'},
+    {code:'shipping',label:'Spedizioni e imballaggi'},
+    {code:'equipment',label:'Attrezzatura'},
+    {code:'software',label:'Software e servizi'},
+    {code:'exhibitions',label:'Mostre e fiere'},
+    {code:'marketing',label:'Marketing'},
+    {code:'training',label:'Formazione'},
+    {code:'other',label:'Altro'}
+  ];
+  expenseDraft = {
+    id: undefined as string | undefined,expense_date:today(),
+    category:'painting-materials',description:'',amount_eur:null as number|null,
+    fund:'activity' as 'activity'|'savings',supplier:null as string|null,
+    purchase_url:null as string|null,notes:null as string|null
+  };
+
   certificates: Certificate[] = [];
   overview: Overview = { artworks: 0, collectors: 0, sales: 0, certificates: 0, revenue_cents: 0 };
   dataPath = '';
@@ -74,20 +122,42 @@ export class AppComponent implements OnInit {
   certificateDialog = false;
   artworkDraft: ArtworkInput = freshArtwork();
   collectorDraft: CollectorInput = freshCollector();
-  saleDraft = { artwork_id: '', collector_id: '', amount_eur: null as number | null, sold_at: today(), notes: null as string | null };
+  saleDraft = { artwork_id: '', collector_id: '', amount_eur: null as number | null,
+    taxes_eur: 0, shipping_eur: 0, sold_at: today(), notes: null as string | null };
   certificateDraft: CertificateInput = { artwork_id: '', artist_name: '', collector_name: null, notes: null };
   selectedCertificate: Certificate | null = null;
   selectedSnapshot: Artwork | null = null;
 
   constructor(private readonly change: ChangeDetectorRef) {}
+  tr(key: string): string { return translate(key, this.language); }
+  private applyLanguage(language: AppLanguage): void {
+    this.language = language;
+    document.documentElement.lang = language;
+  }
   async ngOnInit(): Promise<void> {
     if (!isTauri()) {
       this.errorMessage = 'Apri Repertica Studio con npm run tauri:dev: il browser non può accedere al database locale.';
       this.loading = false;
       return;
     }
-    this.initialized = true;
-    await this.refresh();
+    try {
+      const [system, stored] = await Promise.all([osLocale().catch(() => null), api.getSettings()]);
+      this.systemLanguage = chooseLanguage(system ?? navigator.language);
+      this.settings = stored;
+      this.settingsDraft = {...stored};
+      this.rateEuro = stored.base_price_cm2_cents / 100;
+      this.personalPercent = stored.personal_bp / 100;
+      this.activityPercent = stored.activity_bp / 100;
+      this.savingsPercent = stored.savings_bp / 100;
+      this.defaultTaxPercent = stored.default_tax_bp / 100;
+      this.languageChoice = stored.ui_language ?? 'system';
+      this.applyLanguage(chooseLanguage(stored.ui_language ?? system ?? navigator.language));
+      this.initialized = true;
+      await this.refresh();
+    } catch (error) {
+      this.errorMessage = this.error(error);
+      this.loading = false;
+    }
   }
   navigate(section: Section): void {
     this.section = section;
@@ -102,7 +172,7 @@ export class AppComponent implements OnInit {
     if (section === 'collectors') this.expandedCollectorId = null;
   }
   get currentTitle(): string {
-    return this.sections.find(item => item.id === this.section)?.label ?? 'Repertica Studio';
+    return this.tr(this.sections.find(item => item.id === this.section)?.label ?? 'Repertica Studio');
   }
   get visibleArtworks(): Artwork[] {
     return filterArtworks(this.artworks, {
@@ -132,11 +202,11 @@ export class AppComponent implements OnInit {
   get sellableArtworks(): Artwork[] { return this.artworks.filter(a => ['available','reserved'].includes(a.status)); }
   get money(): string { return this.euros(this.overview.revenue_cents); }
   euros(cents: number): string {
-    return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(cents / 100);
+    return new Intl.NumberFormat(this.language, { style: 'currency', currency: 'EUR' }).format(cents / 100);
   }
   date(value: string): string {
     const d = new Date(value.length === 10 ? value + 'T12:00:00' : value);
-    return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString('it-IT');
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString(this.language);
   }
   dimensions(artwork: Artwork): string {
     const parts = [artwork.height_cm, artwork.width_cm, artwork.depth_cm].filter(v => v !== null);
@@ -145,9 +215,10 @@ export class AppComponent implements OnInit {
   async refresh(): Promise<void> {
     this.loading = true;
     try {
-      [this.artworks, this.collectors, this.sales, this.certificates, this.overview, this.dataPath] = await Promise.all([
+      [this.artworks, this.collectors, this.sales, this.certificates, this.overview, this.dataPath,
+        this.expenses, this.finances] = await Promise.all([
         api.listArtworks(), api.listCollectors(), api.listSales(), api.listCertificates(),
-        api.overview(), api.dataDirectory()
+        api.overview(), api.dataDirectory(), api.listExpenses(), api.financeOverview(this.financeYear)
       ]);
       // Build indexes once per refresh instead of scanning the full sales register for every row.
       const indexes = buildSaleIndexes(this.sales);
@@ -245,8 +316,85 @@ export class AppComponent implements OnInit {
   bytes(value: number): string {
     return new Intl.NumberFormat('it-IT', { maximumFractionDigits: 1 }).format(value / 1048576) + ' MiB';
   }
-  newArtwork(): void { this.artworkDraft = freshArtwork(); this.artworkDialog = true; }
+  async loadFinanceYear(): Promise<void> {
+    try {
+      this.finances = await api.financeOverview(this.financeYear);
+      this.errorMessage = '';
+    } catch (e) { this.errorMessage = this.error(e); }
+    this.change.detectChanges();
+  }
+  monthName(month: string): string {
+    const date = new Date(month + '-01T12:00:00');
+    return date.toLocaleDateString(this.language, {month:'short'});
+  }
+  chartWidth(value: number): number {
+    const limit = Math.max(1,...(this.finances?.months.map(m=>Math.max(m.gross_cents,m.expense_cents)) ?? [1]));
+    return Math.max(0,Math.min(100,Math.round(value/limit*100)));
+  }
+  categoryLabel(code:string):string {
+    const value=this.expenseCategories.find(c=>c.code===code);
+    return value ? this.tr(value.label) : code;
+  }
+  async saveEconomySettings(): Promise<void> {
+    const p=[this.personalPercent,this.activityPercent,this.savingsPercent].map(v=>Math.round(v*100));
+    if (p.some((v)=>!Number.isFinite(v)||v<0||v>10000) || p.reduce((a,b)=>a+b,0)!==10000) {
+      this.errorMessage = this.tr('Deve essere 100%'); return;
+    }
+    const base=Math.round(this.rateEuro*100);
+    const tax=Math.round(this.defaultTaxPercent*100);
+    const draft: StudioSettings = {...this.settingsDraft,
+      base_price_cm2_cents:base,default_tax_bp:tax,
+      personal_bp:p[0],activity_bp:p[1],savings_bp:p[2],
+      ui_language:this.languageChoice==='system'?null:this.languageChoice as AppLanguage};
+    if (await this.run(async()=>{this.settings=await api.saveSettings(draft);this.settingsDraft={...this.settings};},
+      this.tr('Salva impostazioni'))) {
+      this.applyLanguage(this.languageChoice==='system'?this.systemLanguage:chooseLanguage(this.languageChoice));
+      await this.loadFinanceYear();
+    }
+  }
+  get allocationValid(): boolean {
+    return [this.personalPercent,this.activityPercent,this.savingsPercent].every(v=>Number.isFinite(v)&&v>=0&&v<=100)
+      && [this.personalPercent,this.activityPercent,this.savingsPercent].reduce((a,b)=>a+Math.round(b*100),0)===10000;
+  }
+  selectLanguage(): void {
+    this.applyLanguage(this.languageChoice === 'system' ? this.systemLanguage : chooseLanguage(this.languageChoice));
+  }
+  newExpense(): void {
+    this.expenseDraft={id:undefined,expense_date:today(),category:'painting-materials',description:'',amount_eur:null,
+      fund:'activity',supplier:null,purchase_url:null,notes:null};
+    this.expenseDialog=true;
+  }
+  editExpense(e: Expense): void {
+    this.expenseDraft={id:e.id,expense_date:e.expense_date,category:e.category,description:e.description,
+      amount_eur:e.amount_cents/100,fund:e.fund,supplier:e.supplier,purchase_url:e.purchase_url,notes:e.notes};
+    this.expenseDialog=true;
+  }
+  async saveExpense(): Promise<void> {
+    const value=this.expenseDraft.amount_eur;
+    if (value===null || !Number.isFinite(value) || value<=0) { this.errorMessage=this.tr('Importo spesa (€)'); return; }
+    const input: ExpenseInput={
+      id:this.expenseDraft.id,expense_date:this.expenseDraft.expense_date,
+      description:this.expenseDraft.description,category:this.expenseDraft.category,
+      amount_cents:Math.round(value*100),fund:this.expenseDraft.fund,supplier:this.expenseDraft.supplier,
+      purchase_url:this.expenseDraft.purchase_url,notes:this.expenseDraft.notes
+    };
+    if (await this.run(()=>api.saveExpense(input),this.tr('Salva spesa'))) this.expenseDialog=false;
+  }
+  async deleteExpense(e:Expense):Promise<void> {
+    if(!window.confirm(this.tr('Elimina') + ': '+e.description+'?'))return;
+    await this.run(()=>api.deleteExpense(e.id),this.tr('Elimina'));
+  }
+  async previewPrice():Promise<void> {
+    try {
+      this.estimateCents=await api.pricePreview(this.artworkDraft.width_cm??0,this.artworkDraft.height_cm??0);
+    } catch (error) {
+      this.errorMessage=this.error(error);
+    }
+    this.change.detectChanges();
+  }
+  newArtwork(): void { this.estimateCents=null; this.artworkDraft = freshArtwork(); this.artworkDialog = true; }
   editArtwork(a: Artwork): void {
+    this.estimateCents=null;
     this.artworkDraft = {
       id: a.id, code: a.code, title: a.title, year: a.year, technique: a.technique,
       support: a.support, width_cm: a.width_cm, height_cm: a.height_cm,
@@ -294,11 +442,16 @@ export class AppComponent implements OnInit {
     if (!window.confirm(`Eliminare il contatto "${c.name}"?`)) return;
     await this.run(() => api.deleteCollector(c.id), 'Collezionista eliminato');
   }
+  recalculateDefaultSaleTax(): void {
+    const amount=this.saleDraft.amount_eur;
+    if (amount===null || !Number.isFinite(amount) || amount<0) return;
+    this.saleDraft.taxes_eur=Math.round(amount*this.defaultTaxPercent)/100;
+  }
   newSale(): void {
     this.saleDraft = {
       artwork_id: this.sellableArtworks[0]?.id ?? '',
       collector_id: this.collectors[0]?.id ?? '',
-      amount_eur: null, sold_at: today(), notes: null
+      amount_eur: null, taxes_eur:0, shipping_eur:0, sold_at: today(), notes: null
     };
     this.saleDialog = true;
   }
@@ -307,9 +460,15 @@ export class AppComponent implements OnInit {
     if (amount === null || !Number.isFinite(amount) || amount <= 0 || Math.round(amount * 100) > 100_000_000_000) {
       this.errorMessage = 'Inserisci un importo maggiore di zero'; return;
     }
+    const tax_cents=Math.round(this.saleDraft.taxes_eur*100);
+    const shipping_cents=Math.round(this.saleDraft.shipping_eur*100);
+    if (![tax_cents,shipping_cents].every(v=>Number.isFinite(v)&&v>=0) || tax_cents+shipping_cents>Math.round(amount*100)) {
+      this.errorMessage=this.tr('Importo tasse (€)')+' / '+this.tr('Spese spedizione (€)');return;
+    }
     const input = {
       artwork_id: this.saleDraft.artwork_id, collector_id: this.saleDraft.collector_id,
-      amount_cents: Math.round(amount * 100), sold_at: this.saleDraft.sold_at, notes: this.saleDraft.notes
+      amount_cents: Math.round(amount * 100), tax_cents, shipping_cents,
+      sold_at: this.saleDraft.sold_at, notes: this.saleDraft.notes
     };
     if (await this.run(() => api.recordSale(input), 'Vendita registrata e stato dell’opera aggiornato')) this.saleDialog = false;
   }

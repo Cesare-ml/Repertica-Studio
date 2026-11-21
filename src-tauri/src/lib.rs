@@ -1,12 +1,14 @@
 mod backup;
 mod commands;
 mod db;
+mod finance;
 mod models;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_os::init())
         .setup(|app| {
             use tauri::Manager;
             let directory = app.path().app_local_data_dir()?;
@@ -33,7 +35,14 @@ pub fn run() {
             commands::artwork_image_data,
             backup::create_backup,
             backup::inspect_backup,
-            backup::restore_backup
+            backup::restore_backup,
+            finance::get_studio_settings,
+            finance::save_studio_settings,
+            finance::list_expenses,
+            finance::save_expense,
+            finance::delete_expense,
+            finance::finance_overview,
+            finance::price_preview
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");

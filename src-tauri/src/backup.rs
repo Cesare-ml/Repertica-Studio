@@ -121,7 +121,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     ).map_err(error)?;
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
-    if schema != 1 { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    if !(1..=2).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
     let mut counts = [0_i64; 4];
     for (i, table) in ["artworks", "collectors", "sales", "certificates"].iter().enumerate() {
         counts[i] = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).map_err(error)?;
@@ -138,7 +138,7 @@ fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
         return Err("Manifest del backup troppo grande".into());
     }
     let value: Manifest = serde_json::from_slice(&fs::read(&manifest_path).map_err(error)?).map_err(error)?;
-    if value.format != FORMAT || value.format_version != FORMAT_VERSION || value.schema_version != 1 {
+    if value.format != FORMAT || value.format_version != FORMAT_VERSION || !(1..=2).contains(&value.schema_version) {
         return Err("Questo backup non è compatibile con Repertica Studio".into());
     }
     if value.files.len() > 1_000_000 { return Err("Troppi file nel backup".into()); }
@@ -162,6 +162,7 @@ pub fn inspect_backup_core(folder: &Path) -> Result<BackupSummary, String> {
     }
     if !seen.contains(DB_FILE) { return Err("Database assente nel backup".into()); }
     let (schema, counts, references) = validate_snapshot(&directory.join(DB_FILE))?;
+    if schema != manifest.schema_version { return Err("Inconsistent backup schema version".into()); }
     for ref_path in references {
         if !seen.contains(&ref_path) {
             return Err(format!("Immagine dell'opera non inclusa nel backup: {ref_path}"));
@@ -206,6 +207,7 @@ pub fn create_backup_core(db: &Database, destination: &Path) -> Result<BackupSum
         copy.pragma_update(None, "journal_mode", "DELETE").map_err(error)?;
         drop(copy);
 
+        let schema_version = validate_snapshot(&snapshot)?.0;
         let mut files = vec![record(&partial, DB_FILE)?];
         let media_dir = db.directory.join("media");
         for entry in fs::read_dir(&media_dir).map_err(error)? {
@@ -224,7 +226,7 @@ pub fn create_backup_core(db: &Database, destination: &Path) -> Result<BackupSum
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let manifest = Manifest {
             format: FORMAT.into(), format_version: FORMAT_VERSION,
-            created_at: Utc::now().to_rfc3339(), schema_version: 1, files,
+            created_at: Utc::now().to_rfc3339(), schema_version, files,
         };
         let mut output = File::create_new(partial.join(MANIFEST_FILE)).map_err(error)?;
         output.write_all(&serde_json::to_vec_pretty(&manifest).map_err(error)?).map_err(error)?;

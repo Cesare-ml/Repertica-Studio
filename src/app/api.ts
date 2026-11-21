@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
-  Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary
+  Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
+  StudioSettings, Expense, ExpenseInput, FinanceOverview
 } from './models';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
@@ -24,5 +25,12 @@ export const api = {
   dataDirectory: () => invoke<string>('data_directory'),
   createBackup: (destination: string) => invoke<BackupSummary>('create_backup', { destination }),
   inspectBackup: (folder: string) => invoke<BackupSummary>('inspect_backup', { folder }),
-  restoreBackup: (folder: string) => invoke<RestoreSummary>('restore_backup', { folder })
+  restoreBackup: (folder: string) => invoke<RestoreSummary>('restore_backup', { folder }),
+  getSettings: () => invoke<StudioSettings>('get_studio_settings'),
+  saveSettings: (input: StudioSettings) => invoke<StudioSettings>('save_studio_settings', {input}),
+  listExpenses: () => invoke<Expense[]>('list_expenses'),
+  saveExpense: (input: ExpenseInput) => invoke<Expense>('save_expense', {input}),
+  deleteExpense: (id: string) => invoke<void>('delete_expense', {id}),
+  financeOverview: (year: number) => invoke<FinanceOverview>('finance_overview', {year}),
+  pricePreview: (widthCm: number, heightCm: number) => invoke<number|null>('price_preview', {widthCm,heightCm})
 };

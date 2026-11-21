@@ -155,6 +155,39 @@ td.money{color:#234f3c;font-weight:700;font-variant-numeric:tabular-nums}
  .form-grid{grid-template-columns:1fr}
  .dialog{padding:19px}
 }
+
+.finance-top-actions{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.year-select{display:flex;flex-direction:column;gap:5px;color:#68796d;font-size:11px;font-weight:700}
+.year-select select,.settings-input input,.settings-input select{padding:10px 11px;border:1px solid #dce2db;border-radius:8px;background:white;color:#273e33;min-width:120px}
+.finance-chart{margin-bottom:21px}
+.chart-legend{display:flex;gap:8px;align-items:center;color:#718076;font-size:11px;padding:0 29px 15px}
+.legend-revenue,.legend-expense{height:9px;width:9px;border-radius:2px;background:#316e59;margin-left:12px}
+.legend-expense{background:#cba87b}
+.monthly-bars{padding:4px 29px 28px;display:flex;flex-direction:column;gap:9px}
+.month-chart-row{display:grid;grid-template-columns:54px minmax(0,1fr) 105px;align-items:center;gap:12px}
+.month-label{text-transform:capitalize;color:#758278;font-size:12px}
+.month-track{height:24px;display:flex;flex-direction:column;gap:3px;justify-content:center}
+.month-bar{height:8px;border-radius:0 6px 6px 0}
+.month-bar.revenue{background:#316e59}
+.month-bar.expense{background:#cba87b}
+.month-value{text-align:right;font-size:11px;color:#4b6558;font-variant-numeric:tabular-nums}
+.finance-summary{margin-bottom:24px}
+.finance-balances{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:10px 25px 25px}
+.finance-balances div{border-radius:9px;background:#f1f6f2;padding:17px;display:flex;flex-direction:column;gap:10px}
+.finance-balances span{font-size:12px;color:#62796b}
+.finance-balances strong{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;color:#2b6046}
+.finance-month-table{border-top:1px solid #ecefe8}
+.finance-month-table td.negative{color:#b4544a;font-weight:700}
+.expenses-heading{margin:32px 0 20px}
+.settings-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:16px 0}
+.settings-input{display:flex;flex-direction:column;gap:7px}
+.settings-input span{font-size:11px;color:#607365;font-weight:700}
+.economy-settings .settings-input input,.economy-settings .settings-input select{max-width:100%;min-width:0;width:100%;font-size:12px}
+.economy-settings button.primary{margin-top:8px}
+.allocation-total{color:#4d6957;font-weight:700}
+.price-preview{display:flex;gap:15px;align-items:center;padding:12px 0;color:#557361;font-size:12px}
+@media(max-width:770px){.finance-balances{grid-template-columns:1fr}.settings-form-grid{grid-template-columns:1fr}.month-chart-row{grid-template-columns:35px minmax(0,1fr) 80px;gap:6px}.finance-top-actions{align-items:flex-start}}
+
 @media print{
  @page{size:A4;margin:13mm}
  .shell,.overlay{display:none!important}
