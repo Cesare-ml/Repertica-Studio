@@ -364,8 +364,8 @@ mod tests {
         ).unwrap();
         assert_eq!(stored, snapshot);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&stored).unwrap()["image_path"],
-            original
+            serde_json::from_str::<serde_json::Value>(&stored).unwrap()["image_path"].as_str(),
+            Some(original.as_str())
         );
     }
 
