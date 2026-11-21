@@ -5,6 +5,7 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  "Impossibile stampare: dati storici del certificato non validi.": "Cannot print: historical certificate data is invalid.",
   "Fotografia storica dell'opera": "Historical artwork photograph",
   "Fotografia storica del certificato non disponibile.": "Historical certificate photograph is unavailable.",
   "Impossibile stampare: fotografia storica mancante o non leggibile.": "Cannot print: historical photograph is missing or unreadable.",
@@ -250,6 +251,7 @@ const EN: Record<string,string> = {
   'Registrato il':'Recorded on','Nessun dato per questo anno':'No data for this year'
 };
 const ES:Record<string,string> = {
+  "Impossibile stampare: dati storici del certificato non validi.": "No se puede imprimir: los datos históricos del certificado no son válidos.",
   "Fotografia storica dell'opera": "Fotografía histórica de la obra",
   "Fotografia storica del certificato non disponibile.": "La fotografía histórica del certificado no está disponible.",
   "Impossibile stampare: fotografia storica mancante o non leggibile.": "No se puede imprimir: falta la fotografía histórica o no se puede leer.",
@@ -330,6 +332,7 @@ const ES:Record<string,string> = {
  'Importo (€) *':'Importe (€) *','Importo spesa (€)':'Importe del gasto (€)'
 };
 const FR:Record<string,string> = {
+  "Impossibile stampare: dati storici del certificato non validi.": "Impression impossible : les données historiques du certificat sont invalides.",
   "Fotografia storica dell'opera": "Photographie historique de l’œuvre",
   "Fotografia storica del certificato non disponibile.": "La photographie historique du certificat est indisponible.",
   "Impossibile stampare: fotografia storica mancante o non leggibile.": "Impression impossible : la photo historique est absente ou illisible.",
@@ -412,6 +415,7 @@ const FR:Record<string,string> = {
  'Importo (€) *':'Montant (€) *','Importo spesa (€)':'Montant de la dépense (€)'
 };
 const DE:Record<string,string> = {
+  "Impossibile stampare: dati storici del certificato non validi.": "Drucken nicht möglich: Die historischen Zertifikatsdaten sind ungültig.",
   "Fotografia storica dell'opera": "Historisches Foto des Kunstwerks",
   "Fotografia storica del certificato non disponibile.": "Das historische Zertifikatsfoto ist nicht verfügbar.",
   "Impossibile stampare: fotografia storica mancante o non leggibile.": "Drucken nicht möglich: Das historische Foto fehlt oder ist nicht lesbar.",
