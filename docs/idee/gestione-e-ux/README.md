@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (quinta ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (sesta ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -17,6 +17,8 @@ Aggiornato: **2026-11-21** (quinta ricognizione). Stato delle proposte: **Propos
 | [REPS-UX-009](REPS-UX-009-progetti-espositivi-checklist.md) | Progetti espositivi, selezioni opere e checklist con scadenze | P2 | Proposta — da valutare |
 | [REPS-UX-010](REPS-UX-010-diritti-riproduzione-crediti-autorizzazioni.md) | Diritti di riproduzione, crediti fotografici e permessi d'uso dichiarati | P2 | Proposta — da valutare |
 | [REPS-UX-011](REPS-UX-011-cicli-creativi-relazioni-opere.md) | Cicli creativi di opere uniche, studi preparatori e relazioni tipizzate | P2 | Proposta — da valutare |
+| [REPS-UX-012](REPS-UX-012-affidamenti-conto-vendita-rendiconti.md) | Affidamenti in conto vendita e rendiconti commerciali agli intermediari | P1–P2 | Proposta — da valutare |
+| [REPS-UX-013](REPS-UX-013-resi-annullamenti-rettifiche-vendite.md) | Resi, annullamenti e rettifiche post-vendita con cronologia e tutele | P1 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -63,6 +65,16 @@ Verificati di nuovo il branch `main` (README, `docs/MVP.md`, `docs/ECONOMY-I18N.
 - **Confini col filone tecnico:** le sette schede TECH-001…007 trattano strumenti trasversali (portabilità, automazioni, integrità media, ricerca federata, anteprime, backup cifrati, storage esterno). Nessun file sotto `docs/idee/strumenti-e-architettura/` è stato modificato.
 - **Verifica della domanda reale ancora aperta:** frequenza delle richieste di licenza/credito da terzi e uso di cicli di originali unici. Priorità P2 ipotetiche, nessuna scelta attuata e nessuna idea assegnata agli sviluppatori.
 
+## Sesta ricognizione (21 novembre 2026)
+
+Riletti il branch `main` (README, MVP, ECONOMY-I18N, SALE-RECEIPTS, DATA-PORTABILITY, `src/app/models.ts`, `src-tauri/src/db.rs`, `src-tauri/src/commands.rs`), la documentazione delle undici schede precedenti, l'indice tecnico delle otto proposte nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), la [issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) e la [PR #23](https://github.com/Cesare-ml/Repertica-Studio/pull/23) sugli incassi CSV, ancora aperta alla ricognizione.
+
+- **[REPS-UX-012](REPS-UX-012-affidamenti-conto-vendita-rendiconti.md) — Affidamenti in conto vendita:** affronta *termini commerciali* tra artista/proprietario e intermediario, percentuali contrattuali ipotetiche, scadenze e rendiconti. Non crea una seconda vendita, non registra incassi né altera l'ubicazione fisica. Differisce da UX-001 (movimenti/custodia), UX-002 (trattative con acquirenti), UX-003 (costi di produzione), UX-009 (mostre) e issue #13 (contabilità generale e commissioni). La sovrapposizione sulla commissione è esplicitamente delimitata: questa proposta riguarda la **UX dell'accordo**, non il registro fiscale o di cassa.
+- **[REPS-UX-013](REPS-UX-013-resi-annullamenti-rettifiche-vendite.md) — Resi e rettifiche post-vendita:** affronta la conservazione della **storia di una vendita annullata/restituita**, senza cancellare incassi dichiarati o certificati. In `main` una vendita normale è unica per opera, `delete_sale` restituisce lo stato `available` e le vendite con incassi non sono eliminabili: nessuna funzione attuale documenta una pratica completa di reso o una rivendita con storico. Distinta da UX-002 (prima della vendita), da UX-001 (movimenti fisici) e dall'export incassi della PR #23.
+- **Rispetto del filone tecnico:** TECH-001…008 propongono portabilità, autorizzazioni locali, diagnostica media, ricerca federata, anteprime, cifratura backup, archivi media esterni e viste salvate. Le nuove schede descrivono **solo processi gestionali**; l'eventuale esportazione strutturata si allineerebbe concettualmente a TECH-001, senza modificarne alcun file.
+- **Da convalidare con il proprietario:** frequenza del conto vendita rispetto alla vendita diretta; base e regole delle commissioni; frequenza di resi/cancellazioni; diritto di registrare una seconda vendita della medesima opera; criterio temporale dei report rettificati. P1/P2 sono solo priorità suggerite, mai decisioni di sviluppo.
+- **Vincolo editoriale:** nessuna approvazione, issue operativa, modifica al software o merge. Stato uniforme: **Proposta — da valutare**.
+
 ## Criteri editoriali
 
 1. Ogni idea deve aggiungere un **processo professionale distinto**, non rinominare una funzione già presente. Chi propone cita la differenza rispetto all'MVP e alle issue.
@@ -70,9 +82,9 @@ Verificati di nuovo il branch `main` (README, `docs/MVP.md`, `docs/ECONOMY-I18N.
 3. Non affermare autenticità della provenienza, saldo bancario reale, incasso o profitto fiscale senza prove; non trasformare un'ipotesi in una promessa del software.
 4. Tutto resta **gratuito, open source, offline-first**, senza account, abbonamenti, sincronizzazione cloud o invio dei dati a servizi terzi; lingua del sistema con fallback inglese.
 5. Prima di creare una nuova scheda verificare altre schede, issue e PR aperte, comprese quelle di `docs/idee/strumenti-e-architettura/` se aggiunte dall'altro filone. Non modificare i file dell'altro filone. Se un'idea interseca altre schede, linkarle e definire confini.
-6. Ogni ulteriore proposta deve avere ID successivo `REPS-UX-012`, ecc., mantenendo gli ID già assegnati stabili; gli sviluppatori non devono implementarla senza revisione esplicita del proprietario.
+6. Ogni ulteriore proposta deve avere ID successivo `REPS-UX-014`, ecc., mantenendo gli ID già assegnati stabili; gli sviluppatori non devono implementarla senza revisione esplicita del proprietario.
 7. Lavorare solo su file Markdown di questa cartella e tramite PR **documentale**; non effettuare merge automatici.
 
 ## Sequenza di valutazione suggerita (non autorizzazione)
 
-Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. Infine valutare **scorte e consumi materiali** (008) soltanto se acquisti e giacenze ricorrenti sono una necessità reale, e **progetti espositivi** (009) soltanto se l'organizzazione di mostre è abbastanza frequente da giustificare un modulo dedicato. Considerare **diritti e crediti di riproduzione** (010) solo dopo una verifica dei casi di pubblicazione più comuni, e **cicli creativi/relazioni fra opere uniche** (011) solo se i semplici filtri testuali sono insufficienti. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
+Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. Infine valutare **scorte e consumi materiali** (008) soltanto se acquisti e giacenze ricorrenti sono una necessità reale, e **progetti espositivi** (009) soltanto se l'organizzazione di mostre è abbastanza frequente da giustificare un modulo dedicato. Considerare **diritti e crediti di riproduzione** (010) solo dopo una verifica dei casi di pubblicazione più comuni, e **cicli creativi/relazioni fra opere uniche** (011) solo se i semplici filtri testuali sono insufficienti. Infine esaminare **conto vendita/intermediari** (012) se una quota significativa degli utenti opera tramite gallerie; la **tracciabilità di resi e annullamenti** (013) merita valutazione anticipata se si prevedono vendite reali con acconti, dato il rischio di perdere la storia delle rettifiche. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
