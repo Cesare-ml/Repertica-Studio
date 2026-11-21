@@ -383,6 +383,39 @@ mod tests {
         assert_eq!(fs::read(db.directory.join("media/example.png")).unwrap(), vec![1,2,3,4]);
     }
     #[test]
+    fn gallery_order_survives_verified_backup_and_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            for (id,sort) in [("detail",2),("back",1)] {
+                conn.execute("INSERT INTO artwork_images
+                    (id,artwork_id,image_path,caption,created_at,sort_order)
+                    VALUES(?1,'a',?2,?1,'t',?3)",
+                    params![id,format!("media/{id}.png"),sort]).unwrap();
+                fs::write(db.directory.join(format!("media/{id}.png")),id.as_bytes()).unwrap();
+            }
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db,&destination).unwrap();
+        assert_eq!(backup.schema_version,5);
+        assert!(backup.verified);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE artwork_images SET sort_order=100 WHERE id='back'",[]).unwrap();
+        }
+        restore_backup_core(&db,Path::new(&backup.directory)).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id,sort_order,caption FROM artwork_images
+            WHERE artwork_id='a' ORDER BY sort_order,id").unwrap();
+        let order:Vec<(String,i64,String)> = stmt.query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))
+            .unwrap().map(Result::unwrap).collect();
+        assert_eq!(order,vec![("back".into(),1,"back".into()),("detail".into(),2,"detail".into())]);
+        assert_eq!(fs::read(db.directory.join("media/detail.png")).unwrap(),b"detail");
+    }
+    #[test]
     fn gallery_media_is_backed_up_and_verified_by_reference() {
         let tmp = tempfile::tempdir().unwrap();
         let db = db::open(tmp.path().join("active")).unwrap();
