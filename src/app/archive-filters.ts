@@ -25,23 +25,46 @@ export function buildSaleIndexes(sales: Sale[]): SaleIndexes {
   return { byCollector, byArtwork };
 }
 
-/** Normalize Latin diacritics and case for local, language-independent search. */
+/** Normalize Latin diacritics, case and whitespace for local search. */
 function foldSearch(value: string): string {
-  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    .replace(/\s+/gu, ' ').trim();
 }
 
 /**
- * All whitespace-separated terms must match, but they can appear in different
- * fields (for example an artwork's technique and its buyer's name).
+ * Unquoted words are independent AND terms. Double quotes keep a sequence of
+ * words together, e.g. `"olio su tela" marina` finds the phrase in one field
+ * and "marina" in any other field. An unclosed quote includes the remainder.
  */
 function searchTerms(query: string): string[] {
-  return foldSearch(query).trim().split(/\s+/u).filter(Boolean);
+  const terms: string[] = [];
+  let token = '';
+  let quoted = false;
+  const push = () => {
+    const term = token.replace(/\s+/gu, ' ').trim();
+    if (term) terms.push(term);
+    token = '';
+  };
+  for (const character of foldSearch(query)) {
+    if (character === '"') {
+      push();
+      quoted = !quoted;
+    } else if (!quoted && /\s/u.test(character)) {
+      push();
+    } else {
+      token += character;
+    }
+  }
+  push();
+  return terms;
 }
 
 function matchesTerms(terms: string[], fields: Array<string | null | undefined>): boolean {
   if (terms.length === 0) return true;
-  const text = foldSearch(fields.map(field => field ?? '').join(' '));
-  return terms.every(term => text.includes(term));
+  // Match within a single field so a quoted phrase cannot accidentally span
+  // an artwork title, its technique and a collector name joined by spaces.
+  const normalizedFields = fields.map(field => foldSearch(field ?? ''));
+  return terms.every(term => normalizedFields.some(field => field.includes(term)));
 }
 
 export function filterArtworks(
