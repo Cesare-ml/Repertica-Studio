@@ -4,13 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
+import type { ArtworkOrder } from './archive-filters';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'settings';
-type ArtworkOrder = 'recent' | 'title' | 'year';
 const freshArtwork = (): ArtworkInput => ({
   code: '', title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
@@ -104,33 +105,16 @@ export class AppComponent implements OnInit {
     return this.sections.find(item => item.id === this.section)?.label ?? 'Repertica Studio';
   }
   get visibleArtworks(): Artwork[] {
-    const q = this.search.trim().toLocaleLowerCase('it');
-    const linkedIds = this.artworkCollectorFilter === 'all' ? null :
-      new Set((this.salesByCollector[this.artworkCollectorFilter] ?? []).map(s => s.artwork_id));
-    const filtered = this.artworks.filter(a =>
-      (this.artworkStatusFilter === 'all' || a.status === this.artworkStatusFilter) &&
-      (linkedIds === null || linkedIds.has(a.id)) &&
-      (!q || [a.title, a.code, a.year, a.technique, a.support, a.location, a.description,
-        this.salesByArtwork[a.id]?.collector_name]
-        .some(v => (v ?? '').toLocaleLowerCase('it').includes(q))));
-    if (this.artworkOrder === 'title') {
-      return filtered.sort((a, b) => a.title.localeCompare(b.title, 'it', { numeric: true, sensitivity: 'base' }) ||
-        a.code.localeCompare(b.code, 'it', { numeric: true }));
-    }
-    if (this.artworkOrder === 'year') {
-      const year = (a: Artwork) => /^\\d{1,4}$/.test(a.year?.trim() ?? '') ?
-        Number(a.year) : Number.NEGATIVE_INFINITY;
-      return filtered.sort((a, b) => year(b) - year(a) ||
-        a.title.localeCompare(b.title, 'it', { sensitivity: 'base' }));
-    }
-    return filtered; // Native list is already ordered by updated_at descending.
+    return filterArtworks(this.artworks, {
+      query: this.search,
+      status: this.artworkStatusFilter,
+      collectorId: this.artworkCollectorFilter,
+      order: this.artworkOrder
+    }, { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork });
   }
   get visibleCollectors(): Collector[] {
-    const q = this.search.trim().toLocaleLowerCase('it');
-    return q ? this.collectors.filter(c =>
-      [c.name, c.email, c.phone, c.address, c.notes,
-        ...(this.salesByCollector[c.id] ?? []).map(s => s.artwork_title)]
-        .some(v => (v ?? '').toLocaleLowerCase('it').includes(q))) : this.collectors;
+    return filterCollectors(this.collectors, this.search,
+      { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork });
   }
   showCollectorArtworks(collectorId: string): void {
     this.navigate('artworks');
@@ -166,12 +150,9 @@ export class AppComponent implements OnInit {
         api.overview(), api.dataDirectory()
       ]);
       // Build indexes once per refresh instead of scanning the full sales register for every row.
-      this.salesByCollector = {};
-      this.salesByArtwork = {};
-      for (const sale of this.sales) {
-        (this.salesByCollector[sale.collector_id] ??= []).push(sale);
-        this.salesByArtwork[sale.artwork_id] = sale;
-      }
+      const indexes = buildSaleIndexes(this.sales);
+      this.salesByCollector = indexes.byCollector;
+      this.salesByArtwork = indexes.byArtwork;
       if (this.artworkCollectorFilter !== 'all' &&
           !this.collectors.some(c => c.id === this.artworkCollectorFilter)) {
         this.artworkCollectorFilter = 'all';
