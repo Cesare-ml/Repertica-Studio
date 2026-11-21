@@ -4,6 +4,7 @@ import type {
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage
 } from './models';
+import type { CsvRegisterKind } from './csv-registers';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
 export const api = {
@@ -36,7 +37,7 @@ export const api = {
   listExpenses: () => invoke<Expense[]>('list_expenses'),
   saveExpense: (input: ExpenseInput) => invoke<Expense>('save_expense', {input}),
   deleteExpense: (id: string) => invoke<void>('delete_expense', {id}),
-  exportLedgerCsv: (kind: 'sales' | 'expenses', destination: string) =>
+  exportLedgerCsv: (kind: CsvRegisterKind, destination: string) =>
     invoke<string>('export_ledger_csv', {kind, destination}),
   financeOverview: (year: number) => invoke<FinanceOverview>('finance_overview', {year}),
   pricePreview: (widthCm: number, heightCm: number) => invoke<number|null>('price_preview', {widthCm,heightCm})
