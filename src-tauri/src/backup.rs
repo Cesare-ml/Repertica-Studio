@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::{Read, Write},
     path::{Component, Path, PathBuf},
@@ -179,6 +179,47 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     }
     Ok((schema, counts, references))
 }
+// A valid manifest proves that backup bytes match the manifest, not that an
+// attachment still matches the checksum saved when the receipt was attached.
+// Reject a self-consistent but corrupted/re-hashed backup before restoring it.
+fn validate_receipt_attachment_evidence(
+    snapshot: &Path, root: &Path, files: &[FileRecord],
+) -> Result<(), String> {
+    let conn = Connection::open_with_flags(snapshot, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(error)?;
+    let mut statement = conn.prepare(
+        "SELECT receipt_id,media_path,mime_type,size_bytes,sha256 FROM sale_receipt_attachments"
+    ).map_err(error)?;
+    let by_path: HashMap<&str, &FileRecord> =
+        files.iter().map(|record| (record.path.as_str(), record)).collect();
+    let attachments = statement.query_map([], |r| Ok((
+        r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
+        r.get::<_, i64>(3)?, r.get::<_, String>(4)?,
+    ))).map_err(error)?;
+    for attachment in attachments {
+        let (receipt_id, relative, stored_mime, stored_bytes, stored_sha) = attachment.map_err(error)?;
+        if !crate::receipt_attachments::safe_media_path(&relative) {
+            return Err(format!("Percorso allegato incasso non sicuro: {receipt_id}"));
+        }
+        let entry = by_path.get(relative.as_str())
+            .ok_or_else(|| format!("Allegato incasso assente nel backup: {relative}"))?;
+        if stored_bytes <= 0 || entry.bytes != stored_bytes as u64 || entry.sha256 != stored_sha {
+            return Err(format!("Allegato incasso non coerente con i metadati SQLite: {relative}"));
+        }
+        // A matching checksum should not bless an invalid document header or
+        // mismatched extension/MIME after offline modification of an archive.
+        let mut header = Vec::with_capacity(12);
+        File::open(root.join(&relative)).map_err(error)?
+            .take(12).read_to_end(&mut header).map_err(error)?;
+        let format_valid = crate::receipt_attachments::mime(&header)
+            .is_some_and(|(ext, found_mime)| {
+                stored_mime == found_mime && relative.ends_with(&format!(".{ext}"))
+            });
+        if !format_valid {
+            return Err(format!("Formato allegato incasso non valido: {relative}"));
+        }
+    }
+    Ok(())
+}
 fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
     let manifest_path = dir.join(MANIFEST_FILE);
     check_regular(&manifest_path)?;
@@ -241,6 +282,9 @@ pub fn inspect_backup_core(folder: &Path) -> Result<BackupSummary, String> {
     check_unlisted_media(&directory, &seen)?;
     let (schema, counts, references) = validate_snapshot(&directory.join(DB_FILE))?;
     if schema != manifest.schema_version { return Err("Inconsistent backup schema version".into()); }
+    if schema >= 6 {
+        validate_receipt_attachment_evidence(&directory.join(DB_FILE), &directory, &manifest.files)?;
+    }
     for ref_path in references {
         if !seen.contains(&ref_path) {
             return Err(format!("Immagine dell'opera non inclusa nel backup: {ref_path}"));
@@ -431,6 +475,28 @@ mod tests {
         conn.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at,image_path) VALUES('a','R-1','Opera','available','now','now','media/example.png')", []).unwrap();
         conn.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Cliente','now','now')", []).unwrap();
         fs::write(db.directory.join("media/example.png"), [1_u8,2,3,4]).unwrap();
+    }
+    fn seed_receipt_evidence(db: &Database) -> String {
+        let relative = "media/receipt-00000000-0000-4000-8000-000000000001.pdf".to_string();
+        let bytes = b"%PDF-1.7\nCollection proof";
+        fs::write(db.directory.join(&relative), bytes).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+            VALUES('sale','a','c',1000,'2026-11-21','now')", []).unwrap();
+        conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+            VALUES('receipt','sale','2026-11-21',500,'cash','now')", []).unwrap();
+        conn.execute("INSERT INTO sale_receipt_attachments
+            (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
+            VALUES('receipt',?1,'proof.pdf','application/pdf',?2,?3,'now')",
+            params![relative, bytes.len() as i64, format!("{:x}", Sha256::digest(bytes))]).unwrap();
+        relative
+    }
+    fn refresh_manifest_record(folder: &Path, relative: &str) {
+        let manifest_path = folder.join(MANIFEST_FILE);
+        let mut manifest: Manifest = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        let record_to_update = manifest.files.iter_mut().find(|item| item.path == relative).unwrap();
+        *record_to_update = record(folder, relative).unwrap();
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
     }
     #[test]
     fn creates_in_arbitrary_external_folder_and_restores_with_safety_copy() {
@@ -637,6 +703,89 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1);
         assert!(db.directory.join(DB_FILE).exists());
+    }
+
+    #[test]
+    fn rehashed_corrupted_receipt_media_is_rejected_before_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let relative = seed_receipt_evidence(&db);
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // An attacker (or repair tool) updates the manifest checksum to match
+        // corrupt media, but cannot change the original hash in SQLite.
+        fs::write(folder.join(&relative), b"%PDF-1.7\nAltered evidence").unwrap();
+        refresh_manifest_record(folder, &relative);
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("metadati SQLite"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        assert!(db.directory.join(&relative).is_file());
+        assert!(db.directory.join(DB_FILE).is_file());
+    }
+
+    #[test]
+    fn rehashed_sqlite_receipt_metadata_is_rejected_without_touching_live_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let relative = seed_receipt_evidence(&db);
+        let destination = tmp.path().join("drive");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute("UPDATE sale_receipt_attachments SET sha256=?1 WHERE receipt_id='receipt'",
+                params!["0".repeat(64)]).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("metadati SQLite"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        let active_hash: String = db.conn.lock().unwrap().query_row(
+            "SELECT sha256 FROM sale_receipt_attachments WHERE receipt_id='receipt'",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(active_hash, format!("{:x}", Sha256::digest(fs::read(db.directory.join(relative)).unwrap())));
+    }
+
+    #[test]
+    fn active_receipt_corruption_prevents_publishing_a_new_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let relative = seed_receipt_evidence(&db);
+        fs::write(db.directory.join(relative), b"%PDF-1.7\nCorrupt source").unwrap();
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let message = create_backup_core(&db, &destination).unwrap_err();
+        assert!(message.contains("metadati SQLite"), "{message}");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn rehashed_wrong_receipt_mime_is_rejected_before_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        seed_receipt_evidence(&db);
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute("UPDATE sale_receipt_attachments SET mime_type='image/png'
+                WHERE receipt_id='receipt'", []).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("Formato allegato incasso"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
     }
 
     #[test]

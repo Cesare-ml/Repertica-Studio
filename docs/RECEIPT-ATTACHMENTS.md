@@ -39,9 +39,14 @@ snapshot richiede che **ogni percorso allegato ancora collegato** esista tra i
 file registrati nel manifest; un documento mancante causa il rifiuto del
 ripristino **prima** di modificare l'archivio attivo.
 
-La verifica dei checksum contenuti nel DB avviene alla **lettura** dell'allegato;
-il manifest controlla i checksum del backup. Il formato resta una directory
-portabile e leggibile offline; i PDF e le immagini non vengono cifrati.
+La verifica dei checksum contenuti nel DB avviene alla **lettura** dell'allegato
+e ora anche durante la **creazione, ispezione e il ripristino** di backup v6:
+dimensione e SHA-256 nel record SQLite devono combaciare con il file del
+manifest; inoltre firma del formato, MIME e estensione devono concordare.
+Un backup con un file alterato e il solo manifest ricalcolato viene rifiutato.
+**Limite:** il backup non è firmato digitalmente: modificando in modo coerente
+file, database SQLite e manifest si possono produrre altri checksum validi.
+Il formato resta una directory portabile e leggibile offline; i PDF e le immagini non vengono cifrati.
 Conservare i backup in luoghi sicuri perché possono contenere documenti
 personali o bancari.
 
@@ -50,5 +55,7 @@ personali o bancari.
 I test Rust coprono la migrazione di un archivio v5 con incassi storici,
 relazioni, tipo file, file vuoti e link simbolici Unix, l'inserimento,
 la lettura e la rimozione, oltre al rifiuto di un backup cui è stato tolto
-un allegato sia dal disco sia dal manifest. Restano necessari i test reali su
-Windows/macOS/Linux, USB e NAS, compreso il flusso interattivo Angular.
+un allegato sia dal disco sia dal manifest. Test aggiuntivi verificano backup
+con manifest ricalcolato dopo alterazioni del file, dell'hash SQLite o del MIME,
+nonché il rifiuto della pubblicazione di backup da una sorgente già corrotta.
+Restano necessari i test reali su Windows/macOS/Linux, USB e NAS, compreso il flusso interattivo Angular.
