@@ -206,7 +206,7 @@ fn export_core(db: &Database, receipt_id: &str, destination: &Path) -> Result<St
     };
     if !destination.is_absolute()
         || !destination.extension().and_then(|v| v.to_str()).is_some_and(|v| v.eq_ignore_ascii_case(ext)) {
-        return Err(format!("Seleziona un percorso assoluto con estensione .{ext}")).into();
+        return Err(format!("Seleziona un percorso assoluto con estensione .{ext}"));
     }
     let parent = destination.parent().ok_or("Cartella di esportazione non valida")?;
     let parent = fs::canonicalize(parent).map_err(err)?;
@@ -263,7 +263,7 @@ mod tests {
         assert!(data_core(&db, "r").unwrap().starts_with("data:application/pdf;base64,"));
         let exported = tmp.path().join("copy.pdf");
         assert_eq!(export_core(&db, "r", &exported).unwrap(), exported.to_string_lossy());
-        assert_eq!(fs::read(&exported).unwrap(), b"%PDF-1.7\\nreceipt");
+        assert_eq!(fs::read(&exported).unwrap(), b"%PDF-1.7\nreceipt");
         assert!(export_core(&db, "r", &exported).is_err()); // never overwrite
         assert!(export_core(&db, "r", &tmp.path().join("wrong.png")).is_err());
         assert!(export_core(&db, "r", &db.directory.join("media/private.pdf")).is_err());
