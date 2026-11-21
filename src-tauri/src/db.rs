@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -498,6 +498,28 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             );
             CREATE INDEX IF NOT EXISTS idx_brochures_updated ON brochures(updated_at DESC);
             PRAGMA user_version=15;
+            COMMIT;")?;
+    }
+    if version < 16 {
+        // Credentials live in the operating system's credential manager, never SQLite.
+        // Offline drafts are private application data and included in archive backup.
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS mail_accounts (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL COLLATE NOCASE,
+                config_json TEXT NOT NULL CHECK(json_valid(config_json)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mail_drafts (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES mail_accounts(id) ON DELETE CASCADE,
+                payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+                revision INTEGER NOT NULL CHECK(revision>=1),
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_mail_drafts_account ON mail_drafts(account_id,updated_at DESC);
+            PRAGMA user_version=16;
             COMMIT;")?;
     }
     // Certificates are append-only even when accessed through a raw SQLite client.
