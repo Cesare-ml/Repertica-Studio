@@ -1,10 +1,11 @@
 # Esportazioni CSV locali — registri dell'archivio
 
-L'esportatore Rust `export_ledger_csv` supporta sette valori di `kind`:
+L'esportatore Rust `export_ledger_csv` supporta otto valori di `kind`:
 
 | Tipo | Righe esportate | Contenuti |
 | --- | --- | --- |
 | `artworks` | Tutte le opere | UUID, codice, titolo, anno, tecnica, supporto, dimensioni in cm, descrizione, ubicazione, stato, percorso dell'immagine principale e date |
+| `gallery` | Tutte le fotografie aggiuntive della galleria | UUID foto e opera, codice e titolo attuali, percorso relativo del file, didascalia, ordine di visualizzazione e data; non contiene i byte delle immagini |
 | `collectors` | Tutti i collezionisti | UUID, contatti e note private, date |
 | `certificates` | Tutti i certificati | UUID del certificato e opera, seriale, date, emittente, destinatario, note e **snapshot_json originale immutabile** |
 | `sales` | Tutte le vendite | UUID opera/collezionista, importi in centesimi e quote storiche |
@@ -14,7 +15,7 @@ L'esportatore Rust `export_ledger_csv` supporta sette valori di `kind`:
 
 Tutti i registri sono esportati integralmente, senza dipendere dai filtri dell'interfaccia. L'output è UTF-8 con BOM, separatore `;`, righe CRLF, campi testuali tra virgolette con escape delle virgolette, e difesa contro formule di fogli elettronici. Le dimensioni sono numeri decimali con punto (non valori monetari). I campi vuoti non conservano la distinzione fra stringa vuota e `NULL`.
 
-Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** collegato all'opera; il contenuto storico autentico dell'emissione rimane in `snapshot_json`. Gli UUID permettono di riconciliare i registri tra loro. Nessuna esportazione altera opere, certificati o vendite.
+Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** collegato all'opera; il contenuto storico autentico dell'emissione rimane in `snapshot_json`. Gli UUID permettono di riconciliare i registri tra loro. Il registro `gallery` conserva l'ordine (`sort_order`) e le didascalie delle immagini aggiuntive, ma non include le immagini binarie; la copertina è nel registro `artworks`, le immagini storiche negli snapshot dei `certificates`. Per trasferire realmente le fotografie serve un backup completo. Nessuna esportazione altera opere, certificati o vendite.
 
 ## Sicurezza e ambito
 
@@ -23,7 +24,7 @@ Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** co
 - I CSV contengono **dati personali in chiaro**. Conservare e condividere responsabilmente.
 - Il formato CSV è destinato a analisi e interoperabilità **in sola lettura**, non è un formato di reimportazione transazionale. Le immagini, i file associati e l'intero schema SQLite non sono contenuti nei CSV: per una copia completa portabile usare sempre **Impostazioni → Backup** e la sua verifica SHA-256.
 - L'esportazione `sales` registra vendite **non necessariamente incassate**: non deve essere descritta come saldo bancario. L'esportazione distinta `receipts` elenca **gli incassi dichiarati dall'utente**, non movimenti bancari verificati: un incasso può essere parziale; lo stesso `sale_id` può comparire più volte. Il registro `balances` riporta una riga per vendita con importo lordo, incassato dichiarato e residuo: non considera automaticamente pagate le vendite prive di incassi.
-- **Interfaccia**: Opere, Collezionisti, Certificati, Vendite (tre pulsanti separati per vendite, incassi e saldi) e Acquisti e spese dispongono del pulsante CSV. Il dialogo nativo propone un nome `ReperticaStudio-<registro>-AAAA-MM-GG.csv` e lascia scegliere qualsiasi cartella accessibile. Se il percorso è già occupato, il backend rifiuta la sovrascrittura e mostra un errore; scegliere un nuovo nome. Le esportazioni includono **tutti** i record, anche se nell'interfaccia sono attivi filtri o un anno specifico.
+- **Interfaccia**: Opere (registri separati per schede e metadati galleria), Collezionisti, Certificati, Vendite (tre pulsanti separati per vendite, incassi e saldi) e Acquisti e spese dispongono del pulsante CSV. Il dialogo nativo propone un nome `ReperticaStudio-<registro>-AAAA-MM-GG.csv` e lascia scegliere qualsiasi cartella accessibile. Se il percorso è già occupato, il backend rifiuta la sovrascrittura e mostra un errore; scegliere un nuovo nome. Le esportazioni includono **tutti** i record, anche se nell'interfaccia sono attivi filtri o un anno specifico.
 
 ## Collaudo
 
