@@ -154,7 +154,10 @@ mod tests{
          c.execute_batch("DROP TRIGGER sale_receipts_limit_insert;
              DROP TRIGGER sale_receipts_limit_update;
              DROP TRIGGER sales_no_shrink_below_receipts;
-             DROP TABLE sale_receipts; PRAGMA user_version=3;").unwrap();
+             DROP TABLE sale_receipts;
+             DROP INDEX idx_artwork_images_position;
+             ALTER TABLE artwork_images DROP COLUMN sort_order;
+             PRAGMA user_version=3;").unwrap();
         }
         drop(db);
         let upgraded=crate::db::open(temp.path().into()).unwrap();let c=upgraded.conn.lock().unwrap();
