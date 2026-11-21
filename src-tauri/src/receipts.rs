@@ -78,6 +78,11 @@ fn record_core(c:&mut Connection,input:SaleReceiptInput)->Result<SaleReceipt,Str
     Ok(saved)
 }
 fn delete_core(c:&Connection,id:&str)->Result<(),String>{
+    let attached: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sale_receipt_attachments WHERE receipt_id=?1)",
+        params![id], |r| r.get(0),
+    ).map_err(err)?;
+    if attached { return Err("Rimuovi l'allegato prima di cancellare l'incasso".into()); }
     if c.execute("DELETE FROM sale_receipts WHERE id=?1",params![id]).map_err(err)?==0{
         return Err("Receipt not found".into())
     }
@@ -190,6 +195,25 @@ mod tests{
         assert_eq!(list_core(&c).unwrap().len(),1);
     }
 
+    #[test]
+    fn receipt_with_attachment_needs_explicit_detach_before_delete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().into()).unwrap();
+        let mut c = db.conn.lock().unwrap();
+        setup(&c);
+        let receipt = record_core(&mut c, input(150)).unwrap();
+        c.execute(
+            "INSERT INTO sale_receipt_attachments
+            (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
+            VALUES(?1,'media/receipt-1.pdf','proof.pdf','application/pdf',8,?2,'now')",
+            params![receipt.id, "0".repeat(64)],
+        ).unwrap();
+        assert!(delete_core(&c, &receipt.id).unwrap_err().contains("allegato"));
+        assert_eq!(list_core(&c).unwrap().len(), 1);
+        c.execute("DELETE FROM sale_receipt_attachments WHERE receipt_id=?1",
+            params![receipt.id]).unwrap();
+        delete_core(&c, &receipt.id).unwrap();
+    }
     #[test]
     fn receipt_year_overview_uses_collection_date_not_sale_date_and_includes_empty_months(){
         let temp=tempfile::tempdir().unwrap();
