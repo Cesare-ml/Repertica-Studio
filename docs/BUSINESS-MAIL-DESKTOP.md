@@ -19,7 +19,7 @@ Questa funzione è **posta individuale**, non il prodotto Email Platform per cam
 - Password IMAP e password SMTP facoltativamente separata nel portachiavi di sistema. Configurazione senza segreti in SQLite; i backup non contengono password. Se il portachiavi non è disponibile, le operazioni sulle credenziali falliscono senza fallback in chiaro.
 - Test IMAP e discovery cartelle; lettura di 40 intestazioni più recenti per cartella in modalità EXAMINE / PEEK. Non modifica lo stato di lettura.
 - Identità di messaggi controllata con coppia UIDVALIDITY + UID + cartella: un UIDVALIDITY cambiato blocca la lettura stale.
-- Lettura sicura della prima parte MIME text/plain, senza eseguire HTML o caricare immagini remote. I messaggi superiori a 1 MiB sono rifiutati in questa fase.
+- Lettura sicura della prima parte MIME text/plain; quando è presente solo HTML, questo viene convertito in testo semplice senza eseguire script né caricare risorse remote. I messaggi superiori a 1 MiB sono rifiutati in questa fase.
 - Composizione semplice con To, Cc, Bcc, oggetto e corpo; reply/forward tramite citazione semplice.
 - Allegati in uscita scelti esplicitamente da file locali, massimo cinque per messaggio, massimo 5 MiB ciascuno e 15 MiB complessivi. I file vengono letti soltanto al momento dell'invio; le bozze salvano esclusivamente i riferimenti ai percorsi, non una copia dei contenuti.
 - Invio SMTP reale **solo dopo conferma esplicita dell'utente**. Se l'esito non è certo, si mostra un errore conservativo: non inviare automaticamente di nuovo.
@@ -40,7 +40,7 @@ Le connessioni IMAP/SMTP sono autenticazioni reali e quindi richiedono una conne
 ## Limiti MVP
 
 - Nessun supporto OAuth2/XOAUTH2: provider che rifiutano password e password per app non sono ancora compatibili.
-- Niente visualizzazione HTML, download degli allegati ricevuti, ricerca remota, paginazione oltre gli ultimi 40 messaggi, download di messaggi superiori a 1 MiB, sincronizzazione offline della posta ricevuta o contatti esterni.
+- Niente rendering HTML (solo conversione in testo), download degli allegati ricevuti, ricerca remota, paginazione oltre gli ultimi 40 messaggi, download di messaggi superiori a 1 MiB, sincronizzazione offline della posta ricevuta o contatti esterni.
 - Le bozze non sono ancora sincronizzate con la cartella IMAP Drafts; solo in archivio Studio.
 - La firma è plain text. La copia Inviati è separata dall'accettazione SMTP e può fallire.
 - L'invio non implementa ancora ricevute di consegna; l'accettazione SMTP non garantisce che il messaggio venga consegnato. Gli allegati in uscita sono supportati entro limiti prudenti, ma i riferimenti nelle bozze non sopravvivono allo spostamento dei file locali.
