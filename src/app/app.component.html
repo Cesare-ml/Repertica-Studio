@@ -52,32 +52,71 @@
     <section *ngIf="section === 'artworks'" class="page">
       <div class="section-tools"><div><h2>Archivio opere</h2><p>Schede e immagini conservate esclusivamente su questo dispositivo.</p></div>
         <button class="primary" type="button" (click)="newArtwork()" [disabled]="!initialized">+ Aggiungi opera</button></div>
-      <div class="filter-row"><input type="search" placeholder="Cerca per titolo, codice, tecnica, anno…" [(ngModel)]="search" aria-label="Cerca opere">
-        <span>{{ visibleArtworks.length }} opere</span></div>
+      <div class="filter-row archive-filters">
+        <input type="search" placeholder="Titolo, codice, tecnica, ubicazione, collezionista…" [(ngModel)]="search" aria-label="Cerca opere">
+        <label class="filter-control"><span>Stato</span><select [(ngModel)]="artworkStatusFilter" aria-label="Filtra opere per stato">
+          <option value="all">Tutti</option><option value="available">Disponibili</option>
+          <option value="reserved">Riservate</option><option value="sold">Vendute</option>
+          <option value="archived">In archivio</option>
+        </select></label>
+        <label class="filter-control"><span>Collezionista</span><select [(ngModel)]="artworkCollectorFilter" aria-label="Filtra opere acquisite dal collezionista">
+          <option value="all">Tutti</option><option *ngFor="let c of collectors" [value]="c.id">{{ c.name }}</option>
+        </select></label>
+        <label class="filter-control"><span>Ordina</span><select [(ngModel)]="artworkOrder" aria-label="Ordina opere">
+          <option value="recent">Ultime modificate</option><option value="title">Titolo A–Z</option><option value="year">Anno decrescente</option>
+        </select></label>
+        <span class="filter-count" aria-live="polite">{{ visibleArtworks.length }} di {{ artworks.length }} opere</span>
+      </div>
       <div class="panel table-scroll">
-        <table><thead><tr><th>Opera</th><th>Anno / tecnica</th><th>Misure</th><th>Stato</th><th>Operazioni</th></tr></thead>
+        <table><thead><tr><th>Opera</th><th>Anno / tecnica</th><th>Misure</th><th>Stato</th><th>Collezionista</th><th>Operazioni</th></tr></thead>
           <tbody><tr *ngFor="let a of visibleArtworks">
             <td><div class="work-cell"><div class="work-image"><img *ngIf="thumbnails[a.id]" [src]="thumbnails[a.id]" alt=""><span *ngIf="!thumbnails[a.id]">R</span></div>
               <div><strong>{{ a.title }}</strong><small>{{ a.code }}</small></div></div></td>
             <td>{{ a.year || '—' }}<small class="stacked">{{ a.technique || 'Tecnica non indicata' }}</small></td>
             <td>{{ dimensions(a) }}</td>
             <td><span class="status" [ngClass]="a.status">{{ statusLabels[a.status] }}</span></td>
+            <td><button *ngIf="salesByArtwork[a.id] as sale" type="button" class="link-button"
+              (click)="openCollectorFromArtwork(a.id)" [attr.aria-label]="'Apri il collezionista ' + sale.collector_name">{{ sale.collector_name }}</button>
+              <span *ngIf="!salesByArtwork[a.id]">—</span></td>
             <td class="actions"><button class="small" type="button" (click)="editArtwork(a)">Modifica</button>
               <label class="small upload-btn">Foto<input type="file" accept="image/jpeg,image/png,image/webp" (change)="onImage($event,a)" hidden></label>
               <button class="small danger-text" type="button" (click)="deleteArtwork(a)">Elimina</button></td>
           </tr></tbody></table>
-        <div class="empty-state" *ngIf="!visibleArtworks.length"><strong>Nessuna opera trovata</strong><p>Prova una ricerca diversa oppure aggiungi un'opera.</p></div>
+        <div class="empty-state" *ngIf="!visibleArtworks.length"><strong>Nessuna opera trovata</strong><p>Modifica i filtri o la ricerca per visualizzare altre opere.</p>
+          <button type="button" class="small" (click)="search = ''; artworkStatusFilter = 'all'; artworkCollectorFilter = 'all'; artworkOrder = 'recent'">Azzera filtri</button></div>
       </div>
     </section>
 
     <section *ngIf="section === 'collectors'" class="page">
       <div class="section-tools"><div><h2>Collezionisti e contatti</h2><p>Un'anagrafica privata per le tue relazioni professionali.</p></div>
         <button class="primary" type="button" (click)="newCollector()" [disabled]="!initialized">+ Nuovo contatto</button></div>
-      <div class="filter-row"><input type="search" placeholder="Cerca nome, email o telefono…" [(ngModel)]="search" aria-label="Cerca collezionisti"><span>{{ visibleCollectors.length }} contatti</span></div>
-      <div class="panel table-scroll"><table><thead><tr><th>Nome</th><th>Contatti</th><th>Indirizzo</th><th>Operazioni</th></tr></thead>
-        <tbody><tr *ngFor="let c of visibleCollectors"><td><strong>{{ c.name }}</strong></td><td>{{ c.email || '—' }}<small class="stacked">{{ c.phone || '' }}</small></td>
-          <td>{{ c.address || '—' }}</td><td class="actions"><button class="small" type="button" (click)="editCollector(c)">Modifica</button><button class="small danger-text" type="button" (click)="deleteCollector(c)">Elimina</button></td></tr></tbody></table>
-        <div class="empty-state" *ngIf="!visibleCollectors.length">Nessun collezionista. Registra il tuo primo contatto.</div></div>
+      <div class="filter-row"><input type="search" placeholder="Nome, email, telefono o opera acquisita…" [(ngModel)]="search" aria-label="Cerca collezionisti"><span>{{ visibleCollectors.length }} di {{ collectors.length }} contatti</span></div>
+      <div class="panel table-scroll"><table><thead><tr><th>Nome</th><th>Contatti</th><th>Indirizzo</th><th>Opere acquisite</th><th>Operazioni</th></tr></thead>
+        <tbody>
+          <ng-container *ngFor="let c of visibleCollectors">
+            <tr><td><strong>{{ c.name }}</strong></td><td>{{ c.email || '—' }}<small class="stacked">{{ c.phone || '' }}</small></td>
+              <td>{{ c.address || '—' }}</td>
+              <td><button class="small" type="button" (click)="toggleCollectorAcquisitions(c.id)"
+                [disabled]="!(salesByCollector[c.id]?.length)" [attr.aria-expanded]="expandedCollectorId === c.id"
+                [attr.aria-controls]="'collector-works-' + c.id">
+                {{ salesByCollector[c.id]?.length || 0 }} · {{ expandedCollectorId === c.id ? 'Nascondi' : 'Dettagli' }}
+              </button></td>
+              <td class="actions"><button class="small" type="button" (click)="editCollector(c)">Modifica</button>
+                <button class="small danger-text" type="button" (click)="deleteCollector(c)">Elimina</button></td></tr>
+            <tr *ngIf="expandedCollectorId === c.id" class="collector-details" [id]="'collector-works-' + c.id">
+              <td colspan="5">
+                <div class="collector-history-header"><strong>Opere acquistate da {{ c.name }}</strong>
+                  <button type="button" class="small" (click)="showCollectorArtworks(c.id)">Vedi nell'archivio opere</button></div>
+                <ul class="collector-history">
+                  <li *ngFor="let sale of salesByCollector[c.id]">
+                    <strong>{{ sale.artwork_title }}</strong><span>{{ date(sale.sold_at) }}</span>
+                  </li>
+                </ul>
+              </td>
+            </tr>
+          </ng-container>
+        </tbody></table>
+        <div class="empty-state" *ngIf="!visibleCollectors.length">Nessun contatto corrisponde alla ricerca.</div></div>
     </section>
 
     <section *ngIf="section === 'sales'" class="page">
