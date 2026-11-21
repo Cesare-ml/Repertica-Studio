@@ -201,6 +201,10 @@
     </section>
 
 
+    <section *ngIf="section === 'brochures'" class="page brochure-section">
+      <rp-brochures [artworks]="artworks" [language]="language"></rp-brochures>
+    </section>
+
     <section *ngIf="section === 'finance'" class="page finance-page">
       <div class="section-tools">
         <div><h2>{{ tr('Economia dello studio') }}</h2></div>
