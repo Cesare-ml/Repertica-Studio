@@ -73,9 +73,10 @@ Non è ancora disponibile la gestione di più archivi **simultaneamente** nella 
 
 ## Diagnostica locale fotografie (lettura soltanto)
 
-- In **Impostazioni → Diagnostica fotografie dell’archivio**, il controllo esamina i riferimenti alle immagini principali e alle fotografie di galleria attualmente presenti in SQLite.
+- In **Impostazioni → Diagnostica fotografie dell’archivio**, il controllo esamina i riferimenti alle copertine, alle fotografie di galleria e alle fotografie storiche conservate negli snapshot dei certificati. Anche la fotografia di un certificato che non è più la copertina corrente viene controllata.
 - Verifica percorsi relativi sicuri dentro `media/`, file mancanti, elementi non regolari o collegamenti simbolici, dimensioni ammesse e intestazioni JPEG/PNG/WebP. Un risultato «leggibile» non equivale alla decodifica integrale del file.
 - La verifica mantiene il mutex dell'archivio, non corregge record, non elimina immagini e non considera automaticamente eliminabili i media senza riferimenti: potrebbero essere necessari a documenti storici.
 - I problemi sono contati integralmente; l'interfaccia mostra al massimo i primi **100** e indica se il report è troncato. Non espone file a server.
+- Gli snapshot storici con JSON malformato non permettono di identificare in modo affidabile una fotografia e vengono ignorati da questa diagnostica; non vanno considerati una prova di integrità. Il conteggio misura i **riferimenti**, quindi una foto usata da più certificati può essere verificata più volte.
 - **Limite importante:** non esistono hash storici registrati per ogni fotografia dell'archivio attivo, quindi questo controllo non può garantire che i byte non siano cambiati. Il backup completo dispone invece di un manifest SHA-256 e della relativa verifica.
 - Se il controllo segnala un problema, non cancellare immagini o sovrascrivere backup: recuperare i file da una copia verificata e collaudare il ripristino separatamente.

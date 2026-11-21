@@ -24,3 +24,12 @@ test('the audit exposes a bounded report and distinguishes file presence from ha
   assert.match(html, /mediaAudit as audit/);
   assert.match(html, /non confronta hash storici/);
 });
+
+test('the active audit includes historic certificate images with their own visible role', () => {
+  const rust = source('src-tauri/src/media_audit.rs');
+  assert.match(rust, /SELECT artwork_id, id, snapshot_json FROM certificates/);
+  assert.match(rust, /role: "certificate"\.into\(\)/);
+  assert.match(source('src/app/models.ts'), /'primary' \| 'gallery' \| 'certificate'/);
+  assert.match(source('src/app/app.component.html'), /Fotografia del certificato/);
+  assert.match(source('src/app/i18n.ts'), /"Fotografia del certificato": "Certificate photograph"/);
+});

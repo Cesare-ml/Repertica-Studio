@@ -249,7 +249,7 @@
             <p *ngIf="audit.problems === 0">{{ tr('Nessun problema rilevato nel controllo locale.') }}</p>
             <ul *ngIf="audit.issues.length">
               <li *ngFor="let issue of audit.issues">
-                <strong>{{ mediaArtworkLabel(issue.artworkId) }}</strong> · {{ tr(issue.role === 'primary' ? 'Copertina' : 'Galleria') }} ·
+                <strong>{{ mediaArtworkLabel(issue.artworkId) }}</strong> · {{ tr(issue.role === 'primary' ? 'Copertina' : issue.role === 'certificate' ? 'Fotografia del certificato' : 'Galleria') }} ·
                 <code>{{ issue.path }}</code> — {{ mediaProblemLabel(issue.problem) }}
               </li>
             </ul>

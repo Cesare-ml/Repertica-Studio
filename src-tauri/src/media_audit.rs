@@ -113,7 +113,7 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
     if !media_type.is_dir() || media_type.is_symlink() {
         return Err("La cartella media non è una directory locale regolare".into());
     }
-    let references: Vec<MediaReference> = {
+    let mut references: Vec<MediaReference> = {
         let mut stmt = conn.prepare(
             "SELECT id, NULL, 'primary', image_path FROM artworks WHERE image_path IS NOT NULL
              UNION ALL
@@ -123,6 +123,32 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
             .collect::<Result<Vec<_>, _>>().map_err(error)?;
         rows
     };
+
+    // A certificate keeps the cover path frozen at issuance. The file may no
+    // longer be referenced by the artwork or its gallery after a replacement.
+    // Inspect each historical reference independently, without editing SQLite.
+    {
+        let mut stmt = conn.prepare(
+            "SELECT artwork_id, id, snapshot_json FROM certificates ORDER BY issued_at, id"
+        ).map_err(error)?;
+        let snapshots = stmt.query_map([], |row| Ok((
+            row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?
+        ))).map_err(error)?;
+        for snapshot in snapshots {
+            let (artwork_id, certificate_id, json) = snapshot.map_err(error)?;
+            // Legacy malformed JSON has no reliably discoverable media path.
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                if let Some(path) = value.get("image_path").and_then(|v| v.as_str()) {
+                    references.push(MediaReference {
+                        artwork_id,
+                        image_id: Some(certificate_id),
+                        role: "certificate".into(),
+                        path: path.to_owned(),
+                    });
+                }
+            }
+        }
+    }
 
     let mut result = MediaAudit {
         checked: 0, healthy: 0, problems: 0, truncated: false,
@@ -221,4 +247,47 @@ mod tests {
         symlink(dir.path().join("outside.jpg"), dir.path().join("media/link.jpg")).unwrap();
         assert_eq!(check_media(dir.path(), "media/link.jpg"), Some("not_regular"));
     }
+    #[test]
+    fn historical_certificate_covers_are_audited_even_after_cover_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        artwork(&db, "a", Some("media/current.png"));
+        fs::write(db.directory.join("media/current.png"),
+            [137, 80, 78, 71, 13, 10, 26, 10, 0]).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            for (id, serial, json) in [
+                ("old", "RS-old", r#"{"image_path":"media/old.jpg"}"#),
+                ("new", "RS-new", r#"{"image_path":"media/current.png"}"#),
+                ("unsafe", "RS-unsafe", r#"{"image_path":"../outside.jpg"}"#),
+                ("legacy", "RS-legacy", "{malformed json"),
+            ] {
+                conn.execute(
+                    "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                     VALUES(?1,'a',?2,'2026-11-21','Artist',?3,'t')",
+                    params![id, serial, json],
+                ).unwrap();
+            }
+        }
+        let report = audit_core(&db).unwrap();
+        // The malformed legacy snapshot has no discoverable image reference.
+        assert_eq!((report.checked, report.healthy, report.problems), (4, 2, 2));
+        let historical = report.issues.iter().find(|i| i.image_id.as_deref() == Some("old")).unwrap();
+        assert_eq!(historical.role, "certificate");
+        assert_eq!(historical.artwork_id, "a");
+        assert_eq!(historical.path, "media/old.jpg");
+        assert_eq!(historical.problem, "missing");
+        assert_eq!(report.issues.iter().find(|i| i.image_id.as_deref() == Some("unsafe"))
+            .unwrap().problem, "unsafe_path");
+
+        fs::write(db.directory.join("media/old.jpg"), [0xff, 0xd8, 0xff, 0]).unwrap();
+        let repaired = audit_core(&db).unwrap();
+        assert_eq!((repaired.checked, repaired.healthy, repaired.problems), (4, 3, 1));
+        // Auditing must leave historical certificate records untouched.
+        let conn = db.conn.lock().unwrap();
+        let count: i64 = conn.query_row("SELECT count(*) FROM certificates", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 4);
+    }
+
+
 }
