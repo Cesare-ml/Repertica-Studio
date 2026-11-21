@@ -241,7 +241,7 @@ pub fn data_directory(db: State<'_, Database>) -> String {
 // Certificates freeze the artwork's image_path in snapshot_json. A later cover
 // replacement must not destroy that historical photograph. Malformed legacy
 // snapshots are treated conservatively: retain the file instead of risking loss.
-fn image_used_by_certificate(conn: &Connection, artwork_id: &str, image_path: &str) -> Result<bool, String> {
+pub(crate) fn image_used_by_certificate(conn: &Connection, artwork_id: &str, image_path: &str) -> Result<bool, String> {
     let mut statement = conn.prepare("SELECT snapshot_json FROM certificates WHERE artwork_id=?1").map_err(err)?;
     let snapshots = statement.query_map(params![artwork_id], |row| row.get::<_, String>(0)).map_err(err)?;
     for snapshot in snapshots {
