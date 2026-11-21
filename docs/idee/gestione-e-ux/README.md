@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (quarta ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (quinta ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -15,6 +15,8 @@ Aggiornato: **2026-11-21** (quarta ricognizione). Stato delle proposte: **Propos
 | [REPS-UX-007](REPS-UX-007-dossier-presentazione-opere.md) | Dossier e schede di presentazione con dati condivisi selettivamente | P1–P2 | Proposta — da valutare |
 | [REPS-UX-008](REPS-UX-008-scorte-materiali-consumi.md) | Inventario operativo delle scorte e consumi dei materiali | P2 | Proposta — da valutare |
 | [REPS-UX-009](REPS-UX-009-progetti-espositivi-checklist.md) | Progetti espositivi, selezioni opere e checklist con scadenze | P2 | Proposta — da valutare |
+| [REPS-UX-010](REPS-UX-010-diritti-riproduzione-crediti-autorizzazioni.md) | Diritti di riproduzione, crediti fotografici e permessi d'uso dichiarati | P2 | Proposta — da valutare |
+| [REPS-UX-011](REPS-UX-011-cicli-creativi-relazioni-opere.md) | Cicli creativi di opere uniche, studi preparatori e relazioni tipizzate | P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -52,6 +54,15 @@ Riletti `main` (README, docs/MVP.md, ECONOMY-I18N.md, DATA-PORTABILITY.md, src/a
 - **Separazione dal filone tecnico:** TECH-001…006 riguardano portabilità, automazioni, integrità media, ricerca federata, cache immagini e cifratura backup; nessuna scheda né file della sua cartella è stato toccato.
 - **Verifiche ancora da fare prima di qualsiasi scelta:** frequenza reale di riordino materiali e partecipazione a mostre tra utenti target, bisogno di unità multiple, eventuale interoperabilità fra progetti e storia dei movimenti. Le priorità P2 sono ipotesi, non decisioni.
 
+## Quinta ricognizione (21 novembre 2026)
+
+Verificati di nuovo il branch `main` (README, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `docs/DATA-PORTABILITY.md`, `docs/SALE-RECEIPTS.md`, `src/app/models.ts`, `src-tauri/src/db.rs`), la PR documentale [#14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), la PR tecnica [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) e le issue esistenti. Il modello corrente ha schema SQLite fino a v4, con galleria foto e incassi parziali registrati: nessuna delle nuove proposte ripropone queste funzioni già presenti.
+
+- **[REPS-UX-010](REPS-UX-010-diritti-riproduzione-crediti-autorizzazioni.md) — Diritti di riproduzione e crediti:** conserva dichiarazioni e documenti sulla liceità **non verificata automaticamente** degli usi di opere e singole fotografie. Si distingue da UX-007 (impaginazione dossier), UX-009 (pianificazione mostra), UX-005 (edizioni fisiche) e dalla portabilità TECH-001. Una vendita non equivale a cessione automatica dei diritti. Questa scheda è ideativa, non consulenza legale.
+- **[REPS-UX-011](REPS-UX-011-cicli-creativi-relazioni-opere.md) — Cicli creativi e relazioni tra opere:** raggruppa originali autonomi in cicli, dittici e studi preparatori, lasciando identità e stati di ogni opera indipendenti. **Non** è UX-005, che gestirebbe esemplari di una tiratura, né UX-009, che pianifica la partecipazione a eventi. Non deduce parentele artistiche da titoli o immagini.
+- **Confini col filone tecnico:** le sette schede TECH-001…007 trattano strumenti trasversali (portabilità, automazioni, integrità media, ricerca federata, anteprime, backup cifrati, storage esterno). Nessun file sotto `docs/idee/strumenti-e-architettura/` è stato modificato.
+- **Verifica della domanda reale ancora aperta:** frequenza delle richieste di licenza/credito da terzi e uso di cicli di originali unici. Priorità P2 ipotetiche, nessuna scelta attuata e nessuna idea assegnata agli sviluppatori.
+
 ## Criteri editoriali
 
 1. Ogni idea deve aggiungere un **processo professionale distinto**, non rinominare una funzione già presente. Chi propone cita la differenza rispetto all'MVP e alle issue.
@@ -59,9 +70,9 @@ Riletti `main` (README, docs/MVP.md, ECONOMY-I18N.md, DATA-PORTABILITY.md, src/a
 3. Non affermare autenticità della provenienza, saldo bancario reale, incasso o profitto fiscale senza prove; non trasformare un'ipotesi in una promessa del software.
 4. Tutto resta **gratuito, open source, offline-first**, senza account, abbonamenti, sincronizzazione cloud o invio dei dati a servizi terzi; lingua del sistema con fallback inglese.
 5. Prima di creare una nuova scheda verificare altre schede, issue e PR aperte, comprese quelle di `docs/idee/strumenti-e-architettura/` se aggiunte dall'altro filone. Non modificare i file dell'altro filone. Se un'idea interseca altre schede, linkarle e definire confini.
-6. Ogni ulteriore proposta deve avere ID successivo `REPS-UX-010`, ecc., mantenendo gli ID già assegnati stabili; gli sviluppatori non devono implementarla senza revisione esplicita del proprietario.
+6. Ogni ulteriore proposta deve avere ID successivo `REPS-UX-012`, ecc., mantenendo gli ID già assegnati stabili; gli sviluppatori non devono implementarla senza revisione esplicita del proprietario.
 7. Lavorare solo su file Markdown di questa cartella e tramite PR **documentale**; non effettuare merge automatici.
 
 ## Sequenza di valutazione suggerita (non autorizzazione)
 
-Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. Infine valutare **scorte e consumi materiali** (008) soltanto se acquisti e giacenze ricorrenti sono una necessità reale, e **progetti espositivi** (009) soltanto se l'organizzazione di mostre è abbastanza frequente da giustificare un modulo dedicato. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
+Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. Infine valutare **scorte e consumi materiali** (008) soltanto se acquisti e giacenze ricorrenti sono una necessità reale, e **progetti espositivi** (009) soltanto se l'organizzazione di mostre è abbastanza frequente da giustificare un modulo dedicato. Considerare **diritti e crediti di riproduzione** (010) solo dopo una verifica dei casi di pubblicazione più comuni, e **cicli creativi/relazioni fra opere uniche** (011) solo se i semplici filtri testuali sono insufficienti. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
