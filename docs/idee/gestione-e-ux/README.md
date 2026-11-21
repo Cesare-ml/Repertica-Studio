@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (undicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (dodicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -24,6 +24,7 @@ Aggiornato: **2026-11-21** (undicesima ricognizione). Stato delle proposte: **Pr
 | [REPS-UX-016](REPS-UX-016-valutazioni-coperture-assicurative-scadenze.md) | Valutazioni documentate e riferimenti a coperture assicurative dichiarate, con scadenze da verificare | P2 | Proposta — da valutare |
 | [REPS-UX-017](REPS-UX-017-vendita-multiopera-ripartizione-importi.md) | Vendite con più opere, riepilogo unitario e ripartizione esplicita degli importi | P1–P2 | Proposta — da valutare |
 | [REPS-UX-018](REPS-UX-018-catalogazione-seriale-schede-bozza.md) | Catalogazione seriale con riuso controllato dei campi e bozze opzionali da completare | P1–P2 | Proposta — da valutare |
+| [REPS-UX-019](REPS-UX-019-storico-esposizioni-bibliografia-documentata.md) | Storico delle esposizioni effettive e bibliografia documentata per opera, con fonti e incertezze | P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -141,3 +142,13 @@ Riletti il branch `main` ([README](../../../README.md), [MVP](../../MVP.md), [mo
 - **Confini anti-doppione:** UX-005 edizioni numerate, UX-011 cicli creativi, UX-015 verifica fisica inventario; TECH-001 import strutturato da file, TECH-008 filtri/viste su record esistenti, TECH-010 revisioni di metadati. Qui non si importa da file, non si creano serie o vendite, non si modificano in blocco opere esistenti. La [PR #35](https://github.com/Cesare-ml/Repertica-Studio/pull/35) sulle modifiche concorrenti è ancora aperta: non se ne presume la presenza su `main`.
 - **Validazione:** servono osservazioni reali su dimensioni dei lotti, numero di campi ripetuti, errori e interruzioni. P1–P2 è soltanto una priorità ipotetica. Misurare tempi ed errori rispetto all'inserimento singolo prima di prendere decisioni.
 - **Perimetro:** aggiunti esclusivamente questa scheda Markdown e l'indice in `docs/idee/gestione-e-ux/`. Nessuna modifica a codice, test, build, workflow, impostazioni, dipendenze o file dell'altro filone. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta **in bozza**, senza merge; tutte le **18 idee** conservano lo stato **«Proposta — da valutare»** e nessuna viene assegnata allo sviluppo.
+
+
+## Dodicesima ricognizione — 21 novembre 2026
+
+Riesaminati `main` ([README](../../../README.md), [MVP](../../MVP.md), [DATA-PORTABILITY](../../DATA-PORTABILITY.md), `src-tauri/src/db.rs`, `src-tauri/src/models.rs`, `src/app/models.ts` e la vista Angular), tutte le **18 proposte UX** precedenti e le **14 proposte tecniche** nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). Lo schema SQLite di `main` arriva alla versione 6: catalogazione e descrizione delle opere esistono, ma non registri strutturati per **mostre storiche e riferimenti bibliografici collegati a più opere**. Non è un bug, bensì una possibilità da studiare con professionisti.
+
+- **[REPS-UX-019](REPS-UX-019-storico-esposizioni-bibliografia-documentata.md) — Storico espositivo e bibliografia documentata:** propone registri locali con fonti condivise, citazioni puntuali (pagine/tavole), partecipazioni effettive o dichiarate e grado di verifica esplicito. Utilità soprattutto per artisti con lunga carriera, gallerie e archivi che preparano ricognizioni e schede per curatori. **P2 soltanto ipotetica**.
+- **Anti-doppione:** UX-009 pianifica mostre future e checklist, non attesta retroattivamente una presenza; UX-001 traccia movimenti, non esposizioni o bibliografia; UX-007 prepara dossier, non gestisce la qualità e il riuso delle fonti; UX-010 gestisce permessi/crediti, che non derivano da una citazione. TECH-001 riguarda il pacchetto generale di interoperabilità, senza modifiche ai suoi file.
+- **Vincoli da preservare:** nessuna mostra, articolo o fonte altera vendite, disponibilità, ubicazione o certificati; fonti non verificate dichiarate come tali, date incerte senza giorni inventati, nessun download automatico da URL/ISBN/DOI, nessuna scansione condivisa per impostazione predefinita, dati locali e backup completo a cartella scelta. Le nuove esportazioni sarebbero **aggiuntive** ai sette CSV già presenti.
+- **Ricerca ancora necessaria:** interviste a professionisti e prova su casi reali per decidere se due registri condivisi valgano più di semplici note. Nessuna idea approvata o assegnata. **Tutte le 19 schede sono «Proposta — da valutare»**. Modificati solo Markdown in `docs/idee/gestione-e-ux/`; la [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) rimane in bozza, senza merge.
