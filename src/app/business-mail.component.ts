@@ -1,14 +1,15 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { open } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
 import type { AppLanguage } from './i18n';
 import type { Collector, MailAccount, MailAccountInput, MailDetail, MailDraft, MailDraftInput, MailFolder, MailHeader, MailList } from './models';
 import { mailText } from './mail-i18n';
 
 type MailView = 'inbox' | 'drafts' | 'compose' | 'accounts';
-type Composer = { id: string | null; revision: number | null; to: string; cc: string; bcc: string; subject: string; body: string };
-const blankComposer = (): Composer => ({ id:null,revision:null,to:'',cc:'',bcc:'',subject:'',body:'' });
+type Composer = { id: string | null; revision: number | null; to: string; cc: string; bcc: string; subject: string; body: string; attachments: string[] };
+const blankComposer = (): Composer => ({ id:null,revision:null,to:'',cc:'',bcc:'',subject:'',body:'',attachments:[] });
 const freshAccount = (): MailAccountInput => ({
   id:null,email:'',display_name:'',imap_host:'',imap_port:993,imap_username:'',
   smtp_host:'',smtp_port:465,smtp_username:'',sent_folder:'',signature:'',
@@ -177,7 +178,7 @@ export class BusinessMailComponent implements OnInit {
   openDraft(draft:MailDraft):void{
     if(!this.canLeave())return;
     this.composer={id:draft.id,revision:draft.revision,to:draft.to,
-      cc:draft.cc,bcc:draft.bcc,subject:draft.subject,body:draft.body};
+      cc:draft.cc,bcc:draft.bcc,subject:draft.subject,body:draft.body,attachments:[...(draft.attachments??[])]};
     this.originalComposer=JSON.stringify(this.composer);
     this.view='compose';this.clearStatus();
   }
@@ -197,13 +198,29 @@ export class BusinessMailComponent implements OnInit {
     if(!this.canLeave())return;
     this.view='accounts';this.accountForm=null;this.clearStatus();
   }
+  attachmentName(path:string):string { return path.split(/[\\/]/).pop()??path; }
+  async addAttachments():Promise<void>{
+    if(this.busy)return;
+    try{
+      const selection=await open({multiple:true,title:this.t('Choose attachments (max 5 files)')});
+      const paths=typeof selection==='string'?[selection]:Array.isArray(selection)?selection:[];
+      const merged=[...new Set([...this.composer.attachments,...paths])];
+      if(merged.length>5){this.error=this.t('You can attach up to five files.');return;}
+      this.composer.attachments=merged;
+      this.error='';
+    }catch(error){this.fail(error);}
+  }
+  removeAttachment(path:string):void{
+    this.composer.attachments=this.composer.attachments.filter(p=>p!==path);
+  }
   async saveDraft():Promise<void>{
     if(!this.selectedId)return;
     await this.operation(async()=>{
       const draft:MailDraftInput={
         id:this.composer.id,revision:this.composer.revision,
         account_id:this.selectedId,to:this.composer.to,cc:this.composer.cc,bcc:this.composer.bcc,
-        subject:this.composer.subject,body:this.composer.body
+        subject:this.composer.subject,body:this.composer.body,
+        attachments:[...this.composer.attachments]
       };
       const saved=await api.mailSaveDraft(draft);
       this.composer.id=saved.id;this.composer.revision=saved.revision;
@@ -229,7 +246,7 @@ export class BusinessMailComponent implements OnInit {
       // One deliberate click issues one send. Never auto-retry on a network error.
       const result=await api.mailSend({
         account_id:this.selectedId,to:current.to,cc:current.cc,bcc:current.bcc,
-        subject:current.subject,body:current.body,confirm:true
+        subject:current.subject,body:current.body,attachments:current.attachments,confirm:true
       });
       if(result.delivery==='accepted'){
         this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
