@@ -159,9 +159,11 @@ pub fn record_sale(db: State<'_, Database>, input: SaleInput) -> Result<(), Stri
     let status:Option<String>=tx.query_row("SELECT status FROM artworks WHERE id=?1",params![input.artwork_id],|r|r.get(0)).optional().map_err(err)?;
     let status=status.ok_or_else(||"Opera non trovata".to_string())?;
     if status=="sold" || status=="archived" { return Err("Quest'opera non è disponibile per una vendita".into()); }
+    let sale_id=Uuid::new_v4().to_string();
     tx.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,currency,sold_at,notes,created_at) VALUES(?1,?2,?3,?4,'EUR',?5,?6,?7)",
-        params![Uuid::new_v4().to_string(), input.artwork_id, input.collector_id,input.amount_cents,input.sold_at,notes,now()])
+        params![sale_id, input.artwork_id, input.collector_id,input.amount_cents,input.sold_at,notes,now()])
         .map_err(|_|"Vendita non registrata: verifica cliente, opera e vendite esistenti".to_string())?;
+    crate::finance::attach_sale_finances(&tx,&sale_id,input.amount_cents,input.tax_cents,input.shipping_cents)?;
     tx.execute("UPDATE artworks SET status='sold',updated_at=?2 WHERE id=?1",params![input.artwork_id,now()]).map_err(err)?;
     tx.commit().map_err(err)
 }

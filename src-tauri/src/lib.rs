@@ -1,6 +1,7 @@
 mod backup;
 mod commands;
 mod db;
+mod finance;
 mod models;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -33,7 +34,14 @@ pub fn run() {
             commands::artwork_image_data,
             backup::create_backup,
             backup::inspect_backup,
-            backup::restore_backup
+            backup::restore_backup,
+            finance::get_studio_settings,
+            finance::save_studio_settings,
+            finance::list_expenses,
+            finance::save_expense,
+            finance::delete_expense,
+            finance::finance_overview,
+            finance::price_preview
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");

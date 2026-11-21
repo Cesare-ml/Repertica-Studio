@@ -35,6 +35,8 @@ pub struct Sale {
 pub struct SaleInput {
     pub artwork_id: String, pub collector_id: String, pub amount_cents: i64,
     pub sold_at: String, pub notes: Option<String>,
+    #[serde(default)] pub tax_cents: i64,
+    #[serde(default)] pub shipping_cents: i64,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Certificate {
