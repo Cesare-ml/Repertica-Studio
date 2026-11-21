@@ -121,6 +121,8 @@ export class AppComponent implements OnInit {
   galleryImages: GalleryImage[] = [];
   galleryPreviews: Record<string, string> = {};
   galleryCaption = '';
+  editingGalleryCaptionId: string | null = null;
+  editingGalleryCaption = '';
   artworkDialog = false;
   collectorDialog = false;
   saleDialog = false;
@@ -461,6 +463,7 @@ export class AppComponent implements OnInit {
     this.galleryImages = [];
     this.galleryPreviews = {};
     this.galleryCaption = '';
+    this.cancelGalleryCaptionEdit();
     try {
       this.galleryImages = await api.listArtworkGallery(artwork.id);
       if (this.galleryImages.length) await this.loadGalleryPreview(this.galleryImages[0]);
@@ -474,6 +477,27 @@ export class AppComponent implements OnInit {
     this.galleryImages = [];
     this.galleryPreviews = {};
     this.galleryCaption = '';
+    this.cancelGalleryCaptionEdit();
+  }
+  startGalleryCaptionEdit(image: GalleryImage): void {
+    if (this.busy) return;
+    this.editingGalleryCaptionId = image.id;
+    this.editingGalleryCaption = image.caption ?? '';
+  }
+  cancelGalleryCaptionEdit(): void {
+    this.editingGalleryCaptionId = null;
+    this.editingGalleryCaption = '';
+  }
+  async saveGalleryCaption(image: GalleryImage): Promise<void> {
+    if (this.editingGalleryCaptionId !== image.id || this.galleryArtwork?.id !== image.artwork_id) return;
+    const caption = this.editingGalleryCaption;
+    await this.run(async () => {
+      const saved = await api.updateArtworkGalleryCaption(image.id, caption);
+      if (this.galleryArtwork?.id === saved.artwork_id) {
+        this.galleryImages = this.galleryImages.map(item => item.id === saved.id ? saved : item);
+        this.cancelGalleryCaptionEdit();
+      }
+    }, this.tr('Didascalia aggiornata'));
   }
   async loadGalleryPreview(image: GalleryImage): Promise<void> {
     if (this.galleryPreviews[image.id]) return;
@@ -517,6 +541,7 @@ export class AppComponent implements OnInit {
     const artwork = this.galleryArtwork;
     if (await this.run(() => api.deleteArtworkGalleryImage(image.id), this.tr('Fotografia eliminata')) && artwork) {
       delete this.galleryPreviews[image.id];
+      if (this.editingGalleryCaptionId === image.id) this.cancelGalleryCaptionEdit();
       this.galleryImages = await api.listArtworkGallery(artwork.id);
       this.change.detectChanges();
     }

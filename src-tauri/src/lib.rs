@@ -37,6 +37,7 @@ pub fn run() {
             commands::artwork_image_data,
             gallery::list_artwork_gallery,
             gallery::add_artwork_gallery_image,
+            gallery::update_artwork_gallery_caption,
             gallery::artwork_gallery_image_data,
             gallery::delete_artwork_gallery_image,
             backup::create_backup,
