@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (sedicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (diciassettesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -29,6 +29,15 @@ Aggiornato: **2026-11-21** (sedicesima ricognizione). Stato delle proposte: **Pr
 | [REPS-UX-021](REPS-UX-021-acquisizioni-opere-terzi-titolo-documentato.md) | Pratiche di acquisizione di opere da terzi: titolo dichiarato, fonti, acquisti e donazioni senza confondere custodia e pagamenti | P2 | Proposta — da valutare |
 | [REPS-UX-022](REPS-UX-022-opere-composte-componenti-fisici.md) | Opere composte: distinta dei componenti fisici di **una sola opera**, senza confonderli con opere autonome, edizioni o movimenti | P2 | Proposta — da valutare |
 | [REPS-UX-023](REPS-UX-023-prezzi-richiesti-listini-storico.md) | Prezzo richiesto per opera, distinzione dal suggerito/venduto e storico delle revisioni; listino locale condivisibile solo su scelta | P1–P2* | Proposta — da valutare |
+| [REPS-UX-024](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md) | Scadenziario facoltativo delle somme concordate per vendita, distinto dagli incassi effettivamente dichiarati e dal saldo autorevole | P1–P2* | Proposta — da valutare |
+
+## Diciassettesima ricognizione (21 novembre 2026) — REPS-UX-024
+
+- **[REPS-UX-024 — Scadenziario degli incassi concordati e piani di pagamento per vendita](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md):** proposta una scheda locale **facoltativa** per date e importi concordati su una vendita, con possibile evoluzione da data unica a più rate e versionamento delle modifiche. Un piano **non** equivale a un incasso e non può creare ricevute: il residuo continua a derivare esclusivamente da `sales` e `sale_receipts`.
+- **Riscontro su `main`:** `docs/SALE-RECEIPTS.md`, `src/app/models.ts` e `src-tauri/src/receipts.rs` già supportano incassi manuali parziali, saldi delle vendite e riepiloghi mensili dell'incassato dichiarato; non emergono date di scadenza concordate strutturate. Opportunità per artisti/gallerie con acconti, saldi differiti e rate, **non problema di pagamento provato**.
+- **Non doppione:** [issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) riguarda pagamenti effettivi e cashflow; UX-002 trattative prima della vendita, UX-012 affidamenti e rendiconti con gallerie, UX-013 resi/rettifiche, UX-017 vendite multiopera. Le 19 schede tecniche della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) si occupano di infrastruttura, automazioni, revisioni e import/export: nessun loro file è stato modificato.
+- **Salvaguardie:** nessun avviso automatico al cliente, interesse moratorio, fattura, presunzione di insolvenza o conversione di scadenze in incassi; importi EUR in centesimi, cronologia delle revisioni, date locali senza ambiguità di fuso. Funzionamento offline e multilingua OS con fallback inglese, backup a cartella scelta ed export aperto. Dati di trattativa non inclusi per default nei documenti condivisibili.
+- **Priorità P1–P2 puramente ipotetica:** prima verificare con operatori reali se basta una data di saldo o serve un piano rateale e come attribuire gli incassi alle singole rate. Stato **«Proposta — da valutare»**; nessuna approvazione, assegnazione o merge.
 
 ## Sedicesima ricognizione (21 novembre 2026) — REPS-UX-023
 
