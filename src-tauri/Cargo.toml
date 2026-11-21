@@ -27,6 +27,7 @@ sha2 = "0.10"
 imap = "2.4.1"
 native-tls = "0.2"
 mailparse = "0.15"
+html2text = "0.15.3"
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "native-tls", "hostname"] }
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 tauri-plugin-dialog = "2.8.4"
