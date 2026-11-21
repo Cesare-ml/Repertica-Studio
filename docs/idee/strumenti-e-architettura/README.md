@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21**. Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (quarta ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -12,6 +12,7 @@ Data ricognizione: **2026-11-21**. Stato uniforme: **Proposta — da valutare**.
 | [REPS-TECH-004](REPS-TECH-004-ricerca-federata-archivi-locali.md) | Consultazione federata di più archivi locali senza fusione | P2 | Proposta — da valutare |
 | [REPS-TECH-005](REPS-TECH-005-anteprime-media-grandi-archivi.md) | Anteprime derivate e cancellabili per raccolte fotografiche numerose | P2 | Proposta — da valutare |
 | [REPS-TECH-006](REPS-TECH-006-backup-cifrati-portabili.md) | Backup cifrati facoltativi, con recupero su altri dispositivi e formato versionato | P1–P2 | Proposta — da valutare |
+| [REPS-TECH-007](REPS-TECH-007-archivio-media-esterno-rilocalizzabile.md) | Archivio degli originali fotografici in cartella esterna opzionale, con migrazione verificata e backup sempre autosufficiente | P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -23,7 +24,7 @@ Verificati sul branch `main` al **21 novembre 2026**: [README](../../../README.m
 - **Già pianificato**: [issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) per MCP **STDIO read-only**. TECH-002 non è un server MCP: descrive un eventuale sistema di regole **interne** all'app, attivato su esplicita autorizzazione.
 - **Già pianificato**: [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) per aggiornamenti firmati. Nessuna proposta li riguarda.
 - **Già in corso in altro filone**: [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), schede UX-001 provenienza/movimenti, UX-002 trattative/prenotazioni, UX-003 costi attribuiti per opera, UX-004 rapporti di condizione e UX-005 edizioni numerate. Le proposte qui non definiscono quei processi, ma semmai strumenti trasversali utilizzabili in futuro.
-- **Già nota**: la foto principale è oggi un solo file JPEG/PNG/WebP fino a 12 MiB per opera; la verifica dei file avviene nel **backup**. TECH-003 distingue verifica dell'archivio attivo e ricerca **assistita** di file mancanti, senza cancellazione automatica.
+- **Già presente**: una foto principale e fino a 20 immagini aggiuntive JPEG/PNG/WebP per opera (limite 12 MiB ciascuna), dopo il merge della [PR #17](https://github.com/Cesare-ml/Repertica-Studio/pull/17). La verifica SHA-256 dei media è prevista nel **backup**. TECH-003 distingue verifica dell'archivio attivo e ricerca **assistita** di file mancanti, senza cancellazione automatica.
 
 Non è stata creata né considerata approvata una roadmap di sviluppo. Le priorità P1/P2 sono soltanto suggerimenti.
 
@@ -42,10 +43,16 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 - **Rischi e decisioni:** se la frase segreta va perduta, la copia cifrata potrebbe essere irrecuperabile; la soluzione richiede analisi del rischio, confronto con BitLocker/FileVault/LUKS e revisione crittografica indipendente **prima** di qualunque approvazione.
 - **Stato:** *Proposta — da valutare*. Nessuna modifica software, approvazione, incarico agli sviluppatori o merge.
 
+## Quarta ricognizione — 21 novembre 2026
+
+- **REPS-TECH-007:** studiata la scelta facoltativa della cartella degli **originali fotografici**, distinta dal backup e dalla cache delle anteprime. La proposta richiede migrazione verificata, gestione sicura dei volumi scollegati e **backup sempre completi e indipendenti dal percorso esterno**; priorità soltanto ipotetica P2. È un progetto diverso da TECH-003 (diagnostica media), TECH-005 (miniature), TECH-006 (cifratura delle copie) e dalle funzioni gestionali UX-001…009 della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14).
+- **Aggiornamento del riferimento a `main`:** la galleria di immagini aggiuntive della [PR #17](https://github.com/Cesare-ml/Repertica-Studio/pull/17) è stata effettivamente integrata; `gallery.rs` e lo schema SQLite fino a v4 ora sono presenti nel branch principale. La documentazione ideativa non deve confondere funzioni implementate con PR ancora aperte.
+- **Vincolo di sicurezza:** prima di approvare l'idea occorrono convalida dei casi d'uso, collaudo dei backup su USB/NAS ([issue #7](https://github.com/Cesare-ml/Repertica-Studio/issues/7)) e progettazione robusta della recovery di una migrazione cross-volume. Non sono stati modificati file operativi.
+
 ## Regole per le prossime ricognizioni
 
 1. Consultare `main`, issue e PR aperte; confrontare le schede di entrambi i filoni prima di aggiungerne altre. Se un problema è già risolto, aggiornare la scheda indicando il cambiamento, non produrre un doppione.
-2. Assegnare ID successivi `REPS-TECH-006`, `007`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
+2. Assegnare ID successivi `REPS-TECH-008`, `009`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
 3. Valutare sempre dati personali, assenza di lock-in, formati aperti, multilingua (lingua OS, fallback inglese), funzionamento offline-first, assenza di account o abbonamenti e scelta libera della cartella.
 4. Modificare **solo Markdown dentro questa cartella**, usando un branch e una PR esclusivamente documentali. Non toccare `docs/idee/gestione-e-ux/`; niente merge automatici, modifiche al codice, issue operative o assegnazioni implicite.
 5. Se emergono trade-off inconciliabili, registrarli come domanda al proprietario: non decidere in sua vece.
