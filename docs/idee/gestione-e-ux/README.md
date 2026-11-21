@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (diciassettesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (diciottesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -30,6 +30,15 @@ Aggiornato: **2026-11-21** (diciassettesima ricognizione). Stato delle proposte:
 | [REPS-UX-022](REPS-UX-022-opere-composte-componenti-fisici.md) | Opere composte: distinta dei componenti fisici di **una sola opera**, senza confonderli con opere autonome, edizioni o movimenti | P2 | Proposta — da valutare |
 | [REPS-UX-023](REPS-UX-023-prezzi-richiesti-listini-storico.md) | Prezzo richiesto per opera, distinzione dal suggerito/venduto e storico delle revisioni; listino locale condivisibile solo su scelta | P1–P2* | Proposta — da valutare |
 | [REPS-UX-024](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md) | Scadenziario facoltativo delle somme concordate per vendita, distinto dagli incassi effettivamente dichiarati e dal saldo autorevole | P1–P2* | Proposta — da valutare |
+| [REPS-UX-025](REPS-UX-025-istruzioni-allestimento-cura-opera.md) | Istruzioni di installazione, movimentazione e cura **della singola opera**: passaggi versionati, fonti e condivisione selettiva; non crea movimenti o report di condizione | P2* | Proposta — da valutare |
+
+## Diciottesima ricognizione (21 novembre 2026) — REPS-UX-025
+
+- **[REPS-UX-025 — Istruzioni di allestimento, movimentazione e cura per singola opera](REPS-UX-025-istruzioni-allestimento-cura-opera.md):** studiata una scheda riutilizzabile di indicazioni **dichiarate** per montare, esporre, maneggiare, imballare, usare e conservare opere tecnicamente complesse. Proposti passaggi testuali ordinati, fonte, data, versioni storiche e anteprima riservata per allestitori; **nessuna validazione automatica di sicurezza o trattamento conservativo**.
+- **Riscontro su `main`:** README, MVP, `src/app/models.ts` e ricerca GitHub mostrano schede d'opera, fotografie, media, certificati e backup, ma non una guida operativa versionata per singola opera. Opportunità per installazioni e opere multimediali, non bug dimostrato. Fonti professionali: [Collections Trust — Object requirement information](https://collectionstrust.org.uk/resource/object-requirement-information/) e [Installation note](https://collectionstrust.org.uk/resource/installation-note/).
+- **Anti-doppione:** UX-022 definisce **quali componenti** appartengono all'opera; UX-004 documenta **condizioni osservate**; UX-009 pianifica **le attività di una mostra**; UX-001 registra **movimenti avvenuti**; UX-007 produce dossier; questa proposta descrive **come intervenire operativamente sull'opera** sulla base di istruzioni attribuite a una fonte. Il filone tecnico [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) contiene allegati e interoperabilità come proposte indipendenti: nessun suo file modificato.
+- **Salvaguardie:** niente prescrizioni ambientali standard precompilate, certificazioni di conformità o automatismi su vendite, incassi, componenti, ubicazione o conservazione. Offline su SQLite/media, backup verificato in cartella scelta, export/import versionato con anteprima dei campi sensibili, lingua di sistema e fallback inglese senza traduzione automatica delle istruzioni. Priorità **P2 soltanto ipotetica**, possibile alternativa minima con sola nota tecnica datata.
+- **Stato:** «Proposta — da valutare»; nessuna approvazione, assegnazione, modifica al software o merge. Il catalogo contiene ora **25** schede e continua nella stessa [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14).
 
 ## Diciassettesima ricognizione (21 novembre 2026) — REPS-UX-024
 
