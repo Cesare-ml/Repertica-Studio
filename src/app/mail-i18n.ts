@@ -6,6 +6,11 @@ import type { AppLanguage } from './i18n';
  */
 type Variants = [it:string, es:string, fr:string, de:string];
 const dictionary: Record<string,Variants> = {
+  'Attach files':['Allega file','Adjuntar archivos','Joindre des fichiers','Dateien anhängen'],
+  'Choose attachments (max 5 files)':['Scegli allegati (massimo 5 file)','Elegir adjuntos (máximo 5)','Choisir les pièces jointes (5 max.)','Anhänge auswählen (max. 5)'],
+  'You can attach up to five files.':['Puoi allegare al massimo cinque file.','Puedes adjuntar hasta cinco archivos.','Vous pouvez joindre au maximum cinq fichiers.','Sie können höchstens fünf Dateien anhängen.'],
+  'Remove attachment':['Rimuovi allegato','Quitar adjunto','Retirer la pièce jointe','Anhang entfernen'],
+  'Max 5 files, 5 MiB each, 15 MiB total. Files stay on your computer until sent.':['Massimo 5 file, 5 MiB ciascuno, 15 MiB totali. I file rimangono nel computer fino all’invio.','Máximo 5 archivos, 5 MiB cada uno, 15 MiB en total. Se mantienen en el equipo hasta enviarlos.','5 fichiers max., 5 Mio chacun, 15 Mio au total. Ils restent sur votre ordinateur avant l’envoi.','Maximal 5 Dateien à 5 MiB, insgesamt 15 MiB. Dateien bleiben bis zum Senden auf dem Computer.'],
   'Business email':['Posta professionale','Correo profesional','Courrier professionnel','Geschäftliche E-Mails'],
   'Professional correspondence directly from your desktop. Independent of Repertica Online.':['Corrispondenza professionale dal desktop, indipendente da Repertica Online.','Correspondencia profesional desde el escritorio, independiente de Repertica Online.','Correspondance professionnelle sur ordinateur, indépendante de Repertica Online.','Professionelle Korrespondenz am Desktop, unabhängig von Repertica Online.'],
   'Compose':['Scrivi','Redactar','Rédiger','Verfassen'],
