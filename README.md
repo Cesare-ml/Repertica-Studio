@@ -13,6 +13,7 @@ Gestionale artistico **gratuito, open source e locale**, realizzato con Angular 
 - **Vendite**: registrazione importi in centesimi, cliente e opera associati; una vendita per opera nella prima versione.
 - **Certificati**: registro immutabile con numero progressivo univoco, fotografia della scheda al momento dell'emissione e stampa/salvataggio PDF tramite dialogo di stampa.
 - **Offline**: SQLite incorporato e fotografie nella cartella privata dell'applicazione.
+- **Backup e ripristino**: selezione di qualsiasi cartella accessibile (anche disco esterno/NAS), backup SQLite e media con manifest SHA-256, verifica e ripristino con conservazione dell'archivio precedente.
 - **Aggiornamenti firmati**: architettura predisposta; da abilitare solo quando verrà configurata una chiave di firma e pubblicate release compatibili.
 
 Non include **Sites**, login, sincronizzazione cloud, fatturazione fiscale, aste o invio dati a terzi.
@@ -34,7 +35,11 @@ Per creare l'app di produzione: `npm run tauri:build`. Sono previsti controlli C
 
 Il database `repertica.sqlite` viene creato automaticamente nella cartella app-local-data di Repertica Studio. Le immagini vengono salvate nella sottocartella `media/`. È possibile visualizzare il percorso in **Impostazioni**. Le operazioni ordinarie non richiedono Internet.
 
-**Avvertenza sui backup**: il backup/ripristino completo e la migrazione dell'archivio storico non sono ancora implementati. Conservare copie esterne prima di prove con dati importanti. Non copiare soltanto il file SQLite mentre il programma è in esecuzione: è utilizzato il journaling WAL.
+**Backup**: da **Impostazioni → Backup del tuo archivio**, scegli una cartella locale, un'unità USB, un percorso NAS raggiungibile o persino una cartella che contiene altri archivi. L'app crea sempre una sottocartella nuova `ReperticaStudio-backup-...` con `repertica.sqlite`, `media/` e `manifest.json`. Il database è acquisito con `VACUUM INTO` per ottenere uno snapshot coerente anche con journaling WAL. Tutti i file vengono verificati con SHA-256; non serve copiare manualmente SQLite.
+
+**Ripristino**: seleziona una singola sottocartella di backup. Prima di confermare, l'app verifica hash, integrità SQLite e riferimenti delle immagini. Durante il ripristino una copia integrale dell'archivio precedente viene conservata nella cartella padre di quella attiva. Il ripristino **sostituisce** l'archivio in uso, non fonde due archivi diversi.
+
+**Privacy**: i backup sono in chiaro (non cifrati), possono contenere dati personali e vanno conservati su un dispositivo protetto. Non essendo ancora collaudate le build native Windows e macOS, non utilizzare questa MVP come unica copia di dati importanti.
 
 ## Architettura e provenienza
 

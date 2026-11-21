@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
-  Certificate, CertificateInput, Overview
+  Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary
 } from './models';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
@@ -21,5 +21,8 @@ export const api = {
   listCertificates: () => invoke<Certificate[]>('list_certificates'),
   issueCertificate: (input: CertificateInput) => invoke<Certificate>('issue_certificate', { input }),
   overview: () => invoke<Overview>('overview'),
-  dataDirectory: () => invoke<string>('data_directory')
+  dataDirectory: () => invoke<string>('data_directory'),
+  createBackup: (destination: string) => invoke<BackupSummary>('create_backup', { destination }),
+  inspectBackup: (folder: string) => invoke<BackupSummary>('inspect_backup', { folder }),
+  restoreBackup: (folder: string) => invoke<RestoreSummary>('restore_backup', { folder })
 };

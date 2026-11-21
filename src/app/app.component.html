@@ -104,7 +104,35 @@
       <div class="section-tools"><div><h2>Archivio locale e privacy</h2><p>Repertica Studio non richiede account e non trasferisce i tuoi dati su server esterni.</p></div></div>
       <div class="panel settings-panel"><h3>Percorso dei tuoi dati</h3><p>Database SQLite e immagini sono conservati nella cartella locale dell'applicazione.</p>
         <code class="path">{{ dataPath || 'Percorso disponibile solo nell’app Tauri' }}</code>
-        <p class="warning">Versione MVP: non è ancora presente un sistema di backup e ripristino verificato. Evita di utilizzare questa versione come unica copia dei tuoi dati.</p>
+        <div class="backup-block">
+          <div class="backup-heading"><div><h3>Backup del tuo archivio</h3><p>Salva opere, fotografie, collezionisti, vendite e certificati in una cartella a tua scelta: anche su un disco esterno, NAS o nella cartella di un altro archivio.</p></div></div>
+          <div class="backup-field"><strong>Cartella di destinazione</strong><code class="path">{{ backupDestination || 'Nessuna cartella selezionata' }}</code></div>
+          <div class="backup-actions">
+            <button type="button" class="secondary" (click)="chooseBackupDestination()" [disabled]="busy || !initialized">Scegli cartella…</button>
+            <button type="button" class="primary" (click)="makeBackup()" [disabled]="busy || !backupDestination">{{ busy ? 'Operazione in corso…' : 'Crea backup verificato' }}</button>
+          </div>
+          <div *ngIf="lastBackup" class="backup-result">
+            <strong>Ultimo backup verificato ✓</strong>
+            <p>{{ lastBackup.artworks }} opere · {{ lastBackup.collectors }} collezionisti · {{ lastBackup.sales }} vendite · {{ lastBackup.certificates }} certificati · {{ bytes(lastBackup.totalBytes) }}</p>
+            <code class="path">{{ lastBackup.directory }}</code>
+          </div>
+          <p class="backup-note">Ogni backup crea una nuova sottocartella datata, senza sovrascrivere gli altri backup o i file già presenti. Il backup non è cifrato: conservalo in una destinazione protetta.</p>
+        </div>
+        <div class="backup-block">
+          <h3>Ripristina o trasferisci un archivio</h3>
+          <p>Puoi utilizzare un backup creato su questo computer o proveniente da un altro archivio Repertica Studio compatibile.</p>
+          <div class="backup-actions">
+            <button type="button" class="secondary" (click)="chooseRestoreFolder()" [disabled]="busy || !initialized">Seleziona backup da verificare…</button>
+          </div>
+          <div *ngIf="restoreCandidate" class="backup-result">
+            <strong>Backup verificato ✓</strong>
+            <p>{{ date(restoreCandidate.createdAt) }} · {{ restoreCandidate.artworks }} opere · {{ restoreCandidate.collectors }} collezionisti · {{ bytes(restoreCandidate.totalBytes) }}</p>
+            <code class="path">{{ restoreCandidate.directory }}</code>
+            <p class="warning">Il ripristino sostituisce l'archivio attuale. Repertica conserverà prima una copia dell'archivio presente, senza cancellarla.</p>
+            <button type="button" class="primary" (click)="restoreSelectedBackup()" [disabled]="busy">Conferma ripristino</button>
+          </div>
+          <p class="backup-note">Prima di eliminare una vecchia copia, verifica di riuscire ad aprire e utilizzare l'archivio ripristinato.</p>
+        </div>
         <div class="setting-row"><span>Accesso Internet obbligatorio</span><strong>No</strong></div>
         <div class="setting-row"><span>Account Repertica</span><strong>Non richiesto</strong></div>
         <div class="setting-row"><span>Licenza</span><strong>CPAL-1.0</strong></div>

@@ -47,3 +47,10 @@ export interface CertificateInput {
 export interface Overview {
   artworks: number; collectors: number; sales: number; certificates: number; revenue_cents: number;
 }
+
+export interface BackupSummary {
+  directory: string; createdAt: string; files: number; totalBytes: number;
+  artworks: number; collectors: number; sales: number; certificates: number;
+  schemaVersion: number; verified: boolean;
+}
+export interface RestoreSummary { restored: BackupSummary; previousArchive: string }
