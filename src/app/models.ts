@@ -1,5 +1,22 @@
 export type ArtworkStatus = 'available' | 'reserved' | 'sold' | 'archived';
 
+// Publication Engine documents are independent from the exported PDF snapshots.
+export interface BrochureItem {
+  artwork_id: string;
+  template: 'classic' | 'full_bleed' | 'details';
+  gallery_image_id: string | null;
+  title_override: string;
+  description_override: string;
+  include_description: boolean;
+}
+export interface Brochure {
+  id: string; title: string; subtitle: string; artist: string;
+  introduction: string; contact_email: string; contact_website: string;
+  contact_instagram: string; language: 'it' | 'en' | 'es' | 'fr' | 'de';
+  items: BrochureItem[]; created_at: string; updated_at: string;
+}
+
+
 export interface Artwork {
   id: string;
   code: string;
