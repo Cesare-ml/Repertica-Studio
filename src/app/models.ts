@@ -101,6 +101,11 @@ export interface SaleReceipt {
   id: string; sale_id: string; received_at: string; amount_cents: number;
   method: SaleReceiptMethod; reference: string | null; notes: string | null; created_at: string;
 }
+export interface ReceiptAttachment {
+  receipt_id: string; media_path: string; original_name: string;
+  mime_type: 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp';
+  size_bytes: number; sha256: string; created_at: string;
+}
 export type SaleReceiptInput = Pick<SaleReceipt, 'sale_id' | 'received_at' | 'amount_cents' | 'method' | 'reference' | 'notes'>;
 export interface MonthlyReceipt {
   month: string; amount_cents: number; count: number;
