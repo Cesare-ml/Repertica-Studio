@@ -26,3 +26,17 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run prepare:icons
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+  # Windows has different filesystem semantics (open handles block directory renames,
+  # canonical paths use the \\?\ prefix); backup and restore must be tested there too.
+  rust-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm install --no-audit --no-fund
+      - run: npm run prepare:icons
+      - run: cargo test --manifest-path src-tauri/Cargo.toml

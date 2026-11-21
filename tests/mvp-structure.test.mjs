@@ -81,3 +81,15 @@ test('receipt PDF/image attachments use offline SQLite v6 and verified backup me
   assert.match(module, /Sha256::digest/);
   assert.match(module, /MAX_BYTES: usize = 12 \* 1024 \* 1024/);
 });
+
+test('CI runs the Rust suite on Windows, where backup renames behave differently', () => {
+  const ci = get('.github/workflows/ci.yml');
+  assert.match(ci, /windows-latest/);
+  assert.match(ci, /cargo test --manifest-path src-tauri\/Cargo\.toml/);
+});
+test('backup closes the manifest handle before publishing the folder (Windows rename rule)', () => {
+  const backup = get('src-tauri/src/backup.rs');
+  const closing = backup.indexOf('Windows refuses to');
+  const rename = backup.indexOf('fs::rename(&partial, &target)');
+  assert.ok(closing > 0 && rename > closing);
+});

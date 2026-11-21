@@ -350,12 +350,17 @@ pub fn create_backup_core(db: &Database, destination: &Path) -> Result<BackupSum
             format: FORMAT.into(), format_version: FORMAT_VERSION,
             created_at: Utc::now().to_rfc3339(), schema_version, files,
         };
-        let mut output = File::create_new(partial.join(MANIFEST_FILE)).map_err(error)?;
-        output.write_all(&serde_json::to_vec_pretty(&manifest).map_err(error)?).map_err(error)?;
-        output.sync_all().map_err(error)?;
+        {
+            // The handle must be closed before the folder is renamed: Windows refuses to
+            // rename a directory that contains a file with an open handle.
+            let mut output = File::create_new(partial.join(MANIFEST_FILE)).map_err(error)?;
+            output.write_all(&serde_json::to_vec_pretty(&manifest).map_err(error)?).map_err(error)?;
+            output.sync_all().map_err(error)?;
+        }
         // Validation runs on the finished temporary tree before publication.
         inspect_backup_core(&partial)?;
-        fs::rename(&partial, &target).map_err(error)?;
+        fs::rename(&partial, &target)
+            .map_err(|e| format!("Impossibile pubblicare il backup (rinomina cartella): {e}"))?;
         inspect_backup_core(&target)
     })();
     if result.is_err() && partial.exists() { let _ = fs::remove_dir_all(&partial); }
@@ -509,7 +514,8 @@ mod tests {
         assert_eq!(backup.artworks, 1);
         assert_eq!(backup.files, 2);
         assert!(backup.verified);
-        assert!(Path::new(&backup.directory).starts_with(&destination));
+        // The summary reports a canonical path (`\\?\` prefixed on Windows).
+        assert!(Path::new(&backup.directory).starts_with(fs::canonicalize(&destination).unwrap()));
         {
             let conn = db.conn.lock().unwrap();
             conn.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('d','Dopo il backup','now','now')",[]).unwrap();

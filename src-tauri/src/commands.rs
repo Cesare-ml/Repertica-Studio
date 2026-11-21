@@ -1,8 +1,7 @@
 use crate::{db::Database, models::*};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Datelike, NaiveDate, Utc};
-use rusqlite::{params, Connection, OptionalExtension, Row};
-use std::{fs, path::Component};
+use rusqlite::{params, Connection, OptionalExtension, Row};use std::{fs, path::Component};
 use tauri::State;
 use uuid::Uuid;
 
@@ -79,6 +78,10 @@ fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, Stri
     let sale_exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE artwork_id=?1)",params![id],|r|r.get(0)).map_err(err)?;
     if input.status == "sold" && !sale_exists { return Err("Registra una vendita per indicare l'opera come venduta".into()); }
     if input.status != "sold" && sale_exists { return Err("L'opera ha una vendita registrata e deve restare venduta".into()); }
+    let code_taken: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artworks WHERE code=?1 COLLATE NOCASE AND id<>?2)",
+        params![code, id], |r| r.get(0)).map_err(err)?;
+    if code_taken { return Err("Esiste già un'opera con questo codice".into()); }
     let stamp = now();
     if existing {
         conn.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13 WHERE id=?1",
@@ -170,10 +173,19 @@ pub fn list_sales(db: State<'_, Database>) -> Result<Vec<Sale>, String> {
     let items = statement.query_map([], sale_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(items)
 }
+// Dates are stored as text and sorted/grouped lexicographically: accept only canonical YYYY-MM-DD.
+fn canonical_date(value: &str) -> bool {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(|d| d.format("%Y-%m-%d").to_string() == value)
+        .unwrap_or(false)
+}
 #[tauri::command]
 pub fn record_sale(db: State<'_, Database>, input: SaleInput) -> Result<(), String> {
+    record_sale_core(&db, input)
+}
+fn record_sale_core(db: &Database, input: SaleInput) -> Result<(), String> {
     if input.amount_cents<=0 || input.amount_cents>100_000_000_000 { return Err("Importo non valido".into()); }
-    NaiveDate::parse_from_str(&input.sold_at,"%Y-%m-%d").map_err(|_|"Data di vendita non valida".to_string())?;
+    if !canonical_date(&input.sold_at) { return Err("Data di vendita non valida".into()); }
     let notes=clean(input.notes,15_000)?;
     let mut conn=db.conn.lock().map_err(err)?;
     let tx=conn.transaction().map_err(err)?;
@@ -190,10 +202,18 @@ pub fn record_sale(db: State<'_, Database>, input: SaleInput) -> Result<(), Stri
 }
 #[tauri::command]
 pub fn delete_sale(db: State<'_, Database>, id: String) -> Result<(), String> {
+    delete_sale_core(&db, &id)
+}
+fn delete_sale_core(db: &Database, id: &str) -> Result<(), String> {
     let mut conn=db.conn.lock().map_err(err)?;
     let tx=conn.transaction().map_err(err)?;
     let artwork:Option<String>=tx.query_row("SELECT artwork_id FROM sales WHERE id=?1",params![id],|r|r.get(0)).optional().map_err(err)?;
     let artwork=artwork.ok_or_else(||"Vendita non trovata".to_string())?;
+    // Registered collections are financial records: never cascade-hide them behind a raw FK error.
+    let receipts:i64=tx.query_row("SELECT count(*) FROM sale_receipts WHERE sale_id=?1",params![id],|r|r.get(0)).map_err(err)?;
+    if receipts>0 {
+        return Err("La vendita ha incassi registrati: elimina prima gli incassi (e i relativi allegati)".into());
+    }
     tx.execute("DELETE FROM sales WHERE id=?1",params![id]).map_err(err)?;
     tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1",params![artwork,now()]).map_err(err)?;
     tx.commit().map_err(err)
@@ -442,6 +462,79 @@ mod tests {
         let count: i64 = db.conn.lock().unwrap().query_row(
             "SELECT count(*) FROM artworks", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0, "a stale editor must not silently insert an artwork");
+    }
+
+    fn sale_fixture() -> (tempfile::TempDir, Database, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let artwork = save_artwork_core(&db, artwork_edit_input(None, "Opera")).unwrap();
+        let collector = save_collector_core(&db, collector_edit_input(None, "Persona")).unwrap();
+        (dir, db, artwork.id, collector.id)
+    }
+
+    fn sale_input(artwork: &str, collector: &str, date: &str) -> SaleInput {
+        SaleInput {
+            artwork_id: artwork.into(), collector_id: collector.into(), amount_cents: 10_000,
+            sold_at: date.into(), notes: None, tax_cents: 0, shipping_cents: 0,
+        }
+    }
+
+    #[test]
+    fn duplicate_artwork_code_gets_a_clear_message_for_new_and_edited_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let first = save_artwork_core(&db, artwork_edit_input(None, "Prima")).unwrap();
+        let error = save_artwork_core(&db, artwork_edit_input(None, "Seconda")).unwrap_err();
+        assert!(error.contains("codice"), "{error}");
+        let mut other = artwork_edit_input(None, "Altra");
+        other.code = "WORK-OTHER".into();
+        let other = save_artwork_core(&db, other).unwrap();
+        let mut clash = artwork_edit_input(Some(other.id.clone()), "Altra");
+        clash.code = first.code.to_lowercase();
+        assert!(save_artwork_core(&db, clash).unwrap_err().contains("codice"));
+        // Re-saving a record with its own code is not a conflict.
+        let mut same = artwork_edit_input(Some(first.id.clone()), "Prima modificata");
+        same.code = first.code.clone();
+        assert_eq!(save_artwork_core(&db, same).unwrap().title, "Prima modificata");
+    }
+
+    #[test]
+    fn sale_dates_must_be_canonical_iso_dates() {
+        let (_dir, db, artwork, collector) = sale_fixture();
+        for bad in ["2026-1-5", "2026-02-30", "21/11/2026", "2026-11-21T10:00:00", " 2026-11-21", ""] {
+            let error = record_sale_core(&db, sale_input(&artwork, &collector, bad)).unwrap_err();
+            assert!(error.contains("Data"), "{bad}: {error}");
+        }
+        record_sale_core(&db, sale_input(&artwork, &collector, "2026-11-21")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let status: String = conn.query_row("SELECT status FROM artworks WHERE id=?1",
+            params![artwork], |r| r.get(0)).unwrap();
+        assert_eq!(status, "sold");
+    }
+
+    #[test]
+    fn sale_with_recorded_receipts_cannot_be_cancelled_and_stays_intact() {
+        let (_dir, db, artwork, collector) = sale_fixture();
+        record_sale_core(&db, sale_input(&artwork, &collector, "2026-11-21")).unwrap();
+        let sale_id: String = db.conn.lock().unwrap()
+            .query_row("SELECT id FROM sales", [], |r| r.get(0)).unwrap();
+        db.conn.lock().unwrap().execute(
+            "INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+             VALUES('r',?1,'2026-11-21',500,'cash','t')", params![sale_id]).unwrap();
+        let error = delete_sale_core(&db, &sale_id).unwrap_err();
+        assert!(error.contains("incassi"), "{error}");
+        let conn = db.conn.lock().unwrap();
+        let sales: i64 = conn.query_row("SELECT count(*) FROM sales", [], |r| r.get(0)).unwrap();
+        let status: String = conn.query_row("SELECT status FROM artworks WHERE id=?1",
+            params![artwork], |r| r.get(0)).unwrap();
+        assert_eq!((sales, status.as_str()), (1, "sold"));
+        conn.execute("DELETE FROM sale_receipts WHERE id='r'", []).unwrap();
+        drop(conn);
+        delete_sale_core(&db, &sale_id).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let status: String = conn.query_row("SELECT status FROM artworks WHERE id=?1",
+            params![artwork], |r| r.get(0)).unwrap();
+        assert_eq!(status, "available");
     }
 
     #[test]

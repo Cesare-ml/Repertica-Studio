@@ -1,8 +1,8 @@
 //! Local studio economics. Monetary values are integer EUR cents and share ratios
 //! are integer basis points. Sales are recorded turnover, not verified cash receipts.
 use crate::db::Database;
-use chrono::{Datelike, NaiveDate, Utc};
-use rusqlite::{params, OptionalExtension, Transaction};
+use chrono::{NaiveDate, Utc};
+use rusqlite::{params, Transaction};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
