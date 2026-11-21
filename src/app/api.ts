@@ -3,7 +3,7 @@ import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
-  SaleReceipt, SaleReceiptInput, SaleBalance
+  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -34,6 +34,7 @@ export const api = {
   deleteSale: (id: string) => invoke<void>('delete_sale', { id }),
   listSaleReceipts: () => invoke<SaleReceipt[]>('list_sale_receipts'),
   listSaleBalances: () => invoke<SaleBalance[]>('list_sale_balances'),
+  receiptYearOverview: (year: number) => invoke<ReceiptYearOverview>('receipt_year_overview', {year}),
   recordSaleReceipt: (input: SaleReceiptInput) => invoke<SaleReceipt>('record_sale_receipt', {input}),
   deleteSaleReceipt: (id: string) => invoke<void>('delete_sale_receipt', {id}),
   listCertificates: () => invoke<Certificate[]>('list_certificates'),

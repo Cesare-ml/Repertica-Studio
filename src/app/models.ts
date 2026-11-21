@@ -93,6 +93,12 @@ export interface SaleReceipt {
   method: SaleReceiptMethod; reference: string | null; notes: string | null; created_at: string;
 }
 export type SaleReceiptInput = Pick<SaleReceipt, 'sale_id' | 'received_at' | 'amount_cents' | 'method' | 'reference' | 'notes'>;
+export interface MonthlyReceipt {
+  month: string; amount_cents: number; count: number;
+}
+export interface ReceiptYearOverview {
+  year: number; months: MonthlyReceipt[]; total_cents: number; count: number;
+}
 export interface SaleBalance {
   sale_id: string; sale_cents: number; received_cents: number; outstanding_cents: number;
 }
