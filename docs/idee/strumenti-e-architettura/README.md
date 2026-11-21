@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (quindicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (sedicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -24,13 +24,22 @@ Data ricognizione: **2026-11-21** (quindicesima ricognizione). Stato uniforme: *
 | [REPS-TECH-016](REPS-TECH-016-allegati-documentali-locali-multi-entita.md) | Allegati documentali locali riutilizzabili e verificabili, con collegamenti espliciti a più schede e senza cloud; non sostituisce allegati incasso v6 | P2 | Proposta — da valutare |
 | [REPS-TECH-017](REPS-TECH-017-protezione-archivio-attivo-cifratura-facoltativa.md) | Protezione facoltativa dei dati dell'**archivio attivo a riposo** (SQLite, WAL, media, allegati e residui), distinta dai backup cifrati di TECH-006; alternative OS prima di cifratura integrata | P2–P3 | Proposta — da valutare |
 | [REPS-TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) | Esportazioni CSV degli otto registri a memoria contenuta, snapshot coerenti e pubblicazione finale non distruttiva; robustezza verificata su dischi e NAS | P2 | Proposta — da valutare |
+| [REPS-TECH-019](REPS-TECH-019-importazione-guidata-cataloghi-tabellari.md) | Importazione guidata da **CSV/TSV esterni non standard** con mappatura colonne, preflight di tutte le righe e conferma non distruttiva; distinta dal formato Repertica e dalla migrazione Gestionale Opere | P1–P2 | Proposta — da valutare |
+
+## Sedicesima ricognizione — 21 novembre 2026 — REPS-TECH-019
+
+- **[REPS-TECH-019 — Importazione guidata di cataloghi tabellari esterni](REPS-TECH-019-importazione-guidata-cataloghi-tabellari.md):** proposta una via d'ingresso locale per artisti e archivi con inventari preesistenti in **CSV/TSV**, con anteprima leggibile, mappatura delle colonne, regole visibili per unità e date, validazione integrale di ogni riga, rilevamento conflitti e conferma esplicita. Nessuna importazione automatica di vendite, incassi, certificati o fotografia, nessuna correzione silenziosa di codici e nessun cloud. **P1–P2 è una priorità puramente ipotetica**, dipendente da casi d'uso reali.
+- **Verifiche su `main`:** riletti README, MVP, DATA-PORTABILITY, modelli TypeScript e schema SQLite **v10**. Il sistema offre **nove registri CSV in uscita**, non un importatore da tabelle arbitrarie; i backup completi sono già disponibili. `artworks.code` è univoco e le vendite/certificati hanno vincoli da preservare. [Issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5) prevede già un import specifico dal **Gestionale Opere**.
+- **Niente duplicazioni:** TECH-001 = formato **canonico** aperto e reimportabile, non parsing di inventari eterogenei; TECH-018 = scalabilità delle **esportazioni**; UX-018 della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) = **catalogazione manuale seriale**, non import CSV. Esclusi i processi gestionali delle altre schede UX. Nessun file esterno a questa cartella è stato toccato.
+- **Riferimenti metodologici:** [W3C CSVW](https://www.w3.org/TR/tabular-metadata/) sulle tipizzazioni esplicite e [OWASP CSV Injection](https://owasp.org/www-community/attacks/CSV_Injection) sui rischi delle celle formula; nessuno standard viene reso obbligatorio per i file sorgente.
+- **Perimetro:** una nuova scheda e questo indice, solo Markdown in `docs/idee/strumenti-e-architettura/`. Tutte le **19** proposte restano **«Proposta — da valutare»**; nessuna approvazione, assegnazione, issue operativa o merge. Revisione del proprietario tramite [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
 
 ## Ricognizione e confini
 
 Verificati sul branch `main` al **21 novembre 2026**: [README](../../../README.md), [MVP](../../MVP.md), [economia e localizzazione](../../ECONOMY-I18N.md), modelli dati e codice nativo di `db.rs`, `backup.rs`, `export.rs`, `commands.rs`.
 
 - **Già presente**: database locale SQLite, backup completo a cartella scelta con manifest e hash SHA-256, ispezione prima del ripristino e conservazione della copia precedente. Le schede non ripropongono questo sistema.
-- **Già presente**: otto CSV unidirezionali per **opere, galleria fotografica, collezionisti, certificati, vendite, saldi, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
+- **Già presente**: nove CSV unidirezionali per **opere, galleria fotografica, collezionisti, certificati, vendite, ripartizioni, saldi, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
 - **Già pianificato**: [issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5) per migrazione assistita **da Gestionale Opere**; TECH-001 è indipendente dalla fonte, non realizza l'esportatore privato e propone prima importazione in archivio vuoto.
 - **Già pianificato**: [issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) per MCP **STDIO read-only**. TECH-002 non è un server MCP: descrive un eventuale sistema di regole **interne** all'app, attivato su esplicita autorizzazione.
 - **Già pianificato**: [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) per aggiornamenti firmati. Nessuna proposta li riguarda.
