@@ -1,0 +1,180 @@
+<div class="brochures">
+  <div class="brochure-header">
+    <div>
+      <h2>{{ tr('Brochure') }}</h2>
+      <p>{{ tr('Crea pubblicazioni dalle opere del tuo archivio. Tutto resta sul computer.') }}</p>
+    </div>
+    <button type="button" class="create-button" (click)="create()" [disabled]="busy">{{ tr('+ Nuova brochure') }}</button>
+  </div>
+  <div *ngIf="errorMessage" class="brochure-alert error" role="alert">{{ errorMessage }}</div>
+  <div *ngIf="notice" class="brochure-alert success" role="status">{{ notice }}</div>
+
+  <div *ngIf="!draft" class="brochure-list">
+    <div *ngIf="!documents.length" class="brochure-empty">
+      <div class="empty-icon" aria-hidden="true">▤</div>
+      <h3>{{ tr('Le tue brochure appariranno qui') }}</h3>
+      <p>{{ tr('Seleziona le opere, ordinale, personalizza i testi ed esporta un PDF A4.') }}</p>
+      <button type="button" (click)="create()">{{ tr('Crea la prima brochure') }}</button>
+    </div>
+    <article *ngFor="let document of documents" class="brochure-entry">
+      <div class="document-mark" aria-hidden="true">B</div>
+      <div class="document-title">
+        <h3>{{ document.title }}</h3>
+        <p>{{ document.artist || tr('Artista da indicare') }} · {{ document.items.length }} {{ tr('opere') }} · {{ document.language.toUpperCase() }}</p>
+      </div>
+      <div class="entry-actions">
+        <button type="button" (click)="edit(document)" [disabled]="busy">{{ tr('Apri editor') }}</button>
+        <button type="button" (click)="duplicate(document)" [disabled]="busy">{{ tr('Duplica') }}</button>
+        <button type="button" class="destructive" (click)="delete(document)" [disabled]="busy">{{ tr('Elimina') }}</button>
+      </div>
+    </article>
+  </div>
+
+  <div *ngIf="draft as b" class="brochure-editor">
+    <div class="editor-toolbar">
+      <button type="button" class="back-button" (click)="close()" [disabled]="busy">← {{ tr('Tutte le brochure') }}</button>
+      <div class="editor-actions">
+        <button type="button" (click)="saveDraft()" [disabled]="busy">{{ tr('Salva bozza') }}</button>
+        <button type="button" class="create-button" (click)="exportPdf()" [disabled]="busy || !b.items.length">
+          {{ busy ? tr('Elaborazione…') : tr('Esporta PDF') }}
+        </button>
+      </div>
+    </div>
+    <div class="editor-columns">
+      <div class="editor-fields">
+        <section class="brochure-panel">
+          <div class="panel-caption">01 / {{ tr('Identità editoriale') }}</div>
+          <label>{{ tr('Titolo della brochure') }}
+            <input [(ngModel)]="b.title" maxlength="200" [placeholder]="tr('Esempio: Opere selezionate 2026')">
+          </label>
+          <label>{{ tr('Sottotitolo') }}
+            <input [(ngModel)]="b.subtitle" maxlength="400">
+          </label>
+          <div class="two-inputs">
+            <label>{{ tr('Nome artista') }}
+              <input [(ngModel)]="b.artist" maxlength="200">
+            </label>
+            <label>{{ tr('Lingua del documento') }}
+              <select [(ngModel)]="b.language">
+                <option value="it">Italiano</option>
+                <option value="en">English</option>
+                <option value="es">Español</option>
+                <option value="fr">Français</option>
+                <option value="de">Deutsch</option>
+              </select>
+            </label>
+          </div>
+          <label>{{ tr('Introduzione (facoltativa)') }}
+            <textarea [(ngModel)]="b.introduction" rows="5" maxlength="10000" [placeholder]="tr('Presenta questa selezione di opere…')"></textarea>
+          </label>
+        </section>
+
+        <section class="brochure-panel">
+          <div class="panel-caption">02 / {{ tr('Opere e ordine') }}</div>
+          <div class="add-artwork">
+            <label class="add-select">{{ tr('Aggiungi un’opera') }}
+              <select [(ngModel)]="addedArtworkId">
+                <option value="">{{ tr('Scegli dall’archivio…') }}</option>
+                <option *ngFor="let artwork of available" [value]="artwork.id">{{ artwork.code }} · {{ artwork.title }}</option>
+              </select>
+            </label>
+            <button type="button" (click)="addArtwork()" [disabled]="!addedArtworkId || busy">{{ tr('Aggiungi') }}</button>
+          </div>
+          <div class="artwork-empty" *ngIf="!b.items.length">{{ tr('Nessuna opera selezionata.') }}</div>
+
+          <article *ngFor="let item of b.items; let i = index" class="selected-artwork">
+            <div class="selected-head">
+              <div class="selected-num">{{ i + 1 | number:'2.0-0' }}</div>
+              <div class="selected-photo"><img *ngIf="previews[item.artwork_id]" [src]="previews[item.artwork_id]" alt=""></div>
+              <div class="selected-title">
+                <strong>{{ artwork(item.artwork_id)?.title || tr('Opera non trovata') }}</strong>
+                <span>{{ artwork(item.artwork_id)?.code || item.artwork_id }}</span>
+              </div>
+              <div class="order-buttons">
+                <button type="button" (click)="move(i,-1)" [disabled]="i===0" [attr.aria-label]="tr('Sposta su')">↑</button>
+                <button type="button" (click)="move(i,1)" [disabled]="i===b.items.length-1" [attr.aria-label]="tr('Sposta giù')">↓</button>
+                <button type="button" (click)="remove(i)" class="destructive" [attr.aria-label]="tr('Rimuovi opera')">×</button>
+              </div>
+            </div>
+            <div class="two-inputs">
+              <label>{{ tr('Impaginazione') }}
+                <select [(ngModel)]="item.template">
+                  <option value="classic">{{ tr('Classica') }}</option>
+                  <option value="full_bleed">{{ tr('A tutta pagina') }}</option>
+                  <option value="details">{{ tr('Immagine e testo') }}</option>
+                </select>
+              </label>
+              <label>{{ tr('Fotografia') }}
+                <select [ngModel]="item.gallery_image_id" (ngModelChange)="changeImage(item,$event)">
+                  <option [ngValue]="null">{{ tr('Immagine principale') }}</option>
+                  <option *ngFor="let image of galleries[item.artwork_id] || []" [ngValue]="image.id">
+                    {{ image.caption || tr('Immagine aggiuntiva') }}
+                  </option>
+                </select>
+              </label>
+            </div>
+            <label>{{ tr('Titolo personalizzato (facoltativo)') }}
+              <input [(ngModel)]="item.title_override" maxlength="300" [placeholder]="artwork(item.artwork_id)?.title || ''">
+            </label>
+            <label class="check-line">
+              <input type="checkbox" [(ngModel)]="item.include_description">
+              <span>{{ tr('Mostra descrizione') }}</span>
+            </label>
+            <label *ngIf="item.include_description">{{ tr('Descrizione personalizzata (facoltativa)') }}
+              <textarea [(ngModel)]="item.description_override" rows="3" maxlength="10000"
+                [placeholder]="artwork(item.artwork_id)?.description || tr('Nessuna descrizione in archivio')"></textarea>
+            </label>
+          </article>
+        </section>
+        <section class="brochure-panel">
+          <div class="panel-caption">03 / {{ tr('Contatti finali') }}</div>
+          <label>Email<input [(ngModel)]="b.contact_email" type="email" maxlength="250"></label>
+          <label>{{ tr('Sito web') }}<input [(ngModel)]="b.contact_website" type="text" maxlength="300"></label>
+          <label>Instagram<input [(ngModel)]="b.contact_instagram" type="text" maxlength="300"></label>
+        </section>
+      </div>
+      <aside class="brochure-preview">
+        <div class="preview-header">
+          <div><strong>{{ tr('Anteprima di composizione') }}</strong><span>{{ tr('Formato A4 verticale') }}</span></div>
+          <span>{{ pageCount }} {{ tr('pagine base') }}</span>
+        </div>
+        <p class="preview-disclaimer">{{ tr('La composizione è indicativa; il PDF finale viene impaginato in locale.') }}</p>
+        <div class="preview-scroll">
+          <div class="preview-page cover-page">
+            <small>{{ tr('OPERE SELEZIONATE') }}</small>
+            <span class="preview-line"></span>
+            <h3>{{ b.artist || tr('Nome artista') }}</h3>
+            <h4>{{ b.title || tr('Titolo della brochure') }}</h4>
+            <p>{{ b.subtitle }}</p>
+            <span class="preview-brand">REPERTICA / STUDIO</span>
+          </div>
+          <div *ngIf="b.introduction.trim()" class="preview-page preview-intro">
+            <h3>{{ tr('Introduzione') }}</h3>
+            <p>{{ b.introduction }}</p>
+          </div>
+          <div *ngFor="let item of b.items" class="preview-page work-page" [class.full-bleed]="item.template==='full_bleed'"
+            [class.details]="item.template==='details'">
+            <div class="mock-image">
+              <img *ngIf="previews[item.artwork_id]" [src]="previews[item.artwork_id]" alt="">
+              <span *ngIf="!previews[item.artwork_id]">{{ tr('Immagine non disponibile') }}</span>
+            </div>
+            <div class="mock-meta">
+              <h3>{{ item.title_override || artwork(item.artwork_id)?.title }}</h3>
+              <small>{{ artwork(item.artwork_id)?.code }} · {{ artwork(item.artwork_id)?.year }}</small>
+              <p *ngIf="item.include_description">{{ item.description_override || artwork(item.artwork_id)?.description }}</p>
+            </div>
+          </div>
+          <div class="preview-page cover-page contacts-page">
+            <small>{{ tr('CONTATTI') }}</small>
+            <span class="preview-line"></span>
+            <h3>{{ b.artist || tr('Nome artista') }}</h3>
+            <p>{{ b.contact_email }}</p>
+            <p>{{ b.contact_website }}</p>
+            <p>{{ b.contact_instagram }}</p>
+            <span class="preview-brand">REPERTICA / STUDIO</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>

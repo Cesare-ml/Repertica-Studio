@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 14;
+pub const SCHEMA_VERSION: i64 = 15;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -484,6 +484,21 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
         }
         script.push_str("PRAGMA user_version=14; COMMIT;");
         conn.execute_batch(&script)?;
+    }
+    if version < 15 {
+        // Offline brochure drafts: the JSON document is the editable source,
+        // whereas the PDF is a separately exported derivative.
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS brochures (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200),
+                payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_brochures_updated ON brochures(updated_at DESC);
+            PRAGMA user_version=15;
+            COMMIT;")?;
     }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.

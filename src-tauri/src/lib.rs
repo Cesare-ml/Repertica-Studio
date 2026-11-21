@@ -2,6 +2,7 @@ mod allocations;
 mod archive_code;
 mod auto_backup;
 mod backup;
+mod brochures;
 mod collectors;
 mod commands;
 pub mod db;
@@ -38,6 +39,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            brochures::list_brochures,
+            brochures::save_brochure,
+            brochures::delete_brochure,
+            brochures::export_brochure_pdf,
             commands::list_artworks,
             commands::save_artwork,
             commands::create_artwork_full,
