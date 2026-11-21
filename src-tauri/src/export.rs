@@ -48,6 +48,19 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
                     (SELECT count(*) FROM collector_images WHERE collector_id=c.id)
              FROM collectors c ORDER BY c.name COLLATE NOCASE,c.id"
         ),
+        "collector_photos" => (
+            "photo_id;collector_id;collector_name;kind;image_path;media_id;created_at",
+            "SELECT p.id,p.collector_id,c.name,p.kind,p.image_path,p.media_id,p.created_at
+             FROM collector_images p JOIN collectors c ON c.id=p.collector_id
+             ORDER BY c.name COLLATE NOCASE,c.id,
+                      CASE p.kind WHEN 'PROFILE' THEN 0 ELSE 1 END,p.created_at,p.id"
+        ),
+        "raw_files" => (
+            "artwork_id;artwork_code;artwork_title;media_path;original_name;size_bytes;sha256;created_at",
+            "SELECT r.artwork_id,a.code,a.title,r.media_path,r.original_name,r.size_bytes,r.sha256,r.created_at
+             FROM artwork_raw_files r JOIN artworks a ON a.id=r.artwork_id
+             ORDER BY a.code COLLATE NOCASE,a.id"
+        ),
         "certificates" => (
             "certificate_id;artwork_id;artwork_code;current_artwork_title;serial;issued_at;artist_name;collector_name;notes;snapshot_json;created_at",
             "SELECT c.id,c.artwork_id,a.code,a.title,c.serial,c.issued_at,c.artist_name,
@@ -345,6 +358,70 @@ seconda riga','t','t')", []).unwrap();
         assert_eq!(conn.query_row(
             "SELECT COUNT(*) FROM artwork_images", [], |r| r.get::<_, i64>(0)
         ).unwrap(), 2);
+    }
+
+    #[test]
+    fn collector_photos_csv_preserves_every_profile_and_extra_photo_with_owner_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c1','=Ada','t','t'),('c2','Bea','t','t');
+            INSERT INTO media_items(id,original_name,current_revision_id,created_at,updated_at)
+                VALUES('media-1','profile.jpg','revision-1','t','t');
+            INSERT INTO collector_images(id,collector_id,kind,image_path,media_id,created_at)
+                VALUES('extra','c1','PHOTO','media/detail.jpg',NULL,'t2'),
+                      ('profile','c1','PROFILE','media/profile.jpg','media-1','t1'),
+                      ('other','c2','PHOTO','media/other.png',NULL,'t3');
+        "#).unwrap();
+
+        let csv = render_csv(&conn, "collector_photos").unwrap();
+        assert!(csv.starts_with(
+            "\u{feff}photo_id;collector_id;collector_name;kind;image_path;media_id;created_at\r\n"
+        ));
+        let profile = "\"profile\";\"c1\";\"'=Ada\";\"PROFILE\";\"media/profile.jpg\";\"media-1\";\"t1\"";
+        let extra = "\"extra\";\"c1\";\"'=Ada\";\"PHOTO\";\"media/detail.jpg\";\"\";\"t2\"";
+        let other = "\"other\";\"c2\";\"Bea\";\"PHOTO\";\"media/other.png\";\"\";\"t3\"";
+        assert!(csv.contains(profile), "{csv}");
+        assert!(csv.contains(extra), "{csv}");
+        assert!(csv.contains(other), "{csv}");
+        assert!(csv.find(profile) < csv.find(extra), "profile photo must be first");
+        assert!(csv.find(extra) < csv.find(other), "photos must keep their collector link");
+        assert_eq!(csv.matches("\r\n").count(), 4);
+        assert_eq!(conn.query_row(
+            "SELECT COUNT(*) FROM collector_images", [], |r| r.get::<_, i64>(0)
+        ).unwrap(), 3);
+    }
+
+    #[test]
+    fn raw_files_csv_preserves_original_names_hashes_and_artwork_links_without_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a1','A-1','Original','t','t');
+        "#).unwrap();
+        let sha = "a".repeat(64);
+        conn.execute(
+            "INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at)
+                VALUES('a1','media/source.dng','+suspicious.dng',12345,?1,'t')",
+            rusqlite::params![sha],
+        ).unwrap();
+
+        let csv = render_csv(&conn, "raw_files").unwrap();
+        assert!(csv.starts_with(
+            "\u{feff}artwork_id;artwork_code;artwork_title;media_path;original_name;size_bytes;sha256;created_at\r\n"
+        ));
+        assert!(csv.contains(&format!(
+            "\"a1\";\"A-1\";\"Original\";\"media/source.dng\";\"'+suspicious.dng\";12345;\"{sha}\";\"t\""
+        )), "{csv}");
+        assert_eq!(csv.matches("\r\n").count(), 2);
+        assert!(!csv.contains("RAW FILE BYTES"));
+        assert_eq!(conn.query_row(
+            "SELECT COUNT(*) FROM artwork_raw_files", [], |r| r.get::<_, i64>(0)
+        ).unwrap(), 1);
     }
 
     #[test]
