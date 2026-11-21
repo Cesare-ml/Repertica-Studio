@@ -48,7 +48,7 @@ test('brochure editor exposes every new label in the translations', () => {
     const end=i18n.indexOf('\n};',start);
     const entries=i18n.slice(start,end);
     for (const key of keys) {
-      assert.ok(entries.includes(JSON.stringify(key)+':'), markers[i] + ': missing ' + key);
+      assert.ok(entries.includes(JSON.stringify(key)+':') || entries.includes("'" + key + "':"), markers[i] + ': missing ' + key);
     }
   }
 });
