@@ -1,0 +1,90 @@
+# Build unsigned test installers on GitHub-hosted Macs; no Apple Developer account needed.
+# Ad-hoc signing is not notarization; GitHub artifact only, no release or updater feed.
+name: macOS builds (Intel + Apple Silicon)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-macos.yml'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'package.json'
+      - 'angular.json'
+permissions:
+  contents: read
+concurrency:
+  group: repertica-mac-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+jobs:
+  macos:
+    name: Build DMG ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple-Silicon
+            runner: macos-15
+            arch: arm64
+            target: aarch64-apple-darwin
+          - name: Intel
+            runner: macos-15-intel
+            arch: x64
+            target: x86_64-apple-darwin
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      # Ad-hoc signature (no Developer ID / notarization; see README).
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: ${{ matrix.arch }}
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Verify architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
+          rustc --version
+          cargo --version
+      - name: Build DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run prepare:icons
+          npm run build
+          npx tauri build --target ${{ matrix.target }} --bundles dmg
+      - name: Verify DMG and calculate SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg' -print
+          cd src-tauri/target/${{ matrix.target }}/release/bundle/dmg
+          shasum -a 256 -- *.dmg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Upload test DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: repertica-macos-${{ matrix.name }}-${{ github.run_number }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*
+          if-no-files-found: error
+          retention-days: 14

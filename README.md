@@ -56,3 +56,13 @@ La logica è stata progettata prendendo come riferimento i domini del repository
 **CPAL-1.0**, come VirgoStars Ephemeris; il testo integrale è in [LICENSE](LICENSE), incluse le condizioni di attribuzione a Repertica. I marchi non sono ceduti con la licenza del software.
 
 Contributi e segnalazioni sono benvenuti tramite pull request e GitHub Issues.
+
+## Build per macOS tramite GitHub Actions
+
+Il workflow [macOS builds (Intel + Apple Silicon)](.github/workflows/build-macos.yml) genera file `.dmg` su runner GitHub macOS, senza richiedere un Mac locale.
+
+1. Apri **Actions → macOS builds (Intel + Apple Silicon) → Run workflow**, selezionando `main`.
+2. Al termine, apri l'esecuzione e scarica gli artifact `repertica-macos-Apple-Silicon-...` e/o `repertica-macos-Intel-...`.
+3. Ogni artifact include il `.dmg` e il file SHA-256 per verificarlo.
+
+Il workflow esegue anche compilazioni sul branch `main` quando il codice dell'app cambia. I DMG sono **build di prova con firma ad hoc**, non notarizzate da Apple. macOS Gatekeeper potrebbe impedire l'apertura o mostrare avvisi: non presentarle come release pubbliche verificate. Nessuna release GitHub o aggiornamento automatico viene pubblicato da questa Action. Per una distribuzione ufficiale senza avvisi occorreranno Developer ID, notarizzazione e test su dispositivi reali.
