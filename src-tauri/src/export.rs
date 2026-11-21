@@ -1,4 +1,4 @@
-//! Offline CSV exports of artwork, collector, certificate, sale and expense registers.
+//! Offline CSV exports of artwork, collector, certificate, sale, receipt and expense registers.
 //! CSV exports are for inspection/analysis, NOT a restore format or verified cash receipts.
 //! All money is exported as integer cents to avoid rounding or locale ambiguity.
 use crate::db::Database;
@@ -56,6 +56,15 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              JOIN collectors c ON c.id=s.collector_id
              LEFT JOIN sale_finances f ON f.sale_id=s.id
              ORDER BY s.sold_at,s.id"
+        ),
+        "receipts" => (
+            "receipt_id;sale_id;received_at;artwork_id;artwork_code;artwork_title;collector_id;collector_name;amount_cents;currency;method;reference;notes;created_at",
+            "SELECT r.id,r.sale_id,r.received_at,s.artwork_id,a.code,a.title,s.collector_id,c.name,
+                    r.amount_cents,s.currency,r.method,r.reference,r.notes,r.created_at
+             FROM sale_receipts r JOIN sales s ON s.id=r.sale_id
+             JOIN artworks a ON a.id=s.artwork_id
+             JOIN collectors c ON c.id=s.collector_id
+             ORDER BY r.received_at,r.created_at,r.id"
         ),
         "expenses" => (
             "expense_id;expense_date;category;description;amount_cents;fund;supplier;purchase_url;notes;created_at;updated_at",
@@ -134,6 +143,34 @@ mod tests {
     use crate::db;
 
     #[test]
+    fn receipts_csv_is_distinct_from_sales_and_preserves_references_and_exact_cents() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+            VALUES('art','ART-1','Landscape','t','t')", []).unwrap();
+        conn.execute("INSERT INTO collectors(id,name,created_at,updated_at)
+            VALUES('buyer','Client','t','t')", []).unwrap();
+        conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+            VALUES('sale','art','buyer',10001,'2026-11-01','t')", []).unwrap();
+        conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,reference,notes,created_at)
+            VALUES('r1','sale','2026-11-10',1500,'bank_transfer','  =2+3','comment;line','t')", []).unwrap();
+        conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,reference,created_at)
+            VALUES('r2','sale','2026-11-12',2001,'cash','cash-02','t')", []).unwrap();
+
+        let csv = render_csv(&conn, "receipts").unwrap();
+        assert!(csv.starts_with("\u{feff}receipt_id;sale_id;received_at;artwork_id;"));
+        assert!(csv.contains("\"r1\";\"sale\";\"2026-11-10\";\"art\";\"ART-1\";\"Landscape\";\"buyer\";\"Client\";1500;\"EUR\";\"bank_transfer\";\"'  =2+3\";\"comment;line\";"));
+        assert!(csv.contains("\"r2\";\"sale\";\"2026-11-12\";\"art\";\"ART-1\";\"Landscape\";\"buyer\";\"Client\";2001;\"EUR\";\"cash\";\"cash-02\";"));
+        assert_eq!(csv.matches("\r\n").count(), 3);
+        let sales = render_csv(&conn, "sales").unwrap();
+        assert!(sales.contains(";10001;"));
+        assert!(!sales.starts_with("\u{feff}receipt_id;"));
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM sale_receipts", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
     fn exports_exact_cents_historic_shares_and_escapes_spreadsheet_content() {
         let dir = tempfile::tempdir().unwrap();
         let db = db::open(dir.path().join("archive")).unwrap();
@@ -195,7 +232,7 @@ seconda riga','t','t')", []).unwrap();
     fn archive_register_exports_are_non_destructive_and_reject_replacing_existing_files() {
         let dir = tempfile::tempdir().unwrap();
         let db = db::open(dir.path().join("archive")).unwrap();
-        for kind in ["artworks", "collectors", "certificates"] {
+        for kind in ["artworks", "collectors", "certificates", "receipts"] {
             let csv = dir.path().join(format!("{kind}.csv"));
             export_file(&db, kind, &csv).unwrap();
             assert!(fs::read_to_string(&csv).unwrap().contains("created_at"));
