@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (quinta ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (sesta ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -14,13 +14,14 @@ Data ricognizione: **2026-11-21** (quinta ricognizione). Stato uniforme: **Propo
 | [REPS-TECH-006](REPS-TECH-006-backup-cifrati-portabili.md) | Backup cifrati facoltativi, con recupero su altri dispositivi e formato versionato | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-007](REPS-TECH-007-archivio-media-esterno-rilocalizzabile.md) | Archivio degli originali fotografici in cartella esterna opzionale, con migrazione verificata e backup sempre autosufficiente | P2 | Proposta — da valutare |
 | [REPS-TECH-008](REPS-TECH-008-viste-salvate-filtri-ricerca-locale.md) | Viste nominative, filtri combinati e ricerca strutturata nell'archivio attivo (non federazione) | P1–P2 | Proposta — da valutare |
+| [REPS-TECH-009](REPS-TECH-009-catalogo-verifiche-conservazione-backup.md) | Catalogo, verifica nel tempo e conservazione prudente delle copie di backup complete | P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
 Verificati sul branch `main` al **21 novembre 2026**: [README](../../../README.md), [MVP](../../MVP.md), [economia e localizzazione](../../ECONOMY-I18N.md), modelli dati e codice nativo di `db.rs`, `backup.rs`, `export.rs`, `commands.rs`.
 
 - **Già presente**: database locale SQLite, backup completo a cartella scelta con manifest e hash SHA-256, ispezione prima del ripristino e conservazione della copia precedente. Le schede non ripropongono questo sistema.
-- **Già presente**: cinque CSV unidirezionali per **opere, collezionisti, certificati, vendite e spese**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
+- **Già presente**: sei CSV unidirezionali per **opere, collezionisti, certificati, vendite, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
 - **Già pianificato**: [issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5) per migrazione assistita **da Gestionale Opere**; TECH-001 è indipendente dalla fonte, non realizza l'esportatore privato e propone prima importazione in archivio vuoto.
 - **Già pianificato**: [issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) per MCP **STDIO read-only**. TECH-002 non è un server MCP: descrive un eventuale sistema di regole **interne** all'app, attivato su esplicita autorizzazione.
 - **Già pianificato**: [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) per aggiornamenti firmati. Nessuna proposta li riguarda.
@@ -56,6 +57,15 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 - **Riscontro tecnico verificato:** `src/app/archive-filters.ts` combina testo libero, stato, collezionista e ordinamento **in memoria** su tutte le opere restituite da `list_artworks`; non offre viste persistenti, predicati tipizzati su campi/assenze o interrogazioni combinabili. `docs/MVP.md` menziona genericamente ricerche avanzate: questa scheda ne chiarisce la possibile UX, la privacy dei criteri salvati, il comportamento con dati incompleti e l'eventuale bisogno di ottimizzare query su archivi molto grandi.
 - **Garanzie:** i cinque CSV esistenti restano sempre esportazioni **integrali** e non filtrate, le viste non creano duplicati dei record e non sono da intendere come report storici immutabili. Nessun SQL arbitrario, cloud, account, server MCP o modifica all'altro filone.
 - **Convalide richieste:** esempi di query realmente ripetute, benchmark su archivi di varie dimensioni e selezione dei campi; priorità P1–P2 solo ipotetica, stato invariato **Proposta — da valutare**. Nessuna implementazione né merge.
+
+## Sesta ricognizione — 21 novembre 2026
+
+- **[REPS-TECH-009](REPS-TECH-009-catalogo-verifiche-conservazione-backup.md) — Catalogo, verifica e conservazione prudente dei backup:** studiata una vista in **sola lettura** delle copie presenti in una cartella scelta, con verifica integrale ripetibile, stato e data dell'ultimo controllo, stima spazio e anteprima delle decisioni di conservazione. Nessuna pulizia automatica o cancellazione nella prima fase.
+- **Riscontro su `main`:** `backup.rs` crea ogni volta nuove cartelle **autonome** con manifest v1 e supporta l'ispezione **di una singola copia**, ma non un catalogo delle copie. Il manifest non contiene un ID stabile dell'archivio di origine: è **impossibile garantire** che le copie presenti nella stessa destinazione appartengano allo stesso archivio solo dai nomi o dai contatori. Questa è una criticità specifica per le politiche di retention.
+- **Perimetro distinto:** non duplica la QA USB/NAS della [issue #7](https://github.com/Cesare-ml/Repertica-Studio/issues/7), la cifratura TECH-006, la ricerca federata TECH-004, la diagnostica dell'archivio attivo TECH-003 o le automazioni locali TECH-002. Non propone backup incrementali, deduplicazione o eliminazione automatica come caratteristiche approvate.
+- **Aggiornamento documentale su `main`:** [DATA-PORTABILITY](../../DATA-PORTABILITY.md) descrive ora **sei** CSV (aggiunti gli **incassi/receipts** ai cinque registri storici). Le menzioni a cinque CSV nelle ricognizioni precedenti vanno lette come stato storico, non come elenco corrente.
+- **Convalide e dipendenze:** raccogliere volumi realistici, filesystem e frequenza di backup; effettuare prima i collaudi nativi e su supporti esterni previsti dalla issue #7; verificare su Windows/macOS/Linux che la scansione non segua symlink e che non si cancellino file estranei. Priorità proposta P2, non confermata.
+- **Coordinamento:** confrontate le tredici schede UX-001…013 della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) e tutte le precedenti schede TECH-001…008. Nessun file dell'altro filone è stato modificato. Stato invariato: **Proposta — da valutare**; nessuna approvazione, commit software o merge.
 
 ## Regole per le prossime ricognizioni
 
