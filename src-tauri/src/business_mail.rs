@@ -9,12 +9,12 @@ use crate::db::Database;
 use chrono::Utc;
 use imap::Session;
 use keyring::Entry;
-use lettre::{Message, SmtpTransport, Transport, message::{Mailbox, header::ContentType},
+use lettre::{Message, SmtpTransport, Transport, message::{Mailbox, MultiPart, SinglePart, Attachment, header::ContentType},
     transport::smtp::authentication::Credentials};
 use mailparse::{MailHeaderMap, ParsedMail};
 use rusqlite::{params, OptionalExtension};
 use serde::{Serialize, Deserialize};
-use std::{collections::HashSet, net::TcpStream};
+use std::{collections::HashSet, fs, net::TcpStream, path::Path};
 use tauri::State;
 use uuid::Uuid;
 
@@ -388,7 +388,43 @@ fn recipients(value:&str)->Result<Vec<String>,String>{
 #[derive(Debug,Deserialize)]
 pub struct MailSendInput {
     pub account_id:String,pub to:String,pub cc:String,pub bcc:String,
-    pub subject:String,pub body:String,pub confirm:bool
+    pub subject:String,pub body:String,pub confirm:bool,
+    #[serde(default)] pub attachments:Vec<String>
+}
+fn load_outbound_attachments(paths:&[String])->Result<Vec<(String,Vec<u8>,ContentType)>,String>{
+    if paths.len()>5{return Err("Massimo cinque allegati per messaggio".into());}
+    let mut result=Vec::new();
+    let mut seen=HashSet::new();
+    let mut total=0u64;
+    for path in paths{
+        if !seen.insert(path){return Err("Allegati duplicati".into());}
+        let file=Path::new(path);
+        let meta=fs::symlink_metadata(file).map_err(|_|"Allegato non disponibile".to_string())?;
+        if !meta.file_type().is_file() || meta.file_type().is_symlink() || meta.len()==0 || meta.len()>5*1024*1024{
+            return Err("Allegato non valido: consentiti file ordinari fino a 5 MiB".into());
+        }
+        total+=meta.len();
+        if total>15*1024*1024{return Err("Allegati troppo grandi (limite 15 MiB)".into());}
+        let name=file.file_name().and_then(|s|s.to_str())
+            .ok_or_else(||"Nome allegato non valido".to_string())?.to_string();
+        if name.len()>180 || name.chars().any(|c|c.is_control() || ['/', '\','<','>'].contains(&c)){
+            return Err("Nome allegato non valido".into());
+        }
+        let bytes=fs::read(file).map_err(|_|"Allegato non leggibile".to_string())?;
+        if bytes.len() as u64 != meta.len(){return Err("Allegato modificato durante la lettura".into());}
+        let mime=match file.extension().and_then(|x|x.to_str()).unwrap_or("").to_ascii_lowercase().as_str(){
+            "jpg"|"jpeg"=>"image/jpeg",
+            "png"=>"image/png","webp"=>"image/webp","gif"=>"image/gif",
+            "pdf"=>"application/pdf","txt"=>"text/plain","csv"=>"text/csv",
+            "zip"=>"application/zip","docx"=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xlsx"=>"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pptx"=>"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            _=>"application/octet-stream"
+        };
+        let kind=mime.parse::<ContentType>().map_err(|_|"Tipo allegato non valido".to_string())?;
+        result.push((name,bytes,kind));
+    }
+    Ok(result)
 }
 #[derive(Debug,Serialize)]
 pub struct MailSendResult { pub delivery:String,pub sent_copy:String }
@@ -406,6 +442,8 @@ pub async fn mail_send(db:State<'_,Database>,input:MailSendInput)->Result<MailSe
     }
     let account=account_by_id(&db,&input.account_id)?;
     tauri::async_runtime::spawn_blocking(move|| {
+        // Perform all local file checks before connecting or submitting SMTP DATA.
+        let attachments=load_outbound_attachments(&input.attachments)?;
         let mailbox:Mailbox=if account.display_name.trim().is_empty(){account.email.parse()}
             else{format!("{} <{}>",account.display_name.replace(['<','>'], ""),account.email).parse()}
             .map_err(|_|"Mittente non valido".to_string())?;
@@ -414,7 +452,15 @@ pub async fn mail_send(db:State<'_,Database>,input:MailSendInput)->Result<MailSe
         for address in to {builder=builder.to(address.parse().map_err(|_|"Destinatario non valido".to_string())?);}
         for address in cc {builder=builder.cc(address.parse().map_err(|_|"Destinatario CC non valido".to_string())?);}
         for address in bcc {builder=builder.bcc(address.parse().map_err(|_|"Destinatario CCN non valido".to_string())?);}
-        let message=builder.body(input.body).map_err(|_|"Impossibile preparare il messaggio".to_string())?;
+        let message=if attachments.is_empty(){
+            builder.body(input.body)
+        }else{
+            let mut multipart=MultiPart::mixed().singlepart(SinglePart::plain(input.body));
+            for (name,bytes,content_type) in attachments {
+                multipart=multipart.singlepart(Attachment::new(name).body(bytes,content_type));
+            }
+            builder.multipart(multipart)
+        }.map_err(|_|"Impossibile preparare il messaggio".to_string())?;
         let password=read_key(&account.id,"smtp").or_else(|_|read_key(&account.id,"imap"))?;
         let creds=Credentials::new(account.smtp_username.clone(),password);
         // TLS certificate validation is mandatory; port 587 must STARTTLS or fail.
