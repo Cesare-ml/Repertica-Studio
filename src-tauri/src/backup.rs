@@ -396,7 +396,7 @@ mod tests {
         let destination = tmp.path().join("disk");
         fs::create_dir(&destination).unwrap();
         let backup = create_backup_core(&db, &destination).unwrap();
-        assert_eq!(backup.schema_version, 4);
+        assert_eq!(backup.schema_version, 5);
         assert_eq!(backup.files, 3);
         assert!(backup.verified);
 
@@ -424,7 +424,7 @@ mod tests {
         let destination=tmp.path().join("removable");
         fs::create_dir(&destination).unwrap();
         let backup=create_backup_core(&db,&destination).unwrap();
-        assert_eq!(backup.schema_version,4);
+        assert_eq!(backup.schema_version,5);
         assert!(backup.verified);
         {
             let conn=db.conn.lock().unwrap();
