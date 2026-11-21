@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (quarta ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (quinta ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -13,6 +13,7 @@ Data ricognizione: **2026-11-21** (quarta ricognizione). Stato uniforme: **Propo
 | [REPS-TECH-005](REPS-TECH-005-anteprime-media-grandi-archivi.md) | Anteprime derivate e cancellabili per raccolte fotografiche numerose | P2 | Proposta — da valutare |
 | [REPS-TECH-006](REPS-TECH-006-backup-cifrati-portabili.md) | Backup cifrati facoltativi, con recupero su altri dispositivi e formato versionato | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-007](REPS-TECH-007-archivio-media-esterno-rilocalizzabile.md) | Archivio degli originali fotografici in cartella esterna opzionale, con migrazione verificata e backup sempre autosufficiente | P2 | Proposta — da valutare |
+| [REPS-TECH-008](REPS-TECH-008-viste-salvate-filtri-ricerca-locale.md) | Viste nominative, filtri combinati e ricerca strutturata nell'archivio attivo (non federazione) | P1–P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -49,10 +50,17 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 - **Aggiornamento del riferimento a `main`:** la galleria di immagini aggiuntive della [PR #17](https://github.com/Cesare-ml/Repertica-Studio/pull/17) è stata effettivamente integrata; `gallery.rs` e lo schema SQLite fino a v4 ora sono presenti nel branch principale. La documentazione ideativa non deve confondere funzioni implementate con PR ancora aperte.
 - **Vincolo di sicurezza:** prima di approvare l'idea occorrono convalida dei casi d'uso, collaudo dei backup su USB/NAS ([issue #7](https://github.com/Cesare-ml/Repertica-Studio/issues/7)) e progettazione robusta della recovery di una migrazione cross-volume. Non sono stati modificati file operativi.
 
+## Quinta ricognizione — 21 novembre 2026
+
+- **[REPS-TECH-008](REPS-TECH-008-viste-salvate-filtri-ricerca-locale.md):** approfondite viste salvate e filtri strutturati per il **solo archivio attivo**, distinti da TECH-004 (ricerca federata nei backup), TECH-001 (interscambio), UX-007 (dossier) e dalle funzionalità già presenti su `main`.
+- **Riscontro tecnico verificato:** `src/app/archive-filters.ts` combina testo libero, stato, collezionista e ordinamento **in memoria** su tutte le opere restituite da `list_artworks`; non offre viste persistenti, predicati tipizzati su campi/assenze o interrogazioni combinabili. `docs/MVP.md` menziona genericamente ricerche avanzate: questa scheda ne chiarisce la possibile UX, la privacy dei criteri salvati, il comportamento con dati incompleti e l'eventuale bisogno di ottimizzare query su archivi molto grandi.
+- **Garanzie:** i cinque CSV esistenti restano sempre esportazioni **integrali** e non filtrate, le viste non creano duplicati dei record e non sono da intendere come report storici immutabili. Nessun SQL arbitrario, cloud, account, server MCP o modifica all'altro filone.
+- **Convalide richieste:** esempi di query realmente ripetute, benchmark su archivi di varie dimensioni e selezione dei campi; priorità P1–P2 solo ipotetica, stato invariato **Proposta — da valutare**. Nessuna implementazione né merge.
+
 ## Regole per le prossime ricognizioni
 
 1. Consultare `main`, issue e PR aperte; confrontare le schede di entrambi i filoni prima di aggiungerne altre. Se un problema è già risolto, aggiornare la scheda indicando il cambiamento, non produrre un doppione.
-2. Assegnare ID successivi `REPS-TECH-008`, `009`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
+2. Assegnare ID successivi `REPS-TECH-009`, `010`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
 3. Valutare sempre dati personali, assenza di lock-in, formati aperti, multilingua (lingua OS, fallback inglese), funzionamento offline-first, assenza di account o abbonamenti e scelta libera della cartella.
 4. Modificare **solo Markdown dentro questa cartella**, usando un branch e una PR esclusivamente documentali. Non toccare `docs/idee/gestione-e-ux/`; niente merge automatici, modifiche al codice, issue operative o assegnazioni implicite.
 5. Se emergono trade-off inconciliabili, registrarli come domanda al proprietario: non decidere in sua vece.
