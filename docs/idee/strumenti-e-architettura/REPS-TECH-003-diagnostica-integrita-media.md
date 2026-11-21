@@ -5,9 +5,15 @@
 - **Priorità proposta:** **P2**, dopo collaudo dei backup esistenti.
 - **Ambito:** salute e recuperabilità dei file dell'archivio **attivo**. Non è un nuovo backup, una nuova scheda di provenienza o gestione prestiti.
 
+## Aggiornamento della ricognizione — 21 novembre 2026
+
+**Parte della proposta è già presente in `main`, ma la scheda non è approvata né completata.** Il modulo [media_audit.rs](../../../src-tauri/src/media_audit.rs) e il comando Tauri `audit_artwork_media`, descritti anche in [MVP](../../MVP.md), realizzano un'analisi locale in **sola lettura** dei riferimenti alle foto principali e di galleria. Rilevano path non sicuri, file mancanti o non regolari, dimensioni fuori limite e intestazioni JPEG/PNG/WebP incongruenti; la UI mostra i primi 100 problemi, segnalando i restanti. È una diagnosi **di presenza e formato superficiale**, non prova crittografica o decodifica integrale.
+
+**Restano soltanto idee da valutare**: hash misurati all'acquisizione per confronti affidabili nel tempo, elenco prudente dei media senza riferimenti (non cancellabili automaticamente), correlazione con backup validi e recupero **selettivo** con staging e consenso, scansioni grandi con avanzamento/annullamento. Il testo originario qui sotto documenta la motivazione iniziale, ma qualunque affermazione che una diagnostica read-only di base sia assente è **superata**. Non duplicare il comando esistente in future proposte.
+
 ## Problema concreto e confini
 
-Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale e, dopo la [PR #17 integrata in `main`](https://github.com/Cesare-ml/Repertica-Studio/pull/17), fino a 20 fotografie aggiuntive (JPEG/PNG/WebP, massimo **12 MiB** ciascuna). Il codice del [backup](../../../src-tauri/src/backup.rs) già genera manifest SHA-256 e verifica consistenza dei file **nel backup**, oltre a integrità SQLite. Non risulta un pannello di **diagnostica preventiva dell'archivio attivo**, con elenco di file mancanti, file senza riferimenti e percorso di recupero assistito. Un fotografo o una galleria potrebbero scoprire troppo tardi che alcune immagini locali sono state rimosse accidentalmente.
+Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale e, dopo la [PR #17 integrata in `main`](https://github.com/Cesare-ml/Repertica-Studio/pull/17), fino a 20 fotografie aggiuntive (JPEG/PNG/WebP, massimo **12 MiB** ciascuna). Il codice del [backup](../../../src-tauri/src/backup.rs) già genera manifest SHA-256 e verifica consistenza dei file **nel backup**, oltre a integrità SQLite. La prima stesura non rilevava una diagnostica preventiva: il controllo read-only di presenza/intestazioni è stato successivamente integrato in **main** (vedere aggiornamento sopra), mentre ricerca di orfani e recupero assistito sono ancora ipotesi. Un fotografo o una galleria potrebbero scoprire troppo tardi che alcune immagini locali sono state rimosse accidentalmente.
 
 **Destinatari:** artisti con migliaia di opere, gallerie e archivi con media che occupano molto spazio o che migrano computer. **Non** riguarda la veridicità storica o legale dei documenti di provenienza (filone [UX-001, PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14)).
 
@@ -62,7 +68,7 @@ Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale e, dopo l
 
 ## Fasi eventuali (non approvate)
 
-1. **Diagnostica read-only** basata sullo schema presente, con report e categorie.
+1. **Diagnostica read-only:** il controllo di presenza/intestazioni è già presente su main; valutare solo estensioni non duplicate (orfani, progressi, annullamento, report), se realmente utili.
 2. **Hash alla nuova acquisizione**, policy di retrocompatibilità e dati di integrità distinti dagli hash dei backup.
 3. **Recupero guidato** da file selezionato o backup valido, con staging e nessuna modifica silenziosa.
 4. Solo dopo decisione: struttura multi-media, versioning e possibile deduplica non distruttiva.
