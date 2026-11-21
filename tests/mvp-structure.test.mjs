@@ -256,3 +256,14 @@ test('updates come from signed GitHub releases, are fixed in the program and nee
   assert.match(html, /installUpdate\(\)/);
   assert.match(html, /tr\('Cerca aggiornamenti'\)/);
 });
+
+test('the release build can load its styles under the strict CSP', () => {
+  const angular = JSON.parse(get('angular.json'));
+  const production = Object.values(angular.projects)[0].architect.build.configurations.production;
+  // The default "critical CSS" trick loads styles through an inline onload handler, which the CSP blocks.
+  assert.equal(production.optimization.styles.inlineCritical, false);
+  const conf = JSON.parse(get('src-tauri/tauri.conf.json'));
+  assert.deepEqual(conf.app.security.dangerousDisableAssetCspModification, ['style-src']);
+  assert.match(conf.app.security.csp, /script-src 'self';/);
+  assert.doesNotMatch(conf.app.security.csp, /script-src[^;]*unsafe-inline/);
+});
