@@ -208,3 +208,14 @@ td.money{color:#234f3c;font-weight:700;font-variant-numeric:tabular-nums}
  .certificate-sign{display:flex;justify-content:space-between;margin-top:25mm;font-size:11pt;gap:12mm}
  .certificate-page footer{border-top:1px solid #b6c2b5;padding-top:8mm;color:#728679;font-size:8pt}
 }
+
+.gallery-upload{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;padding:12px 0 22px}
+.gallery-upload .settings-input{flex:1;min-width:180px}
+.gallery-upload .settings-input input{width:100%}
+.gallery-upload .upload-btn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.gallery-upload .upload-btn.disabled{opacity:.55;cursor:not-allowed}
+.gallery-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:14px}
+.gallery-photo{border:1px solid #e1e8df;border-radius:11px;padding:12px;display:flex;flex-direction:column;gap:10px;min-height:170px}
+.gallery-photo img{width:100%;height:180px;object-fit:contain;border-radius:8px;background:#f5f7f4}
+.gallery-photo p{font-size:12px;color:#657768;overflow-wrap:anywhere;flex:1}
+.gallery-photo button{align-self:flex-start}
