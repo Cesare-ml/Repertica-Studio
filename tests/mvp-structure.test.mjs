@@ -251,7 +251,7 @@ test('updates come from signed GitHub releases, are fixed in the program and nee
   assert.doesNotMatch(JSON.stringify(conf.bundle), /createUpdaterArtifacts/, 'normal builds need no private key');
   assert.equal(JSON.parse(get('src-tauri/tauri.release.conf.json')).bundle.createUpdaterArtifacts, true);
   const workflow = get('.github/workflows/release.yml');
-  for (const name of ['TAURI_SIGNING_PRIVATE_KEY', 'REPERTICA_UPDATER_PUBLIC_KEY', 'includeUpdaterJson: true', 'config.plugins = { updater: { pubkey: key } }']) assert.ok(workflow.includes(name), name);
+  for (const name of ['TAURI_SIGNING_PRIVATE_KEY', 'REPERTICA_UPDATER_PUBLIC_KEY', 'includeUpdaterJson: true', 'normalize-updater-public-key.mjs --write', 'normalize-updater-public-key.mjs --check', 'workflow_dispatch:', 'tagName: ${{ needs.check.outputs.tag }}']) assert.ok(workflow.includes(name), name);
   const html = get('src/app/app.component.html');
   assert.match(html, /installUpdate\(\)/);
   assert.match(html, /tr\('Cerca aggiornamenti'\)/);
