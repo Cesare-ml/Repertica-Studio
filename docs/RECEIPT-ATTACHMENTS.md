@@ -24,6 +24,15 @@ incasso non può essere eliminato finché esiste un allegato collegato.
   il file residuo rimane incluso nei backup completi per evitare perdite silenziose.
 
 Le operazioni sono serializzate dal mutex del database, lo stesso del backup.
+La rimozione verifica **prima della modifica SQLite** che la directory `media/`
+non sia stata sostituita da un collegamento simbolico. Se un archivio importato
+o alterato riutilizza lo stesso file in un'opera, nella galleria, in un
+collezionista, nel catalogo immagini, nei RAW o in un certificato storico,
+scollega l'incasso ma **conserva il file condiviso**. I certificati non leggibili
+sono trattati in modo conservativo: non autorizzano cancellazioni di file.
+Restano possibili file orfani dopo un errore I/O di cancellazione, ma un errore
+viene mostrato e il backup li conserva.
+
 Se la copia del file riesce ma l'inserimento SQLite fallisce, il nuovo file
 viene rimosso. Nessun servizio remoto, account o libreria di upload cloud.
 
