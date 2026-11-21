@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (quattordicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (quindicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -27,6 +27,15 @@ Aggiornato: **2026-11-21** (quattordicesima ricognizione). Stato delle proposte:
 | [REPS-UX-019](REPS-UX-019-storico-esposizioni-bibliografia-documentata.md) | Storico delle esposizioni effettive e bibliografia documentata per opera, con fonti e incertezze | P2 | Proposta — da valutare |
 | [REPS-UX-020](REPS-UX-020-etichette-inventariali-identificativi-scansionabili.md) | Etichette inventariali stampabili e identificazione locale con codici scansionabili, senza azioni automatiche | P1–P2* | Proposta — da valutare |
 | [REPS-UX-021](REPS-UX-021-acquisizioni-opere-terzi-titolo-documentato.md) | Pratiche di acquisizione di opere da terzi: titolo dichiarato, fonti, acquisti e donazioni senza confondere custodia e pagamenti | P2 | Proposta — da valutare |
+| [REPS-UX-022](REPS-UX-022-opere-composte-componenti-fisici.md) | Opere composte: distinta dei componenti fisici di **una sola opera**, senza confonderli con opere autonome, edizioni o movimenti | P2 | Proposta — da valutare |
+
+## Quindicesima ricognizione (21 novembre 2026) — nuova proposta REPS-UX-022
+
+- **[REPS-UX-022 — Opere composte e distinta dei componenti fisici](REPS-UX-022-opere-composte-componenti-fisici.md):** una installazione o scultura multipartita può essere **un'unica opera** da vendere/certificare, ma contenere parti identificabili e separabili (pannelli, base, alimentatore, custodie). Si propone una distinta locale facoltativa con identificativi, quantità, note, ordine e checklist stampabile. Una parte *prevista* non viene dichiarata *presente* senza una verifica; nessuna riga diventa vendita, certificato o movimento.
+- **Riscontro su `main`:** SQLite v6 conserva le singole opere con `artworks.id/code`, vendita unica per opera, fotografie e certificati immutabili; non esiste una relazione strutturata tra opera e suoi **componenti fisici**. Sono stati verificati anche `docs/MVP.md`, `docs/ECONOMY-I18N.md` e i modelli TypeScript.
+- **Non duplicazione:** UX-005 tratta **esemplari di edizioni**; UX-011 collega **opere autonome** (inclusi dittici vendibili separatamente); UX-001 traccia **movimenti**; UX-015 registra **controlli di presenza**; UX-020 propone **etichette**. Questo studio definisce soltanto *ciò che compone una singola opera*. TECH-001/010/016, nella [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), restano strumenti trasversali indipendenti e i loro file non sono stati modificati.
+- **Riferimenti professionali:** [Collections Trust — Numbering](https://collectionstrust.org.uk/resource/numbering/) e [Cataloguing](https://collectionstrust.org.uk/resource/cataloguing-suggested-procedure/) distinguono oggetti, gruppi e parti identificabili. Sono riferimenti metodologici, non una certificazione di Repertica.
+- **Priorità:** P2 solo ipotetica, da verificare su casi reali di installazioni e depositi. **Stato: Proposta — da valutare.** Nessun codice, issue operativa, approvazione, incarico o merge.
 
 ## Cosa è stato verificato per evitare duplicati
 
