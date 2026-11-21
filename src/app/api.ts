@@ -22,6 +22,8 @@ export const api = {
     invoke<GalleryImage>('update_artwork_gallery_caption', { imageId, caption }),
   promoteArtworkGalleryImage: (artworkId: string, imageId: string) =>
     invoke<void>('promote_artwork_gallery_image', { artworkId, imageId }),
+  moveArtworkGalleryImage: (artworkId: string, imageId: string, direction: 'up' | 'down') =>
+    invoke<void>('move_artwork_gallery_image', { artworkId, imageId, direction }),
   artworkGalleryImageData: (imageId: string) => invoke<string>('artwork_gallery_image_data', { imageId }),
   deleteArtworkGalleryImage: (imageId: string) => invoke<void>('delete_artwork_gallery_image', { imageId }),
   listCollectors: () => invoke<Collector[]>('list_collectors'),

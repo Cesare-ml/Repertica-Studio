@@ -43,9 +43,15 @@ test('gallery IPC, schema v3 and backup consistency are wired', () => {
   assert.match(db, /CREATE TABLE IF NOT EXISTS artwork_images/);
   assert.match(db, /PRAGMA user_version=3/);
   assert.match(backup, /SELECT image_path FROM artwork_images/);
-  assert.match(backup, /1\.\.=4/);
+  assert.match(backup, /1\.\.=5/);
 });
 
+test('gallery sorting commands and schema v5 are available offline', () => {
+  assert.match(get('src-tauri/src/db.rs'), /PRAGMA user_version=5/);
+  assert.match(get('src-tauri/src/lib.rs'), /gallery::move_artwork_gallery_image/);
+  assert.match(get('src/app/api.ts'), /'move_artwork_gallery_image'/);
+  assert.match(get('src/app/app.component.html'), /moveGalleryPhoto/);
+});
 test('sale receipt v4 records are exposed through local typed IPC', () => {
   const schema=get('src-tauri/src/db.rs'),native=get('src-tauri/src/lib.rs'),api=get('src/app/api.ts');
   assert.match(schema, /CREATE TABLE sale_receipts/);

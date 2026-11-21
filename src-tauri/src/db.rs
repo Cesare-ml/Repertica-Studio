@@ -12,7 +12,7 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     let conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 4 {
+    if version > 5 {
         return Err(format!("Archivio creato da una versione più recente (schema {version})").into());
     }
     if version == 0 {
@@ -178,6 +178,25 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;"
         )?;
     }
+    if version < 5 {
+        // Legacy gallery order was created_at/id; preserve it per artwork.
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            ALTER TABLE artwork_images ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+            WITH ranked AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY artwork_id ORDER BY created_at, id
+                ) AS position FROM artwork_images
+            )
+            UPDATE artwork_images SET sort_order=(
+                SELECT position FROM ranked WHERE ranked.id=artwork_images.id
+            );
+            CREATE INDEX idx_artwork_images_position
+                ON artwork_images(artwork_id,sort_order,id);
+            PRAGMA user_version=5;
+            COMMIT;"
+        )?;
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -197,7 +216,7 @@ mod tests {
         {
             let c = db.conn.lock().unwrap();
             let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-            assert_eq!(v, 4);
+            assert_eq!(v, 5);
             c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('x','Test','a','a')",[]).unwrap();
         }
         drop(db);
@@ -262,7 +281,7 @@ mod tests {
         let migrated = open(dir.path().into()).unwrap();
         let c = migrated.conn.lock().unwrap();
         let v: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(v,4);
+        assert_eq!(v,5);
         let n: i64 = c.query_row("SELECT count(*) FROM sale_finances WHERE sale_id='s'",[],|r|r.get(0)).unwrap();
         assert_eq!(n,1);
     }
@@ -290,7 +309,7 @@ mod tests {
         let upgraded = open(temp.path().into()).unwrap();
         let conn = upgraded.conn.lock().unwrap();
         let version: i64 = conn.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(version,4);
+        assert_eq!(version,5);
         let image: String = conn.query_row("SELECT image_path FROM artworks WHERE id='a'",[],|r|r.get(0)).unwrap();
         assert_eq!(image,"media/primary.jpg");
         assert!(conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
@@ -302,10 +321,44 @@ mod tests {
         assert_eq!(count,0);
     }
     #[test]
+    fn gallery_order_migration_preserves_legacy_chronology_and_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = open(temp.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            for id in ["a","b"] {
+                c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES(?1,?1,?1,'t','t')", rusqlite::params![id]).unwrap();
+            }
+            for (id, art, created) in [("z","a","2026-01-02"),("a1","a","2026-01-02"),
+                ("m","a","2026-01-01"),("other","b","2026-01-02")] {
+                c.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                    VALUES(?1,?2,?3,?4)",
+                    rusqlite::params![id,art,format!("media/{id}.png"),created]).unwrap();
+            }
+            c.execute_batch("DROP INDEX idx_artwork_images_position;
+                ALTER TABLE artwork_images DROP COLUMN sort_order;
+                PRAGMA user_version=4;").unwrap();
+        }
+        drop(db);
+        let upgraded = open(temp.path().into()).unwrap();
+        let c = upgraded.conn.lock().unwrap();
+        let mut stmt = c.prepare("SELECT id,sort_order,image_path FROM artwork_images
+            WHERE artwork_id='a' ORDER BY sort_order,id").unwrap();
+        let actual: Vec<(String,i64,String)> = stmt.query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))
+            .unwrap().map(Result::unwrap).collect();
+        assert_eq!(actual, vec![
+            ("m".into(),1,"media/m.png".into()),("a1".into(),2,"media/a1.png".into()),
+            ("z".into(),3,"media/z.png".into())]);
+        assert_eq!(c.query_row("SELECT sort_order FROM artwork_images WHERE id='other'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        let version: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
+        assert_eq!(version,5);
+    }
+    #[test]
     fn newer_schema_is_not_downgraded() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
-        db.conn.lock().unwrap().pragma_update(None, "user_version", 5).unwrap();
+        db.conn.lock().unwrap().pragma_update(None, "user_version", 6).unwrap();
         drop(db);
         assert!(open(dir.path().into()).is_err());
     }

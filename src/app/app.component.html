@@ -328,7 +328,7 @@
         <input type="file" accept="image/jpeg,image/png,image/webp" (change)="addGalleryPhoto($event)" [disabled]="busy || galleryImages.length >= 20" hidden></label>
     </div>
     <div class="gallery-grid" *ngIf="galleryImages.length; else emptyGallery">
-      <div class="gallery-photo" *ngFor="let img of galleryImages">
+      <div class="gallery-photo" *ngFor="let img of galleryImages; let i = index">
         <img *ngIf="galleryPreviews[img.id]" [src]="galleryPreviews[img.id]" [alt]="img.caption || galleryArtwork.title">
         <button class="secondary" type="button" *ngIf="!galleryPreviews[img.id]" (click)="loadGalleryPreview(img)">{{ tr('Visualizza foto') }}</button>
         <div class="gallery-caption-edit" *ngIf="editingGalleryCaptionId === img.id; else readGalleryCaption">
@@ -343,6 +343,10 @@
           <p>{{ img.caption || tr('Senza didascalia') }}</p>
           <button class="small secondary" type="button" [disabled]="busy" (click)="startGalleryCaptionEdit(img)">{{ tr('Modifica') }}</button>
         </ng-template>
+        <div class="gallery-caption-actions" role="group" [attr.aria-label]="tr('Ordina fotografie')">
+          <button class="small secondary" type="button" [disabled]="busy || i === 0" (click)="moveGalleryPhoto(img, 'up')">{{ tr('Sposta prima') }}</button>
+          <button class="small secondary" type="button" [disabled]="busy || i === galleryImages.length - 1" (click)="moveGalleryPhoto(img, 'down')">{{ tr('Sposta dopo') }}</button>
+        </div>
         <button class="small secondary" type="button" [disabled]="busy" (click)="makeGalleryPrimary(img)">{{ tr('Imposta come principale') }}</button>
         <button class="small danger-text" type="button" [disabled]="busy" (click)="removeGalleryPhoto(img)">{{ tr('Elimina') }}</button>
       </div>

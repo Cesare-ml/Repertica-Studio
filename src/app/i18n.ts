@@ -5,6 +5,10 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  'Sposta prima': 'Move earlier',
+  'Sposta dopo': 'Move later',
+  'Ordine fotografie aggiornato': 'Photo order updated',
+  'Ordina fotografie': 'Arrange photos',
   "La foto principale e le fotografie aggiuntive restano nel tuo archivio locale e nei backup. Puoi scegliere una foto aggiuntiva come nuova copertina.": "The primary and supplementary photos remain in your local archive and backups. You can choose an additional photo as the new cover.",
   "Imposta come principale": "Set as primary",
   "Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.": "Set this as the primary photo? The previous one, if any, will remain in the gallery. The selected photo's caption will not be transferred.",
@@ -222,6 +226,10 @@ const EN: Record<string,string> = {
   'Registrato il':'Recorded on','Nessun dato per questo anno':'No data for this year'
 };
 const ES:Record<string,string> = {
+  'Sposta prima': 'Mover antes',
+  'Sposta dopo': 'Mover después',
+  'Ordine fotografie aggiornato': 'Orden de fotos actualizado',
+  'Ordina fotografie': 'Ordenar fotos',
   "La foto principale e le fotografie aggiuntive restano nel tuo archivio locale e nei backup. Puoi scegliere una foto aggiuntiva come nuova copertina.": "La foto principal y las adicionales permanecen en tu archivo local y copias de seguridad. Puedes elegir una foto adicional como portada.",
   "Imposta come principale": "Establecer como principal",
   "Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.": "¿Usar esta foto como principal? La anterior, si existe, permanecerá en la galería. La leyenda de la foto elegida no se transferirá.",
@@ -274,6 +282,10 @@ const ES:Record<string,string> = {
  'Importo (€) *':'Importe (€) *','Importo spesa (€)':'Importe del gasto (€)'
 };
 const FR:Record<string,string> = {
+  'Sposta prima': 'Déplacer avant',
+  'Sposta dopo': 'Déplacer après',
+  'Ordine fotografie aggiornato': 'Ordre des photos mis à jour',
+  'Ordina fotografie': 'Classer les photos',
   "La foto principale e le fotografie aggiuntive restano nel tuo archivio locale e nei backup. Puoi scegliere una foto aggiuntiva come nuova copertina.": "La photo principale et les photos supplémentaires restent dans vos archives locales et sauvegardes. Vous pouvez choisir une autre photo comme couverture.",
   "Imposta come principale": "Définir comme principale",
   "Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.": "Définir cette photo comme principale ? L’ancienne restera dans la galerie si elle existe. La légende de la photo choisie ne sera pas transférée.",
@@ -328,6 +340,10 @@ const FR:Record<string,string> = {
  'Importo (€) *':'Montant (€) *','Importo spesa (€)':'Montant de la dépense (€)'
 };
 const DE:Record<string,string> = {
+  'Sposta prima': 'Nach vorne',
+  'Sposta dopo': 'Nach hinten',
+  'Ordine fotografie aggiornato': 'Fotoreihenfolge aktualisiert',
+  'Ordina fotografie': 'Fotos sortieren',
   "La foto principale e le fotografie aggiuntive restano nel tuo archivio locale e nei backup. Puoi scegliere una foto aggiuntiva come nuova copertina.": "Das Hauptfoto und zusätzliche Fotos bleiben im lokalen Archiv und in Sicherungen. Sie können ein weiteres Foto als Titelbild wählen.",
   "Imposta come principale": "Als Hauptfoto festlegen",
   "Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.": "Dieses Foto als Hauptfoto festlegen? Das bisherige bleibt, falls vorhanden, in der Galerie. Die Bildunterschrift des gewählten Fotos wird nicht übernommen.",
