@@ -9,6 +9,8 @@ const EN: Record<string,string> = {
   'Fotografie dell’opera': 'Artwork photographs',
   'La foto principale resta nell’archivio. Qui puoi aggiungere fino a 20 fotografie complementari, tutte conservate localmente e nei backup.': 'The primary photo remains in the archive. Add up to 20 supplementary photos, stored locally and included in backups.',
   'Didascalia facoltativa': 'Optional caption',
+  'Salva didascalia': 'Save caption',
+  'Didascalia aggiornata': 'Caption updated',
   'Aggiungi fotografia': 'Add photo',
   'Visualizza foto': 'View photo',
   'Senza didascalia': 'No caption',
@@ -196,6 +198,7 @@ const EN: Record<string,string> = {
   'Registrato il':'Recorded on','Nessun dato per questo anno':'No data for this year'
 };
 const ES:Record<string,string> = {
+  'Salva didascalia':'Guardar leyenda','Didascalia aggiornata':'Leyenda actualizada',
   'Esporta opere CSV':'Exportar obras CSV','Esporta collezionisti CSV':'Exportar coleccionistas CSV',
   'Esporta certificati CSV':'Exportar certificados CSV',
   'Registro opere esportato in CSV locale.':'Registro de obras exportado a CSV local.',
@@ -223,6 +226,7 @@ const ES:Record<string,string> = {
  'Importo (€) *':'Importe (€) *','Importo spesa (€)':'Importe del gasto (€)'
 };
 const FR:Record<string,string> = {
+  'Salva didascalia':'Enregistrer la légende','Didascalia aggiornata':'Légende mise à jour',
   'Esporta opere CSV':'Exporter les œuvres en CSV','Esporta collezionisti CSV':'Exporter les collectionneurs en CSV',
   'Esporta certificati CSV':'Exporter les certificats en CSV',
   'Registro opere esportato in CSV locale.':'Registre des œuvres exporté en CSV local.',
@@ -252,6 +256,7 @@ const FR:Record<string,string> = {
  'Importo (€) *':'Montant (€) *','Importo spesa (€)':'Montant de la dépense (€)'
 };
 const DE:Record<string,string> = {
+  'Salva didascalia':'Bildunterschrift speichern','Didascalia aggiornata':'Bildunterschrift aktualisiert',
   'Esporta opere CSV':'Werke als CSV exportieren','Esporta collezionisti CSV':'Sammler als CSV exportieren',
   'Esporta certificati CSV':'Zertifikate als CSV exportieren',
   'Registro opere esportato in CSV locale.':'Werkregister lokal als CSV exportiert.',

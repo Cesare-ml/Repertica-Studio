@@ -327,7 +327,18 @@
       <div class="gallery-photo" *ngFor="let img of galleryImages">
         <img *ngIf="galleryPreviews[img.id]" [src]="galleryPreviews[img.id]" [alt]="img.caption || galleryArtwork.title">
         <button class="secondary" type="button" *ngIf="!galleryPreviews[img.id]" (click)="loadGalleryPreview(img)">{{ tr('Visualizza foto') }}</button>
-        <p>{{ img.caption || tr('Senza didascalia') }}</p>
+        <div class="gallery-caption-edit" *ngIf="editingGalleryCaptionId === img.id; else readGalleryCaption">
+          <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span>
+            <input [(ngModel)]="editingGalleryCaption" maxlength="300" [disabled]="busy"></label>
+          <div class="gallery-caption-actions">
+            <button class="small primary" type="button" [disabled]="busy" (click)="saveGalleryCaption(img)">{{ tr('Salva didascalia') }}</button>
+            <button class="small secondary" type="button" [disabled]="busy" (click)="cancelGalleryCaptionEdit()">{{ tr('Annulla') }}</button>
+          </div>
+        </div>
+        <ng-template #readGalleryCaption>
+          <p>{{ img.caption || tr('Senza didascalia') }}</p>
+          <button class="small secondary" type="button" [disabled]="busy" (click)="startGalleryCaptionEdit(img)">{{ tr('Modifica') }}</button>
+        </ng-template>
         <button class="small danger-text" type="button" [disabled]="busy" (click)="removeGalleryPhoto(img)">{{ tr('Elimina') }}</button>
       </div>
     </div>
