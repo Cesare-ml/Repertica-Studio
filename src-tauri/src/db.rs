@@ -235,6 +235,12 @@ mod tests {
         assert!(c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s2','a','c',15000,'2026-11-21','now')",[]).is_err());
         assert!(c.execute("DELETE FROM collectors WHERE id='c'",[]).is_err());
     }
+    fn drop_receipts_for_old_schema_test(c: &Connection) {
+        c.execute_batch("DROP TRIGGER sale_receipts_limit_insert;
+            DROP TRIGGER sale_receipts_limit_update;
+            DROP TRIGGER sales_no_shrink_below_receipts;
+            DROP TABLE sale_receipts;").unwrap();
+    }
     #[test]
     fn finance_migration_preserves_old_sales() {
         let dir = tempfile::tempdir().unwrap();
@@ -248,6 +254,8 @@ mod tests {
             c.execute("DROP TABLE sale_finances",[]).unwrap();
             c.execute("DROP TABLE expenses",[]).unwrap();
             c.execute("DROP TABLE studio_settings",[]).unwrap();
+            c.execute("DROP TABLE artwork_images",[]).unwrap();
+            drop_receipts_for_old_schema_test(&c);
             c.pragma_update(None,"user_version",1).unwrap();
         }
         drop(db);
@@ -275,6 +283,7 @@ mod tests {
             conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
                 VALUES('a','A','Original','media/primary.jpg','t','t')", []).unwrap();
             conn.execute("DROP TABLE artwork_images",[]).unwrap();
+            drop_receipts_for_old_schema_test(&conn);
             conn.pragma_update(None,"user_version",2).unwrap();
         }
         drop(db);

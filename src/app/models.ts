@@ -86,3 +86,13 @@ export interface FinanceOverview {
   expense_cents:number; margin_cents:number; personal_cents:number;
   activity_balance_cents:number; savings_balance_cents:number;
 }
+
+export type SaleReceiptMethod = 'bank_transfer' | 'cash' | 'card' | 'other';
+export interface SaleReceipt {
+  id: string; sale_id: string; received_at: string; amount_cents: number;
+  method: SaleReceiptMethod; reference: string | null; notes: string | null; created_at: string;
+}
+export type SaleReceiptInput = Pick<SaleReceipt, 'sale_id' | 'received_at' | 'amount_cents' | 'method' | 'reference' | 'notes'>;
+export interface SaleBalance {
+  sale_id: string; sale_cents: number; received_cents: number; outstanding_cents: number;
+}

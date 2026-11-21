@@ -2,7 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
-  StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage
+  StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
+  SaleReceipt, SaleReceiptInput, SaleBalance
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -27,6 +28,10 @@ export const api = {
   listSales: () => invoke<Sale[]>('list_sales'),
   recordSale: (input: SaleInput) => invoke<void>('record_sale', { input }),
   deleteSale: (id: string) => invoke<void>('delete_sale', { id }),
+  listSaleReceipts: () => invoke<SaleReceipt[]>('list_sale_receipts'),
+  listSaleBalances: () => invoke<SaleBalance[]>('list_sale_balances'),
+  recordSaleReceipt: (input: SaleReceiptInput) => invoke<SaleReceipt>('record_sale_receipt', {input}),
+  deleteSaleReceipt: (id: string) => invoke<void>('delete_sale_receipt', {id}),
   listCertificates: () => invoke<Certificate[]>('list_certificates'),
   issueCertificate: (input: CertificateInput) => invoke<Certificate>('issue_certificate', { input }),
   overview: () => invoke<Overview>('overview'),
