@@ -239,6 +239,22 @@
       <div class="panel settings-panel"><h3>{{ tr('Percorso dei tuoi dati') }}</h3><p>{{ tr('Database SQLite e immagini sono conservati nella cartella locale dell\'applicazione.') }}</p>
         <code class="path">{{ dataPath || 'Percorso disponibile solo nell’app Tauri' }}</code>
 
+        <div class="backup-block">
+          <h3>{{ tr('Diagnostica fotografie dell’archivio') }}</h3>
+          <p>{{ tr('Verifica in sola lettura percorsi, presenza e intestazione delle immagini JPEG, PNG e WebP. Non modifica file e non confronta hash storici.') }}</p>
+          <button type="button" class="secondary" (click)="verifyArtworkMedia()" [disabled]="busy || !initialized">{{ tr('Verifica fotografie') }}</button>
+          <div *ngIf="mediaAudit as audit" class="backup-result" role="status" aria-live="polite">
+            <strong>{{ tr('Riferimenti controllati') }}: {{ audit.checked }} · {{ tr('Fotografie leggibili') }}: {{ audit.healthy }} · {{ tr('Problemi rilevati') }}: {{ audit.problems }}</strong>
+            <p *ngIf="audit.problems === 0">{{ tr('Nessun problema rilevato nel controllo locale.') }}</p>
+            <ul *ngIf="audit.issues.length">
+              <li *ngFor="let issue of audit.issues">
+                <strong>{{ mediaArtworkLabel(issue.artworkId) }}</strong> · {{ tr(issue.role === 'primary' ? 'Copertina' : 'Galleria') }} ·
+                <code>{{ issue.path }}</code> — {{ mediaProblemLabel(issue.problem) }}
+              </li>
+            </ul>
+            <p *ngIf="audit.truncated">{{ tr('Sono visualizzati soltanto i primi 100 problemi.') }}</p>
+          </div>
+        </div>
         <div class="backup-block economy-settings">
           <h3>{{ tr('Lingua dell’app') }}</h3><p>{{ tr('La lingua iniziale segue quella del sistema operativo. Se non disponibile, Repertica usa l\'inglese.') }}</p>
           <label class="settings-input"><span>{{ tr('Lingua dell’app') }}</span>
