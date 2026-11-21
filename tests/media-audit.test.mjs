@@ -64,5 +64,7 @@ test('RAW integrity audit is streamed, read-only and explained in the desktop in
   assert.match(html, /File verificati/);
   assert.equal((translations.match(/"File verificati":/g) || []).length, 4);
   assert.equal((translations.match(/"Allegato RAW":/g) || []).length, 4);
+  assert.equal((translations.match(/"Metadati dell’allegato RAW non validi":/g) || []).length, 4);
+  assert.equal((translations.match(/"Integrità RAW compromessa \\(SHA-256 differente\\)":/g) || []).length, 4);
   assert.equal((translations.match(/"Per i file RAW controlla anche dimensione e SHA-256, senza modificare gli allegati\.":/g) || []).length, 4);
 });
