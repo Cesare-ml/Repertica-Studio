@@ -6,6 +6,20 @@
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
   'IL TUO STUDIO': 'YOUR STUDIO',
+  'Ricavi, spese e ripartizioni — tutte le informazioni sono conservate soltanto in locale.':'Revenue, expenses and allocations — everything stays on your computer.',
+  'Vendite al netto di tasse e spedizioni':'Sales less recorded taxes and shipping',
+  'Netto vendite meno spese':'Net sales minus expenses',
+  'Ricavi mensili e spese mensili, in euro':'Monthly sales and expenses, in euros',
+  'Distribuzione dei ricavi netti e spese assegnate ai fondi':'Allocation of net sales and fund expenses',
+  'Materiali, imballaggi, attrezzatura, servizi e altri acquisti dello studio.':'Supplies, packing, equipment, services and other studio purchases.',
+  "La lingua iniziale segue quella del sistema operativo. Se non disponibile, Repertica usa l'inglese.":'The default language follows your operating system. English is used when unavailable.',
+  'Il coefficiente artista è il moltiplicatore del metodo superficie già usato nel Gestionale Opere.':'Artist coefficient is the area-pricing multiplier used by the original artwork manager.',
+  'Metodo superficie: larghezza × altezza × tariffa per cm² × coefficiente. Il prezzo suggerito non modifica il prezzo storico delle vendite.':'Area method: width × height × price per cm² × coefficient. Suggested prices never alter historical sales.',
+  'Distribuzione dei ricavi netti. Le percentuali sono fissate al momento della vendita.':'Allocation of net sales. Share percentages are frozen on each sale.',
+  '— Deve essere 100%':'— Must equal 100%',
+  'Prezzo indicativo:':'Suggested price:',
+  'Materiali o servizio acquistato':'Purchased supplies or service',
+
   'Archivio sul tuo computer':'Archive on this computer',
   'Gratuito · Open source':'Free · Open source',
   'REPERTICA STUDIO / ARCHIVIO PERSONALE':'REPERTICA STUDIO / PERSONAL ARCHIVE',
