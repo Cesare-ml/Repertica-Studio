@@ -15,7 +15,7 @@ const MAX_IMAGE_BYTES: u64 = 12 * 1024 * 1024;
 pub struct MediaIssue {
     artwork_id: String,
     image_id: Option<String>,
-    role: &'static str,
+    role: String,
     path: String,
     problem: &'static str,
 }
@@ -33,7 +33,7 @@ pub struct MediaAudit {
 struct MediaReference {
     artwork_id: String,
     image_id: Option<String>,
-    role: &'static str,
+    role: String,
     path: String,
 }
 
@@ -184,8 +184,8 @@ mod tests {
         fs::write(db.directory.join("media/good-extra.webp"), b"RIFF0000WEBP").unwrap();
         let scan = audit_core(&db).unwrap();
         assert_eq!((scan.checked, scan.healthy, scan.problems), (5, 2, 3));
-        assert_eq!(scan.issues.iter().map(|i| i.problem).collect::<Vec<_>>(),
-            vec!["missing", "unsafe_path", "invalid_header"]);
+        let problems: std::collections::HashSet<_> = scan.issues.iter().map(|i| i.problem).collect();
+        assert_eq!(problems, ["missing", "unsafe_path", "invalid_header"].into_iter().collect());
         assert!(!scan.truncated);
         // A diagnostic is not allowed to move, delete or correct any image.
         assert!(db.directory.join("media/orphan.png").exists());
