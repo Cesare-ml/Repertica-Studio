@@ -74,15 +74,23 @@ fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, Stri
     let conn = db.conn.lock().map_err(err)?;
     let editing = input.id.is_some();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let existing: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
-    if editing && !existing { return Err("Opera da modificare non trovata".into()); }
+    let stored_version: Option<String> = conn.query_row(
+        "SELECT updated_at FROM artworks WHERE id=?1", params![id], |r| r.get(0)
+    ).optional().map_err(err)?;
+    if editing && stored_version.is_none() { return Err("Opera da modificare non trovata".into()); }
+    if editing && input.expected_updated_at.as_deref() != stored_version.as_deref() {
+        return Err("Conflitto: l'opera è cambiata dopo l'apertura della scheda. Chiudi e riapri la modifica per vedere i dati aggiornati.".into());
+    }
+    if !editing && stored_version.is_some() { return Err("Identificativo opera già utilizzato".into()); }
+    let existing = stored_version.is_some();
     let sale_exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE artwork_id=?1)",params![id],|r|r.get(0)).map_err(err)?;
     if input.status == "sold" && !sale_exists { return Err("Registra una vendita per indicare l'opera come venduta".into()); }
     if input.status != "sold" && sale_exists { return Err("L'opera ha una vendita registrata e deve restare venduta".into()); }
     let stamp = now();
     if existing {
-        conn.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13 WHERE id=?1",
-            params![id,code,title,year,technique,support,width,height,depth,description,location,input.status,stamp]).map_err(err)?;
+        let affected = conn.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13 WHERE id=?1 AND updated_at=?14",
+            params![id,code,title,year,technique,support,width,height,depth,description,location,input.status,stamp,input.expected_updated_at]).map_err(err)?;
+        if affected != 1 { return Err("Conflitto: l'opera è stata modificata durante il salvataggio".into()); }
     } else {
         conn.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13)",
@@ -134,11 +142,19 @@ fn save_collector_core(db: &Database, input: CollectorInput) -> Result<Collector
     let editing = input.id.is_some();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let stamp = now();
-    let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
-    if editing && !exists { return Err("Collezionista da modificare non trovato".into()); }
+    let stored_version: Option<String> = conn.query_row(
+        "SELECT updated_at FROM collectors WHERE id=?1", params![id], |r| r.get(0)
+    ).optional().map_err(err)?;
+    if editing && stored_version.is_none() { return Err("Collezionista da modificare non trovato".into()); }
+    if editing && input.expected_updated_at.as_deref() != stored_version.as_deref() {
+        return Err("Conflitto: il collezionista è cambiato dopo l'apertura della scheda. Chiudi e riapri la modifica per vedere i dati aggiornati.".into());
+    }
+    if !editing && stored_version.is_some() { return Err("Identificativo collezionista già utilizzato".into()); }
+    let exists = stored_version.is_some();
     if exists {
-        conn.execute("UPDATE collectors SET name=?2,email=?3,phone=?4,address=?5,notes=?6,updated_at=?7 WHERE id=?1",
-            params![id,name,email,phone,address,notes,stamp]).map_err(err)?;
+        let affected = conn.execute("UPDATE collectors SET name=?2,email=?3,phone=?4,address=?5,notes=?6,updated_at=?7 WHERE id=?1 AND updated_at=?8",
+            params![id,name,email,phone,address,notes,stamp,input.expected_updated_at]).map_err(err)?;
+        if affected != 1 { return Err("Conflitto: il collezionista è stato modificato durante il salvataggio".into()); }
     } else {
         conn.execute("INSERT INTO collectors(id,name,email,phone,address,notes,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)",
             params![id,name,email,phone,address,notes,stamp]).map_err(err)?;
@@ -409,18 +425,18 @@ mod tests {
         assert!(db.directory.join(original).is_file());
     }
 
-    fn artwork_edit_input(id: Option<String>, title: &str) -> ArtworkInput {
+    fn artwork_edit_input(id: Option<String>, title: &str, expected_updated_at: Option<String>) -> ArtworkInput {
         ArtworkInput {
-            id, code: "WORK-STALE-01".into(), title: title.into(), year: None,
+            id, expected_updated_at, code: "WORK-STALE-01".into(), title: title.into(), year: None,
             technique: None, support: None, width_cm: None, height_cm: None,
             depth_cm: None, description: None, location: None,
             status: "available".into(),
         }
     }
 
-    fn collector_edit_input(id: Option<String>, name: &str) -> CollectorInput {
+    fn collector_edit_input(id: Option<String>, name: &str, expected_updated_at: Option<String>) -> CollectorInput {
         CollectorInput {
-            id, name: name.into(), email: None, phone: None,
+            id, expected_updated_at, name: name.into(), email: None, phone: None,
             address: None, notes: None,
         }
     }
@@ -429,15 +445,15 @@ mod tests {
     fn artwork_edit_never_recreates_a_deleted_record() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().to_path_buf()).unwrap();
-        let created = save_artwork_core(&db, artwork_edit_input(None, "Original")).unwrap();
+        let created = save_artwork_core(&db, artwork_edit_input(None, "Original", None)).unwrap();
         let changed = save_artwork_core(&db,
-            artwork_edit_input(Some(created.id.clone()), "Edited")).unwrap();
+            artwork_edit_input(Some(created.id.clone()), "Edited", Some(created.updated_at.clone()))).unwrap();
         assert_eq!(changed.id, created.id);
         assert_eq!(changed.title, "Edited");
         db.conn.lock().unwrap().execute("DELETE FROM artworks WHERE id=?1",
             params![created.id]).unwrap();
         let error = save_artwork_core(&db,
-            artwork_edit_input(Some(created.id.clone()), "Resurrected")).unwrap_err();
+            artwork_edit_input(Some(created.id.clone()), "Resurrected", Some(changed.updated_at.clone()))).unwrap_err();
         assert!(error.contains("non trovata"));
         let count: i64 = db.conn.lock().unwrap().query_row(
             "SELECT count(*) FROM artworks", [], |row| row.get(0)).unwrap();
@@ -448,18 +464,63 @@ mod tests {
     fn collector_edit_never_recreates_a_deleted_record() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().to_path_buf()).unwrap();
-        let created = save_collector_core(&db, collector_edit_input(None, "Original")).unwrap();
+        let created = save_collector_core(&db, collector_edit_input(None, "Original", None)).unwrap();
         let changed = save_collector_core(&db,
-            collector_edit_input(Some(created.id.clone()), "Edited")).unwrap();
+            collector_edit_input(Some(created.id.clone()), "Edited", Some(created.updated_at.clone()))).unwrap();
         assert_eq!(changed.id, created.id);
         assert_eq!(changed.name, "Edited");
         db.conn.lock().unwrap().execute("DELETE FROM collectors WHERE id=?1",
             params![created.id]).unwrap();
         let error = save_collector_core(&db,
-            collector_edit_input(Some(created.id.clone()), "Resurrected")).unwrap_err();
+            collector_edit_input(Some(created.id.clone()), "Resurrected", Some(changed.updated_at.clone()))).unwrap_err();
         assert!(error.contains("non trovato"));
         let count: i64 = db.conn.lock().unwrap().query_row(
             "SELECT count(*) FROM collectors", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0, "a stale editor must not silently insert a collector");
+    }
+
+    #[test]
+    fn artwork_rejects_stale_and_unversioned_edits_without_lost_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let created = save_artwork_core(&db, artwork_edit_input(None, "Original", None)).unwrap();
+        db.conn.lock().unwrap().execute(
+            "UPDATE artworks SET title='Changed elsewhere',updated_at='revision-2' WHERE id=?1",
+            params![created.id],
+        ).unwrap();
+        for version in [Some(created.updated_at.clone()), None] {
+            let result = save_artwork_core(&db,
+                artwork_edit_input(Some(created.id.clone()), "Stale overwrite", version));
+            assert!(result.unwrap_err().contains("Conflitto"));
+        }
+        let current = {
+            let conn = db.conn.lock().unwrap();
+            artwork_by_id(&conn, &created.id).unwrap()
+        };
+        assert_eq!(current.title, "Changed elsewhere");
+        let saved = save_artwork_core(&db,
+            artwork_edit_input(Some(created.id.clone()), "Correct revision", Some("revision-2".into()))).unwrap();
+        assert_eq!(saved.title, "Correct revision");
+        assert_eq!(saved.id, created.id);
+    }
+
+    #[test]
+    fn collector_rejects_stale_and_unversioned_edits_without_lost_updates() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let created = save_collector_core(&db, collector_edit_input(None, "Original", None)).unwrap();
+        db.conn.lock().unwrap().execute(
+            "UPDATE collectors SET name='Changed elsewhere',updated_at='revision-2' WHERE id=?1",
+            params![created.id],
+        ).unwrap();
+        for version in [Some(created.updated_at.clone()), None] {
+            let result = save_collector_core(&db,
+                collector_edit_input(Some(created.id.clone()), "Stale overwrite", version));
+            assert!(result.unwrap_err().contains("Conflitto"));
+        }
+        let saved = save_collector_core(&db,
+            collector_edit_input(Some(created.id.clone()), "Correct revision", Some("revision-2".into()))).unwrap();
+        assert_eq!(saved.name, "Correct revision");
+        assert_eq!(saved.id, created.id);
     }
 }

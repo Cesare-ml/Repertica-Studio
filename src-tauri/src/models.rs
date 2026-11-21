@@ -10,7 +10,8 @@ pub struct Artwork {
 }
 #[derive(Debug, Deserialize)]
 pub struct ArtworkInput {
-    pub id: Option<String>, pub code: String, pub title: String,
+    pub id: Option<String>, #[serde(default)] pub expected_updated_at: Option<String>,
+    pub code: String, pub title: String,
     pub year: Option<String>, pub technique: Option<String>, pub support: Option<String>,
     pub width_cm: Option<f64>, pub height_cm: Option<f64>, pub depth_cm: Option<f64>,
     pub description: Option<String>, pub location: Option<String>, pub status: String,
@@ -22,7 +23,8 @@ pub struct Collector {
 }
 #[derive(Debug, Deserialize)]
 pub struct CollectorInput {
-    pub id: Option<String>, pub name: String, pub email: Option<String>,
+    pub id: Option<String>, #[serde(default)] pub expected_updated_at: Option<String>,
+    pub name: String, pub email: Option<String>,
     pub phone: Option<String>, pub address: Option<String>, pub notes: Option<String>,
 }
 #[derive(Debug, Serialize)]

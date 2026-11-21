@@ -471,14 +471,21 @@ export class AppComponent implements OnInit {
   editArtwork(a: Artwork): void {
     this.estimateCents=null;
     this.artworkDraft = {
-      id: a.id, code: a.code, title: a.title, year: a.year, technique: a.technique,
+      id: a.id, expected_updated_at: a.updated_at, code: a.code, title: a.title, year: a.year, technique: a.technique,
       support: a.support, width_cm: a.width_cm, height_cm: a.height_cm,
       depth_cm: a.depth_cm, description: a.description, location: a.location, status: a.status
     };
     this.artworkDialog = true;
   }
   async saveArtwork(): Promise<void> {
-    if (await this.run(() => api.saveArtwork(this.artworkDraft), 'Opera salvata nell’archivio locale')) this.artworkDialog = false;
+    if (await this.run(() => api.saveArtwork(this.artworkDraft), 'Opera salvata nell’archivio locale')) {
+      this.artworkDialog = false;
+    } else if (this.errorMessage.startsWith('Conflitto:')) {
+      // Refresh the underlying list, keeping the unsaved edit visible.
+      const message = this.errorMessage;
+      await this.refresh();
+      this.errorMessage = message;
+    }
   }
   async deleteArtwork(a: Artwork): Promise<void> {
     if (!window.confirm(`Eliminare definitivamente l'opera "${a.title}"? Questa operazione non è reversibile.`)) return;
@@ -627,11 +634,17 @@ export class AppComponent implements OnInit {
   }
   newCollector(): void { this.collectorDraft = freshCollector(); this.collectorDialog = true; }
   editCollector(c: Collector): void {
-    this.collectorDraft = { id: c.id, name: c.name, email: c.email, phone: c.phone, address: c.address, notes: c.notes };
+    this.collectorDraft = { id: c.id, expected_updated_at: c.updated_at, name: c.name, email: c.email, phone: c.phone, address: c.address, notes: c.notes };
     this.collectorDialog = true;
   }
   async saveCollector(): Promise<void> {
-    if (await this.run(() => api.saveCollector(this.collectorDraft), 'Collezionista salvato')) this.collectorDialog = false;
+    if (await this.run(() => api.saveCollector(this.collectorDraft), 'Collezionista salvato')) {
+      this.collectorDialog = false;
+    } else if (this.errorMessage.startsWith('Conflitto:')) {
+      const message = this.errorMessage;
+      await this.refresh();
+      this.errorMessage = message;
+    }
   }
   async deleteCollector(c: Collector): Promise<void> {
     if (!window.confirm(`Eliminare il contatto "${c.name}"?`)) return;
