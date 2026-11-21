@@ -40,14 +40,14 @@ const statusLabels: Record<ArtworkStatus, string> = {
 })
 export class AppComponent implements OnInit {
   readonly appVersion = '0.1.0';
-  readonly sections: { id: Section; label: string; icon: string }[] = [
-    { id: 'overview', label: 'Panoramica', icon: '◫' },
-    { id: 'artworks', label: 'Opere', icon: '▣' },
-    { id: 'collectors', label: 'Collezionisti', icon: '♧' },
-    { id: 'sales', label: 'Vendite', icon: '◇' },
-    { id: 'certificates', label: 'Certificati', icon: '▤' },
-    { id: 'finance', label: 'Economia', icon: '▥' },
-    { id: 'settings', label: 'Impostazioni', icon: '⚙' }
+  readonly sections: { id: Section; label: string }[] = [
+    { id: 'overview', label: 'Panoramica' },
+    { id: 'artworks', label: 'Opere' },
+    { id: 'collectors', label: 'Collezionisti' },
+    { id: 'sales', label: 'Vendite' },
+    { id: 'certificates', label: 'Certificati' },
+    { id: 'finance', label: 'Economia' },
+    { id: 'settings', label: 'Impostazioni' }
   ];
   readonly statusLabels = statusLabels;
   language: AppLanguage = 'en';

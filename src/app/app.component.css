@@ -11,7 +11,15 @@ nav{display:flex;flex-direction:column;gap:5px}
 nav button{display:flex;align-items:center;gap:13px;width:100%;border:0;background:transparent;color:#5c6764;text-align:left;padding:13px 16px;border-radius:11px;font-size:13px;font-weight:600;transition:background .16s}
 nav button:hover{background:#e6e8e2}
 nav button.active{background:#dfe9e2;color:#244d42;box-shadow:inset 3px 0 #517c6a}
-.nav-icon{width:20px;font-size:20px;line-height:1;text-align:center;font-family:Georgia,serif;font-weight:400}
+/* Studio navigation icons: monochrome SVG masks inherit hover/active text color. */
+.nav-icon{display:inline-block;flex:0 0 21px;width:21px;height:21px;background-color:currentColor;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain}
+.nav-icon--overview{-webkit-mask-image:url('/assets/icons/overview.svg');mask-image:url('/assets/icons/overview.svg')}
+.nav-icon--artworks{-webkit-mask-image:url('/assets/icons/artworks.svg');mask-image:url('/assets/icons/artworks.svg')}
+.nav-icon--collectors{-webkit-mask-image:url('/assets/icons/collectors.svg');mask-image:url('/assets/icons/collectors.svg')}
+.nav-icon--sales{-webkit-mask-image:url('/assets/icons/sales.svg');mask-image:url('/assets/icons/sales.svg')}
+.nav-icon--certificates{-webkit-mask-image:url('/assets/icons/certificates.svg');mask-image:url('/assets/icons/certificates.svg')}
+.nav-icon--finance{-webkit-mask-image:url('/assets/icons/finance.svg');mask-image:url('/assets/icons/finance.svg')}
+.nav-icon--settings{-webkit-mask-image:url('/assets/icons/settings.svg');mask-image:url('/assets/icons/settings.svg')}
 .sidebar-bottom{margin-top:auto;border-top:1px solid #deded6;padding:20px 11px 4px;display:flex;flex-direction:column;gap:8px}
 .sidebar-bottom small{font-size:11px;color:#8b938e}
 .sidebar-bottom small.attribution{font-size:10px;opacity:.8}
