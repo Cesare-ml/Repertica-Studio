@@ -78,6 +78,7 @@
       <div class="section-tools"><div><h2>{{ tr('Archivio opere') }}</h2></div>
         <div class="finance-top-actions">
           <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
+              <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('raw_files')" [disabled]="busy || !initialized">{{ tr('Esporta metadati RAW CSV') }}</button>
           <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
           <button class="primary action-glyph action-glyph--artworks" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button>
         </div></div>
@@ -125,6 +126,7 @@
       <div class="section-tools"><div><h2>{{ tr('Collezionisti e contatti') }}</h2></div>
         <div class="finance-top-actions">
           <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('collectors')" [disabled]="busy || !initialized">{{ tr('Esporta collezionisti CSV') }}</button>
+              <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('collector_photos')" [disabled]="busy || !initialized">{{ tr('Esporta fotografie collezionisti CSV') }}</button>
           <button class="primary action-glyph action-glyph--collectors" type="button" (click)="newCollector()" [disabled]="!initialized">{{ tr('+ Nuovo contatto') }}</button>
         </div></div>
       <div class="filter-row"><input type="search" [placeholder]="tr('Nome, email, telefono o opera acquisita…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca collezionisti')">
