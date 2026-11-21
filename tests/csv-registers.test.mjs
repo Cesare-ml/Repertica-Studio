@@ -48,6 +48,15 @@ test('sale receipt CSV is a separate on-demand register, never mislabeled as sal
   }
 });
 
+test('receipt export includes optional one-to-one evidence metadata without binary files', () => {
+  const backend = read('src-tauri/src/export.rs');
+  const documentation = read('docs/DATA-PORTABILITY.md');
+  assert.match(backend, /LEFT JOIN sale_receipt_attachments evidence ON evidence\.receipt_id=r\.id/);
+  assert.match(backend, /attachment_path;attachment_original_name;attachment_mime;attachment_size_bytes;attachment_sha256;attachment_created_at/);
+  assert.match(backend, /evidence\.media_path,evidence\.original_name,evidence\.mime_type/);
+  assert.match(documentation, /non il CSV/);
+});
+
 test('sale balances export includes exact cents and does not infer receipt records', () => {
   const backend = read('src-tauri/src/export.rs');
   const html = read('src/app/app.component.html');
