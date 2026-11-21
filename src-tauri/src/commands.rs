@@ -2,7 +2,7 @@ use crate::{db::Database, models::*};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{Datelike, Local, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};use std::{fs, path::Component};
-use tauri::State;
+use tauri::{Manager, State};
 use uuid::Uuid;
 
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
@@ -123,14 +123,25 @@ pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: 
 fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Artwork, String> {
     if input.artwork.id.is_some() { return Err("Questa operazione crea una nuova opera".into()); }
     let mut fields = normalize_artwork(&input.artwork)?;
-    if input.gallery_paths.len() > 20 { return Err("Massimo 20 fotografie aggiuntive per opera".into()); }
-    let load = |path: &String| -> Result<(Vec<u8>, &'static str), String> {
-        let bytes = read_image_file(path)?;
-        let (extension, _) = image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
-        Ok((bytes, extension))
+    if input.gallery.len() > 20 { return Err("Massimo 20 fotografie aggiuntive per opera".into()); }
+    // Pictures from disk are read and checked before anything is written.
+    let load = |source: &crate::media::PhotoSource| -> Result<Option<(Vec<u8>, String)>, String> {
+        match (&source.path, &source.media_id) {
+            (Some(path), None) => {
+                let bytes = read_image_file(path)?;
+                image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
+                crate::imaging::dimensions(&bytes)?;
+                if !source.operations.is_empty() { crate::imaging::validate(&source.operations)?; }
+                let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("immagine").to_string();
+                Ok(Some((bytes, name)))
+            }
+            (None, Some(_)) if source.operations.is_empty() => Ok(None),
+            (None, Some(_)) => Err("Le modifiche si applicano alle fotografie da file: modifica prima l'immagine nel media center".into()),
+            _ => Err("Fotografia non valida".into()),
+        }
     };
-    let cover = input.cover_path.as_ref().map(load).transpose()?;
-    let gallery = input.gallery_paths.iter().map(load).collect::<Result<Vec<_>, _>>()?;
+    let cover = input.cover.as_ref().map(|s| load(s)).transpose()?;
+    let gallery = input.gallery.iter().map(load).collect::<Result<Vec<_>, _>>()?;
     match &input.sale {
         Some(sale) => {
             if sale.amount_cents <= 0 || sale.amount_cents > 100_000_000_000 { return Err("Importo non valido".into()); }
@@ -147,9 +158,16 @@ fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Art
         _ => None,
     };
 
-    let mut written: Vec<std::path::PathBuf> = Vec::new();
+    // The (possibly large) RAW file is copied before the archive is locked.
+    let staged_raw = input.raw_path.as_ref()
+        .map(|path| crate::raw_files::stage(&db.directory, std::path::Path::new(path), crate::raw_files::MAX_RAW_BYTES))
+        .transpose()?;
     let outcome = (|| -> Result<Artwork, String> {
         let mut conn = db.conn.lock().map_err(err)?;
+        // Files created by a failed attempt are the ones that were not there before.
+        let existing: std::collections::HashSet<std::ffi::OsString> = fs::read_dir(db.directory.join("media"))
+            .map(|entries| entries.flatten().map(|e| e.file_name()).collect()).unwrap_or_default();
+        let attempt = (|| -> Result<Artwork, String> {
         let tx = conn.transaction().map_err(err)?;
         let id = Uuid::new_v4().to_string();
         let code = match fields.code.clone() {
@@ -157,22 +175,22 @@ fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Art
             None => crate::archive_code::allocate(&tx, fields.year.as_deref())?,
         };
         if code_in_use(&tx, &code, &id)? { return Err("Esiste già un'opera con questo codice".into()); }
-        let mut cover_path: Option<String> = None;
-        if let Some((bytes, extension)) = &cover {
-            let relative = store_media(&db.directory, bytes, extension)?;
-            written.push(db.directory.join(&relative));
-            cover_path = Some(relative);
+        let mut cover_ref: Option<(String, String)> = None;
+        if let Some(source) = &input.cover {
+            let loaded = cover.as_ref().and_then(|c| c.as_ref());
+            cover_ref = Some(crate::media::materialize(&tx, &db.directory, source, loaded.map(|(b, _)| b.as_slice()), loaded.map(|(_, n)| n.as_str()).unwrap_or("immagine"))?);
         }
         let stamp = now();
-        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,created_at,updated_at)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)",
+        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,image_media_id,created_at,updated_at)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15)",
             params![id, code, fields.title, fields.year, fields.technique, fields.support, fields.width, fields.height,
-                fields.depth, fields.description, fields.location, fields.status, cover_path, stamp]).map_err(err)?;
-        for (position, (bytes, extension)) in gallery.iter().enumerate() {
-            let relative = store_media(&db.directory, bytes, extension)?;
-            written.push(db.directory.join(&relative));
-            tx.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order) VALUES(?1,?2,?3,NULL,?4,?5)",
-                params![Uuid::new_v4().to_string(), id, relative, stamp, position as i64 + 1]).map_err(err)?;
+                fields.depth, fields.description, fields.location, fields.status,
+                cover_ref.as_ref().map(|r| r.1.clone()), cover_ref.as_ref().map(|r| r.0.clone()), stamp]).map_err(err)?;
+        for (position, source) in input.gallery.iter().enumerate() {
+            let loaded = gallery[position].as_ref();
+            let (media_id, relative) = crate::media::materialize(&tx, &db.directory, source, loaded.map(|(b, _)| b.as_slice()), loaded.map(|(_, n)| n.as_str()).unwrap_or("immagine"))?;
+            tx.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,media_id) VALUES(?1,?2,?3,NULL,?4,?5,?6)",
+                params![Uuid::new_v4().to_string(), id, relative, stamp, position as i64 + 1, media_id]).map_err(err)?;
         }
         if let Some(sale) = &input.sale {
             let collector_id = match &new_collector {
@@ -189,19 +207,34 @@ fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Art
                 params![sale_id, id, collector_id, sale.amount_cents, sale.sold_at, sale_notes, stamp])
                 .map_err(|_| "Vendita non registrata: verifica il collezionista scelto".to_string())?;
             crate::finance::attach_sale_finances(&tx, &sale_id, sale.amount_cents, sale.tax_cents, sale.shipping_cents)?;
+            if let Some(payment) = &sale.payment { crate::installments::apply_payment(&tx, &sale_id, sale.amount_cents, payment)?; }
         }
+        if let Some(staged) = &staged_raw { crate::raw_files::link(&tx, &id, staged)?; }
         let saved = artwork_by_id(&tx, &id)?;
         tx.commit().map_err(err)?;
         Ok(saved)
+        })();
+        if attempt.is_err() {
+            if let Ok(entries) = fs::read_dir(db.directory.join("media")) {
+                for entry in entries.flatten() {
+                    if !existing.contains(&entry.file_name()) && staged_raw.as_ref().is_none_or(|s| !s.relative.ends_with(&*entry.file_name().to_string_lossy())) {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
+            }
+        }
+        attempt
     })();
-    if outcome.is_err() {
-        for path in &written { let _ = fs::remove_file(path); }
-    }
+    if outcome.is_err() { if let Some(staged) = &staged_raw { staged.discard(); } }
     outcome
 }
 #[tauri::command]
-pub fn create_artwork_full(db: State<'_, Database>, input: NewArtworkInput) -> Result<Artwork, String> {
-    create_artwork_full_core(&db, input)
+pub async fn create_artwork_full(app: tauri::AppHandle, input: NewArtworkInput) -> Result<Artwork, String> {
+    // Off the UI thread: copying a large RAW file can take a moment.
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<Database>();
+        create_artwork_full_core(&db, input)
+    }).await.map_err(err)?
 }
 #[tauri::command]
 pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artwork, String> {
@@ -209,8 +242,13 @@ pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artw
 }
 #[tauri::command]
 pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String> {
+    delete_artwork_core(&db, &id)
+}
+fn delete_artwork_core(db: &Database, id: &str) -> Result<(), String> {
     let conn = db.conn.lock().map_err(err)?;
+    let id = id.to_string();
     let old_image = artwork_by_id(&conn, &id)?.image_path;
+    let raw_path: Option<String> = conn.query_row("SELECT media_path FROM artwork_raw_files WHERE artwork_id=?1", params![id], |r| r.get(0)).optional().map_err(err)?;
     // ON DELETE CASCADE removes gallery rows; clean their local files only after SQL succeeds.
     let gallery_paths: Vec<String> = {
         let mut statement = conn.prepare("SELECT image_path FROM artwork_images WHERE artwork_id=?1").map_err(err)?;
@@ -221,12 +259,9 @@ pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String>
     };
     let affected = conn.execute("DELETE FROM artworks WHERE id=?1",params![id]).map_err(|_|"Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
     if affected == 0 { return Err("Opera non trovata".into()); }
-    if let Some(path) = old_image {
-        if safe_relative(&path) { let _ = fs::remove_file(db.directory.join(path)); }
-    }
-    for path in gallery_paths {
-        if safe_relative(&path) { let _ = fs::remove_file(db.directory.join(path)); }
-    }
+    if let Some(path) = raw_path { crate::raw_files::remove_file(&db.directory, &path); }
+    if let Some(path) = old_image { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &path); }
+    for path in gallery_paths { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &path); }
     Ok(())
 }
 
@@ -267,6 +302,7 @@ fn record_sale_core(db: &Database, input: SaleInput) -> Result<(), String> {
         params![sale_id, input.artwork_id, input.collector_id,input.amount_cents,input.sold_at,notes,now()])
         .map_err(|_|"Vendita non registrata: verifica cliente, opera e vendite esistenti".to_string())?;
     crate::finance::attach_sale_finances(&tx,&sale_id,input.amount_cents,input.tax_cents,input.shipping_cents)?;
+    if let Some(payment)=&input.payment { crate::installments::apply_payment(&tx,&sale_id,input.amount_cents,payment)?; }
     tx.execute("UPDATE artworks SET status='sold',updated_at=?2 WHERE id=?1",params![input.artwork_id,now()]).map_err(err)?;
     tx.commit().map_err(err)
 }
@@ -403,13 +439,11 @@ fn save_artwork_image_bytes(db: &Database, artwork_id: &str, bytes: &[u8]) -> Re
     let tmp=db.directory.join(format!("media/{name}.tmp"));
     fs::write(&tmp,bytes).map_err(err)?;
     if let Err(e)=fs::rename(&tmp,&target) { let _=fs::remove_file(&tmp); return Err(err(e)); }
-    if let Err(e)=conn.execute("UPDATE artworks SET image_path=?2,updated_at=?3 WHERE id=?1",params![artwork_id,relative,now()]) {
+    if let Err(e)=conn.execute("UPDATE artworks SET image_path=?2,image_media_id=NULL,updated_at=?3 WHERE id=?1",params![artwork_id,relative,now()]) {
         let _=fs::remove_file(&target); return Err(err(e));
     }
     if let Some(old_path)=old {
-        if !preserve_old && safe_relative(&old_path) {
-            let _=fs::remove_file(db.directory.join(old_path));
-        }
+        if !preserve_old { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &old_path); }
     }
     Ok(())
 }
@@ -579,7 +613,7 @@ mod tests {
     fn sale_input(artwork: &str, collector: &str, date: &str) -> SaleInput {
         SaleInput {
             artwork_id: artwork.into(), collector_id: collector.into(), amount_cents: 10_000,
-            sold_at: date.into(), notes: None, tax_cents: 0, shipping_cents: 0,
+            sold_at: date.into(), notes: None, tax_cents: 0, shipping_cents: 0, payment: None,
         }
     }
 
@@ -671,13 +705,19 @@ mod tests {
         let mut artwork = artwork_edit_input(None, title);
         artwork.code = None;
         artwork.year = year.map(String::from);
-        NewArtworkInput { artwork, cover_path: None, gallery_paths: vec![], sale: None }
+        NewArtworkInput { artwork, cover: None, gallery: vec![], raw_path: None, sale: None }
     }
+    /// A small real JPEG (the colour depends on `marker`, so different markers give different files).
     fn picture(dir: &std::path::Path, name: &str, marker: u8) -> String {
         let path = dir.join(name);
-        fs::write(&path, [0xff, 0xd8, 0xff, marker]).unwrap();
+        let image = image::RgbImage::from_pixel(16, 12, image::Rgb([marker.wrapping_mul(40), 120, 200u8.wrapping_sub(marker)]));
+        let mut bytes = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90)
+            .encode_image(&image).unwrap();
+        fs::write(&path, bytes).unwrap();
         path.to_string_lossy().into_owned()
     }
+    fn src(path: String) -> crate::media::PhotoSource { crate::media::PhotoSource { path: Some(path), ..Default::default() } }
     fn media_files(db: &Database) -> usize {
         fs::read_dir(db.directory.join("media")).unwrap().count()
     }
@@ -705,12 +745,12 @@ mod tests {
     fn creating_with_photos_and_a_sale_stores_everything_in_one_step() {
         let (dir, db, _artwork, collector) = sale_fixture();
         let mut input = new_artwork("Con foto e vendita", Some("2025"));
-        input.cover_path = Some(picture(dir.path(), "copertina.jpg", 1));
-        input.gallery_paths = vec![picture(dir.path(), "a.jpg", 2), picture(dir.path(), "b.jpg", 3)];
+        input.cover = Some(src(picture(dir.path(), "copertina.jpg", 1)));
+        input.gallery = vec![src(picture(dir.path(), "a.jpg", 2)), src(picture(dir.path(), "b.jpg", 3))];
         input.artwork.status = "available".into();
         input.sale = Some(NewSaleInput {
             collector_id: Some(collector.clone()), new_collector_name: None, amount_cents: 250_000,
-            sold_at: "2026-11-21".into(), notes: Some(" Consegna a mano ".into()), tax_cents: 0, shipping_cents: 5_000,
+            sold_at: "2026-11-21".into(), notes: Some(" Consegna a mano ".into()), tax_cents: 0, shipping_cents: 5_000, payment: None,
         });
         let saved = create_artwork_full_core(&db, input).unwrap();
         assert_eq!(saved.status, "sold", "a sale makes the artwork sold");
@@ -734,7 +774,7 @@ mod tests {
         let mut input = new_artwork("Venduta subito", None);
         input.sale = Some(NewSaleInput {
             collector_id: None, new_collector_name: Some("  Anna Rossi ".into()), amount_cents: 90_000,
-            sold_at: "2026-11-21".into(), notes: None, tax_cents: 0, shipping_cents: 0,
+            sold_at: "2026-11-21".into(), notes: None, tax_cents: 0, shipping_cents: 0, payment: None,
         });
         create_artwork_full_core(&db, input).unwrap();
         let name: String = db.conn.lock().unwrap().query_row("SELECT name FROM collectors", [], |r| r.get(0)).unwrap();
@@ -742,7 +782,7 @@ mod tests {
         let mut anonymous = new_artwork("Senza acquirente", None);
         anonymous.sale = Some(NewSaleInput {
             collector_id: None, new_collector_name: None, amount_cents: 1, sold_at: "2026-11-21".into(),
-            notes: None, tax_cents: 0, shipping_cents: 0,
+            notes: None, tax_cents: 0, shipping_cents: 0, payment: None,
         });
         assert!(create_artwork_full_core(&db, anonymous).unwrap_err().contains("collezionista"));
         assert_eq!((count(&db, "artworks"), count(&db, "collectors")), (1, 1));
@@ -756,22 +796,22 @@ mod tests {
         let mut wrong_type = new_artwork("Tipo errato", None);
         let text = dir.path().join("testo.jpg");
         fs::write(&text, b"not an image").unwrap();
-        wrong_type.gallery_paths = vec![text.to_string_lossy().into_owned()];
+        wrong_type.gallery = vec![src(text.to_string_lossy().into_owned())];
         assert!(create_artwork_full_core(&db, wrong_type).is_err());
         // A failure after the files were written (the sale breaks a rule) is rolled back and cleaned up.
         let mut bad_sale = new_artwork("Vendita errata", None);
-        bad_sale.cover_path = Some(picture(dir.path(), "c.jpg", 4));
-        bad_sale.gallery_paths = vec![picture(dir.path(), "g.jpg", 5)];
+        bad_sale.cover = Some(src(picture(dir.path(), "c.jpg", 4)));
+        bad_sale.gallery = vec![src(picture(dir.path(), "g.jpg", 5))];
         bad_sale.sale = Some(NewSaleInput {
             collector_id: Some("inesistente".into()), new_collector_name: None, amount_cents: 1_000,
-            sold_at: "2026-11-21".into(), notes: None, tax_cents: 0, shipping_cents: 0,
+            sold_at: "2026-11-21".into(), notes: None, tax_cents: 0, shipping_cents: 0, payment: None,
         });
         assert!(create_artwork_full_core(&db, bad_sale).is_err());
         let mut too_much = new_artwork("Spese eccessive", None);
-        too_much.cover_path = Some(picture(dir.path(), "c2.jpg", 6));
+        too_much.cover = Some(src(picture(dir.path(), "c2.jpg", 6)));
         too_much.sale = Some(NewSaleInput {
             collector_id: None, new_collector_name: Some("Chi".into()), amount_cents: 1_000,
-            sold_at: "2026-11-21".into(), notes: None, tax_cents: 900, shipping_cents: 900,
+            sold_at: "2026-11-21".into(), notes: None, tax_cents: 900, shipping_cents: 900, payment: None,
         });
         assert!(create_artwork_full_core(&db, too_much).is_err());
         assert_eq!((count(&db, "artworks"), count(&db, "artwork_images"), count(&db, "sales"), count(&db, "collectors")), (0, 0, 0, 0));
@@ -782,8 +822,127 @@ mod tests {
         sold_without_sale.artwork.status = "sold".into();
         assert!(create_artwork_full_core(&db, sold_without_sale).is_err());
         let mut many = new_artwork("Troppe foto", None);
-        many.gallery_paths = vec!["x".into(); 21];
+        many.gallery = vec![crate::media::PhotoSource::default(); 21];
         assert!(create_artwork_full_core(&db, many).unwrap_err().contains("20"));
+    }
+
+    #[test]
+    fn a_sale_can_be_registered_with_an_instant_payment_or_an_installment_plan() {
+        use crate::installments::{InstallmentInput, PaymentInput};
+        let (_dir, db, artwork, collector) = sale_fixture();
+        let mut input = sale_input(&artwork, &collector, "2026-11-21");
+        input.payment = Some(PaymentInput { mode: "INSTALLMENTS".into(), received_cents: Some(2_000), received_at: Some("2026-11-21".into()),
+            method: Some("bank_transfer".into()), reference: Some(" Acconto ".into()), installments: vec![
+                InstallmentInput { due_date: "2026-12-21".into(), amount_cents: 4_000, notes: None },
+                InstallmentInput { due_date: "2027-01-21".into(), amount_cents: 6_000, notes: Some("Saldo".into()) }] });
+        record_sale_core(&db, input).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let received: (i64, String) = conn.query_row("SELECT amount_cents,reference FROM sale_receipts", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(received, (2_000, "Acconto".to_string()));
+        let plan: i64 = conn.query_row("SELECT count(*) FROM sale_installments", [], |r| r.get(0)).unwrap();
+        assert_eq!(plan, 2);
+    }
+
+    #[test]
+    fn an_invalid_payment_cancels_the_whole_sale() {
+        use crate::installments::{InstallmentInput, PaymentInput};
+        let (_dir, db, artwork, collector) = sale_fixture();
+        let mut input = sale_input(&artwork, &collector, "2026-11-21");
+        input.payment = Some(PaymentInput { mode: "INSTALLMENTS".into(), received_cents: None, received_at: None, method: None, reference: None,
+            installments: vec![InstallmentInput { due_date: "2026-12-21".into(), amount_cents: 4_000, notes: None },
+                InstallmentInput { due_date: "2027-01-21".into(), amount_cents: 5_000, notes: None }] });
+        assert!(record_sale_core(&db, input).unwrap_err().contains("sommare"));
+        let conn = db.conn.lock().unwrap();
+        let (sales, status): (i64, String) = (
+            conn.query_row("SELECT count(*) FROM sales", [], |r| r.get(0)).unwrap(),
+            conn.query_row("SELECT status FROM artworks WHERE id=?1", params![artwork], |r| r.get(0)).unwrap());
+        assert_eq!((sales, status.as_str()), (0, "available"), "no half-registered sale remains");
+    }
+
+    #[test]
+    fn a_raw_file_can_be_attached_at_creation_and_disappears_with_the_artwork() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("archive")).unwrap();
+        let source = dir.path().join("scatto.NEF");
+        fs::write(&source, [b'I', b'I', b'*', 0, 1, 2, 3]).unwrap();
+        let mut input = new_artwork("Con RAW", None);
+        input.raw_path = Some(source.to_string_lossy().into_owned());
+        let saved = create_artwork_full_core(&db, input).unwrap();
+        let path: String = db.conn.lock().unwrap().query_row("SELECT media_path FROM artwork_raw_files WHERE artwork_id=?1", params![saved.id], |r| r.get(0)).unwrap();
+        assert!(db.directory.join(&path).is_file());
+        // A failing creation leaves no RAW copy behind.
+        let mut failing = new_artwork("Fallita", None);
+        failing.raw_path = Some(source.to_string_lossy().into_owned());
+        failing.artwork.status = "sold".into();
+        assert!(create_artwork_full_core(&db, failing).is_err());
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 1);
+        delete_artwork_core(&db, &saved.id).unwrap();
+        assert!(!db.directory.join(&path).exists(), "the RAW file is removed with its artwork");
+    }
+    #[test]
+    fn photographs_can_be_edited_while_the_artwork_is_created_and_the_original_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("archive")).unwrap();
+        let mut input = new_artwork("Con modifiche", None);
+        let mut cover = src(picture(dir.path(), "copertina.jpg", 3));
+        cover.operations = vec![crate::imaging::Operation::Rotate { degrees: 90 }];
+        input.cover = Some(cover);
+        let mut gallery = src(picture(dir.path(), "extra.jpg", 4));
+        gallery.operations = vec![crate::imaging::Operation::Flip { horizontal: true, vertical: false }];
+        input.gallery = vec![gallery, src(picture(dir.path(), "senza.jpg", 5))];
+        let saved = create_artwork_full_core(&db, input).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let (revisions, edits): (i64, i64) = conn.query_row("SELECT count(*),sum(kind='EDIT') FROM media_revisions", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((revisions, edits), (5, 2), "three originals plus two edited versions");
+        let cover_path = saved.image_path.clone().unwrap();
+        let (width, height) = crate::imaging::dimensions(&fs::read(db.directory.join(&cover_path)).unwrap()).unwrap();
+        assert_eq!((width, height), (12, 16), "the artwork shows the rotated version (the source was 16x12)");
+        let current: String = conn.query_row("SELECT r.image_path FROM artworks a JOIN media_items i ON i.id=a.image_media_id JOIN media_revisions r ON r.id=i.current_revision_id", [], |r| r.get(0)).unwrap();
+        assert_eq!(current, cover_path);
+        let original_exists: i64 = conn.query_row("SELECT count(*) FROM media_revisions WHERE kind='ORIGINAL'", [], |r| r.get(0)).unwrap();
+        assert_eq!(original_exists, 3);
+        let linked: i64 = conn.query_row("SELECT count(*) FROM artwork_images WHERE media_id IS NOT NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(linked, 2);
+    }
+
+    #[test]
+    fn a_library_picture_can_be_used_for_a_new_artwork_but_not_edited_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("archive")).unwrap();
+        let file = picture(dir.path(), "libreria.jpg", 6);
+        let item = crate::media::import_core(&db, &[file]).unwrap().imported.remove(0);
+        let mut input = new_artwork("Dalla libreria", None);
+        input.cover = Some(crate::media::PhotoSource { media_id: Some(item.id.clone()), ..Default::default() });
+        let saved = create_artwork_full_core(&db, input).unwrap();
+        assert_eq!(saved.image_path.as_deref(), Some(item.image_path.as_str()));
+        let revisions: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM media_revisions", [], |r| r.get(0)).unwrap();
+        assert_eq!(revisions, 1, "no copy is made");
+        let mut editing = new_artwork("Con modifica", None);
+        editing.cover = Some(crate::media::PhotoSource { media_id: Some(item.id.clone()),
+            operations: vec![crate::imaging::Operation::Rotate { degrees: 90 }], ..Default::default() });
+        assert!(create_artwork_full_core(&db, editing).unwrap_err().contains("media center"));
+        let mut missing = new_artwork("Mancante", None);
+        missing.cover = Some(crate::media::PhotoSource { media_id: Some("sconosciuta".into()), ..Default::default() });
+        assert!(create_artwork_full_core(&db, missing).is_err());
+        let mut both = new_artwork("Ambigua", None);
+        both.cover = Some(crate::media::PhotoSource { media_id: Some(item.id), path: Some("x".into()), ..Default::default() });
+        assert!(create_artwork_full_core(&db, both).is_err());
+    }
+
+    #[test]
+    fn a_failure_after_editing_removes_every_new_file_original_and_edited() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("archive")).unwrap();
+        let mut input = new_artwork("Fallirà", None);
+        let mut cover = src(picture(dir.path(), "c.jpg", 2));
+        cover.operations = vec![crate::imaging::Operation::Rotate { degrees: 90 }];
+        input.cover = Some(cover);
+        input.sale = Some(NewSaleInput { collector_id: Some("inesistente".into()), new_collector_name: None, amount_cents: 100,
+            sold_at: "2026-11-21".into(), notes: None, tax_cents: 0, shipping_cents: 0, payment: None });
+        assert!(create_artwork_full_core(&db, input).is_err());
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 0);
+        let items: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM media_items", [], |r| r.get(0)).unwrap();
+        assert_eq!(items, 0, "the catalogue rolled back with the artwork");
     }
 
     #[test]

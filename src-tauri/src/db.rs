@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 13;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -362,6 +362,110 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             PRAGMA user_version=10;
             COMMIT;"
         )?;
+    }
+    if version < 11 {
+        // Installment (rateale) plans: scheduled payments of a sale. Receipts stay the only
+        // record of money actually received.
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS sale_installments (
+                id TEXT PRIMARY KEY,
+                sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL CHECK(position >= 1),
+                due_date TEXT NOT NULL,
+                amount_cents INTEGER NOT NULL CHECK(amount_cents > 0 AND amount_cents <= 100000000000),
+                notes TEXT CHECK(notes IS NULL OR length(notes) <= 500),
+                UNIQUE(sale_id, position)
+            );
+            CREATE INDEX IF NOT EXISTS idx_sale_installments_due ON sale_installments(due_date);
+            PRAGMA user_version=11;
+            COMMIT;"
+        )?;
+    }
+    if version < 12 {
+        // One RAW camera file per artwork, stored in the private media folder.
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS artwork_raw_files (
+                artwork_id TEXT PRIMARY KEY REFERENCES artworks(id) ON DELETE CASCADE,
+                media_path TEXT NOT NULL UNIQUE,
+                original_name TEXT NOT NULL CHECK(length(original_name) BETWEEN 1 AND 240),
+                size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+                sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+                created_at TEXT NOT NULL
+            );
+            PRAGMA user_version=12;
+            COMMIT;"
+        )?;
+    }
+    if version < 13 {
+        // Media center: catalogue of pictures with revisions, tags and collections, and links from
+        // artworks / galleries / collector photos to the catalogue.
+        let has_column = |table: &str, column: &str| -> Result<bool, rusqlite::Error> {
+            conn.query_row(&format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name='{column}'"), [], |r| r.get::<_, i64>(0)).map(|n| n > 0)
+        };
+        let mut script = String::from("BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS media_items (
+                id TEXT PRIMARY KEY,
+                title TEXT CHECK(title IS NULL OR length(title) <= 200),
+                description TEXT CHECK(description IS NULL OR length(description) <= 5000),
+                alt_text TEXT CHECK(alt_text IS NULL OR length(alt_text) <= 500),
+                credits TEXT CHECK(credits IS NULL OR length(credits) <= 300),
+                copyright_status TEXT NOT NULL DEFAULT 'UNKNOWN' CHECK(copyright_status IN ('UNKNOWN','OWNED','LICENSED','PUBLIC_DOMAIN')),
+                original_name TEXT NOT NULL CHECK(length(original_name) BETWEEN 1 AND 240),
+                state TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(state IN ('ACTIVE','TRASHED')),
+                current_revision_id TEXT NOT NULL,
+                dhash TEXT,
+                dhash_revision_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS media_revisions (
+                id TEXT PRIMARY KEY,
+                media_id TEXT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+                number INTEGER NOT NULL CHECK(number >= 1),
+                kind TEXT NOT NULL CHECK(kind IN ('ORIGINAL','EDIT')),
+                image_path TEXT NOT NULL UNIQUE,
+                width INTEGER NOT NULL CHECK(width > 0),
+                height INTEGER NOT NULL CHECK(height > 0),
+                size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+                sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+                operations_json TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(media_id, number)
+            );
+            CREATE TABLE IF NOT EXISTS media_tags (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE CHECK(length(name) BETWEEN 1 AND 60)
+            );
+            CREATE TABLE IF NOT EXISTS media_item_tags (
+                media_id TEXT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+                tag_id TEXT NOT NULL REFERENCES media_tags(id) ON DELETE CASCADE,
+                PRIMARY KEY(media_id, tag_id)
+            );
+            CREATE TABLE IF NOT EXISTS media_collections (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE CHECK(length(name) BETWEEN 1 AND 60),
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS media_collection_items (
+                collection_id TEXT NOT NULL REFERENCES media_collections(id) ON DELETE CASCADE,
+                media_id TEXT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+                PRIMARY KEY(collection_id, media_id)
+            );
+            ");
+        for (table, column) in [("artworks", "image_media_id"), ("artwork_images", "media_id"), ("collector_images", "media_id")] {
+            if !has_column(table, column)? {
+                script.push_str(&format!("ALTER TABLE {table} ADD COLUMN {column} TEXT REFERENCES media_items(id) ON DELETE SET NULL;"));
+            }
+        }
+        script.push_str("CREATE INDEX IF NOT EXISTS idx_media_revisions_media ON media_revisions(media_id, number);
+            CREATE INDEX IF NOT EXISTS idx_artworks_media ON artworks(image_media_id);
+            CREATE INDEX IF NOT EXISTS idx_artwork_images_media ON artwork_images(media_id);
+            CREATE INDEX IF NOT EXISTS idx_collector_images_media ON collector_images(media_id);
+            PRAGMA user_version=13;
+            COMMIT;");
+        conn.execute_batch(&script)?;
     }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.

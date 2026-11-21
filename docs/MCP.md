@@ -56,6 +56,6 @@ Versioni di protocollo supportate: 2025-06-18, 2025-03-26 e 2024-11-05 (JSON-RPC
 
 ## Limiti
 
-- Lo schema supportato è quello corrente (SQLite v10); un archivio più vecchio va prima aperto con l'app.
+- Lo schema supportato è quello corrente (quello scritto dalla versione corrente dell'app); un archivio più vecchio va prima aperto con l'app.
 - Il server non aggiorna i dati in tempo reale: ogni richiesta legge lo stato corrente dell'archivio.
 - Nessuna autenticazione: chi può avviare il programma sul tuo computer, con il tuo utente, può leggere l'archivio, come già con il file SQLite.

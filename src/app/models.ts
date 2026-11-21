@@ -26,11 +26,46 @@ export type NewArtworkRecord = ArtworkInput;
 export interface NewSaleInput {
   collector_id: string | null; new_collector_name: string | null;
   amount_cents: number; sold_at: string; notes: string | null;
-  tax_cents: number; shipping_cents: number;
+  tax_cents: number; shipping_cents: number; payment?: PaymentInput | null;
 }
+export type EditOperation =
+  | { type: 'crop'; x: number; y: number; width: number; height: number }
+  | { type: 'perspective'; points: { x: number; y: number }[]; outputAspectRatio: number | null }
+  | { type: 'rotate'; degrees: number }
+  | { type: 'flip'; horizontal: boolean; vertical: boolean }
+  | { type: 'adjust'; exposure: number; contrast: number; saturation: number };
+/** A picture of a new artwork: a file (optionally edited first) or an item of the library. */
+export interface PhotoSource { path?: string | null; media_id?: string | null; operations: EditOperation[]; }
 export interface NewArtworkInput {
-  artwork: NewArtworkRecord; cover_path: string | null; gallery_paths: string[]; sale: NewSaleInput | null;
+  artwork: NewArtworkRecord; cover: PhotoSource | null; gallery: PhotoSource[]; raw_path: string | null; sale: NewSaleInput | null;
 }
+export interface RawFile {
+  artwork_id: string; media_path: string; original_name: string; size_bytes: number; sha256: string; created_at: string;
+}
+export interface MediaTag { id: string; name: string; }
+export interface MediaRevision {
+  id: string; number: number; kind: 'ORIGINAL' | 'EDIT'; image_path: string; width: number; height: number;
+  size_bytes: number; sha256: string; operations_json: string | null; created_at: string;
+}
+export type CopyrightStatus = 'UNKNOWN' | 'OWNED' | 'LICENSED' | 'PUBLIC_DOMAIN';
+export interface MediaItem {
+  id: string; title: string | null; description: string | null; alt_text: string | null; credits: string | null;
+  copyright_status: CopyrightStatus; original_name: string; state: 'ACTIVE' | 'TRASHED'; current_revision_id: string;
+  image_path: string; width: number; height: number; size_bytes: number; revision_number: number;
+  tags: MediaTag[]; usage_count: number; created_at: string; updated_at: string;
+}
+export interface MediaUsage { kind: 'ARTWORK_COVER' | 'ARTWORK_GALLERY' | 'COLLECTOR_PROFILE' | 'COLLECTOR_PHOTO'; owner_id: string; label: string; }
+export interface MediaDetail { item: MediaItem; revisions: MediaRevision[]; usages: MediaUsage[]; collection_ids: string[]; }
+export interface MediaPage { items: MediaItem[]; total: number; }
+export interface MediaCollection { id: string; name: string; item_count: number; }
+export interface MediaMetadataInput {
+  title: string | null; description: string | null; alt_text: string | null; credits: string | null; copyright_status: CopyrightStatus;
+}
+export interface PreviewData { data_url: string; width: number; height: number; }
+export interface ImportResult { imported: MediaItem[]; failed: { path: string; message: string }[]; }
+export interface DuplicateGroup { sha256: string; size_bytes: number; items: MediaItem[]; }
+export interface SimilarPair { first: MediaItem; second: MediaItem; distance: number; similarity: number; }
+export interface MediaExportOptions { format?: 'jpeg' | 'png'; quality?: number; max_width?: number | null; max_height?: number | null; }
 export interface CodePolicy {
   prefix: string; scope: 'GLOBAL' | 'YEARLY'; padding: number; separator: '-' | '.' | '_';
 }
@@ -42,7 +77,7 @@ export interface GalleryImage {
 
 export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header' | 'invalid_snapshot';
 export interface MediaIssue {
-  artworkId: string; imageId: string | null; role: 'primary' | 'gallery' | 'certificate';
+  artworkId: string; imageId: string | null; role: 'primary' | 'gallery' | 'certificate' | 'collector' | 'media';
   path: string; problem: MediaProblem;
 }
 export interface MediaAudit {
@@ -70,9 +105,23 @@ export interface Sale {
   currency: 'EUR'; sold_at: string; notes: string | null;
   artwork_title: string; collector_name: string; created_at: string;
 }
+export interface InstallmentLineInput { due_date: string; amount_cents: number; notes: string | null; }
+export interface PaymentInput {
+  mode: 'UNPAID' | 'PAID' | 'PARTIAL' | 'INSTALLMENTS';
+  received_cents: number | null; received_at: string | null;
+  method: 'bank_transfer' | 'cash' | 'card' | 'other'; reference: string | null;
+  installments: InstallmentLineInput[];
+}
 export interface SaleInput {
   artwork_id: string; collector_id: string; amount_cents: number; sold_at: string; notes: string | null; tax_cents: number; shipping_cents: number;
+  payment?: PaymentInput | null;
 }
+export type InstallmentStatus = 'PAID' | 'PARTIAL' | 'OVERDUE' | 'DUE';
+export interface Installment {
+  id: string; sale_id: string; position: number; due_date: string; amount_cents: number;
+  notes: string | null; paid_cents: number; status: InstallmentStatus;
+}
+export interface PlanLine { due_date: string; amount_cents: number; }
 export interface Certificate {
   id: string; artwork_id: string; serial: string; issued_at: string;
   artist_name: string; collector_name: string | null; notes: string | null;

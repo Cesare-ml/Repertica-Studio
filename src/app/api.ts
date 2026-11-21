@@ -5,7 +5,10 @@ import type {
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup,
   NewArtworkInput, CodePolicy, McpClientStatus, CollectorImage, NewCollectorInput,
-  AllocationPlan, AllocationPlanInput, BackupScheduleStatus, BackupScheduleInput
+  AllocationPlan, AllocationPlanInput, BackupScheduleStatus, BackupScheduleInput,
+  Installment, InstallmentLineInput, PlanLine,
+  EditOperation, RawFile, MediaTag, MediaDetail, MediaPage, MediaCollection, MediaMetadataInput, PreviewData, ImportResult,
+  DuplicateGroup, SimilarPair, MediaExportOptions
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -74,6 +77,47 @@ export const api = {
   deleteExpense: (id: string) => invoke<void>('delete_expense', {id}),
   exportLedgerCsv: (kind: CsvRegisterKind, destination: string) =>
     invoke<string>('export_ledger_csv', {kind, destination}),
+  listArtworkRawFiles: () => invoke<RawFile[]>('list_artwork_raw_files'),
+  attachArtworkRaw: (artworkId: string, sourcePath: string) => invoke<RawFile>('attach_artwork_raw', { artworkId, sourcePath }),
+  removeArtworkRaw: (artworkId: string) => invoke<void>('remove_artwork_raw', { artworkId }),
+  exportArtworkRaw: (artworkId: string, destination: string) => invoke<string>('export_artwork_raw', { artworkId, destination }),
+  mediaList: (args: { query?: string; tagId?: string | null; collectionId?: string | null; state?: 'ACTIVE' | 'TRASHED'; offset?: number; limit?: number }) =>
+    invoke<MediaPage>('media_list', { query: args.query ?? null, tagId: args.tagId ?? null, collectionId: args.collectionId ?? null,
+      state: args.state ?? 'ACTIVE', offset: args.offset ?? 0, limit: args.limit ?? 60 }),
+  mediaDetail: (mediaId: string) => invoke<MediaDetail>('media_detail', { mediaId }),
+  mediaUpdate: (mediaId: string, input: MediaMetadataInput) => invoke<MediaDetail>('media_update', { mediaId, input }),
+  mediaThumbnail: (mediaId: string) => invoke<string>('media_thumbnail', { mediaId }),
+  mediaPreview: (mediaId: string, maxSide = 1400, operations: EditOperation[] | null = null, revisionId: string | null = null) =>
+    invoke<PreviewData>('media_preview', { mediaId, revisionId, maxSide, operations }),
+  mediaFilePreview: (path: string, maxSide = 1400, operations: EditOperation[] | null = null) =>
+    invoke<PreviewData>('media_file_preview', { path, maxSide, operations }),
+  mediaApplyEdit: (mediaId: string, operations: EditOperation[]) => invoke<MediaDetail>('media_apply_edit', { mediaId, operations }),
+  mediaRestoreRevision: (mediaId: string, revisionId: string) => invoke<MediaDetail>('media_restore_revision', { mediaId, revisionId }),
+  mediaImport: (paths: string[]) => invoke<ImportResult>('media_import', { paths }),
+  mediaTags: () => invoke<MediaTag[]>('media_tags'),
+  mediaCreateTag: (name: string) => invoke<MediaTag>('media_create_tag', { name }),
+  mediaSetTags: (mediaId: string, tagIds: string[]) => invoke<MediaDetail>('media_set_tags', { mediaId, tagIds }),
+  mediaCollections: () => invoke<MediaCollection[]>('media_collections'),
+  mediaCreateCollection: (name: string) => invoke<MediaCollection>('media_create_collection', { name }),
+  mediaDeleteCollection: (collectionId: string) => invoke<void>('media_delete_collection', { collectionId }),
+  mediaCollectionAdd: (collectionId: string, mediaId: string) => invoke<MediaDetail>('media_collection_add', { collectionId, mediaId }),
+  mediaCollectionRemove: (collectionId: string, mediaId: string) => invoke<MediaDetail>('media_collection_remove', { collectionId, mediaId }),
+  mediaTrash: (mediaId: string) => invoke<MediaDetail>('media_trash', { mediaId }),
+  mediaUntrash: (mediaId: string) => invoke<MediaDetail>('media_untrash', { mediaId }),
+  mediaPurge: (mediaId: string) => invoke<void>('media_purge', { mediaId }),
+  mediaExport: (mediaId: string, kind: 'current' | 'original' | 'custom', options: MediaExportOptions | null, destination: string) =>
+    invoke<string>('media_export', { mediaId, kind, options, destination }),
+  mediaIdForPath: (path: string) => invoke<string | null>('media_id_for_path', { path }),
+  mediaExactDuplicates: () => invoke<DuplicateGroup[]>('media_exact_duplicates'),
+  mediaSimilar: () => invoke<SimilarPair[]>('media_similar'),
+  artworkSetCoverFromMedia: (artworkId: string, mediaId: string) => invoke<void>('artwork_set_cover_from_media', { artworkId, mediaId }),
+  artworkAddGalleryFromMedia: (artworkId: string, mediaId: string, caption: string | null) =>
+    invoke<void>('artwork_add_gallery_from_media', { artworkId, mediaId, caption }),
+  listSaleInstallments: () => invoke<Installment[]>('list_sale_installments'),
+  saveSaleInstallments: (saleId: string, items: InstallmentLineInput[]) =>
+    invoke<void>('save_sale_installments', { saleId, items }),
+  generateInstallmentPlan: (amountCents: number, count: number, firstDue: string) =>
+    invoke<PlanLine[]>('generate_installment_plan', { amountCents, count, firstDue }),
   getBackupSchedule: () => invoke<BackupScheduleStatus>('get_backup_schedule'),
   saveBackupSchedule: (input: BackupScheduleInput) => invoke<BackupScheduleStatus>('save_backup_schedule', {input}),
   runBackupNow: () => invoke<BackupScheduleStatus>('run_backup_now'),

@@ -157,6 +157,23 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
         references.extend(gallery.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
             .collect::<Result<Vec<_>, _>>().map_err(error)?);
     }
+    if schema >= 13 {
+        let mut revisions = conn.prepare("SELECT image_path FROM media_revisions").map_err(error)?;
+        references.extend(revisions.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
+            .collect::<Result<Vec<_>, _>>().map_err(error)?);
+    }
+    if schema >= 12 {
+        let mut raws = conn.prepare("SELECT media_path FROM artwork_raw_files").map_err(error)?;
+        references.extend(raws.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
+            .collect::<Result<Vec<_>, _>>().map_err(error)?);
+    }
+    if schema >= 11 {
+        let inconsistent: i64 = conn.query_row(
+            "SELECT count(*) FROM (SELECT i.sale_id FROM sale_installments i JOIN sales s ON s.id=i.sale_id
+              GROUP BY i.sale_id HAVING SUM(i.amount_cents)<>MAX(s.amount_cents))",
+            [], |r| r.get(0)).map_err(error)?;
+        if inconsistent != 0 { return Err("Il backup contiene piani rateali con un totale diverso dal prezzo di vendita".into()); }
+    }
     // A sale carries either no frozen shares (split switched off) or shares totalling exactly 100%.
     if schema >= 9 {
         let inconsistent: i64 = conn.query_row(

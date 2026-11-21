@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const iconIds = ['overview', 'artworks', 'collectors', 'sales', 'certificates', 'finance', 'settings'];
+const iconIds = ['overview', 'artworks', 'media', 'collectors', 'sales', 'certificates', 'finance', 'settings'];
 
 test('sidebar uses valid, color-adaptive SVG icons for all sections', () => {
   const template = read('src/app/app.component.html');

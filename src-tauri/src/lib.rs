@@ -8,8 +8,12 @@ pub mod db;
 mod export;
 mod finance;
 mod gallery;
+mod imaging;
+mod installments;
+mod media;
 mod media_audit;
 mod models;
+mod raw_files;
 mod receipts;
 mod util;
 pub mod mcp;
@@ -87,6 +91,39 @@ pub fn run() {
             mcp_client::mcp_client_status,
             mcp_client::mcp_client_configure,
             mcp_client::mcp_client_remove,
+            media::media_list,
+            media::media_detail,
+            media::media_update,
+            media::media_thumbnail,
+            media::media_preview,
+            media::media_file_preview,
+            media::media_apply_edit,
+            media::media_restore_revision,
+            media::media_import,
+            media::media_tags,
+            media::media_create_tag,
+            media::media_set_tags,
+            media::media_collections,
+            media::media_create_collection,
+            media::media_delete_collection,
+            media::media_collection_add,
+            media::media_collection_remove,
+            media::media_trash,
+            media::media_untrash,
+            media::media_purge,
+            media::media_export,
+            media::media_id_for_path,
+            media::media_exact_duplicates,
+            media::media_similar,
+            media::artwork_set_cover_from_media,
+            media::artwork_add_gallery_from_media,
+            raw_files::list_artwork_raw_files,
+            raw_files::attach_artwork_raw,
+            raw_files::remove_artwork_raw,
+            raw_files::export_artwork_raw,
+            installments::list_sale_installments,
+            installments::save_sale_installments,
+            installments::generate_installment_plan,
             auto_backup::get_backup_schedule,
             auto_backup::save_backup_schedule,
             auto_backup::run_backup_now,

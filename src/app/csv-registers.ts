@@ -3,7 +3,7 @@
  * Filename suggestions are stable and translated by UI messages, not by the
  * OS locale: importing these CSVs back is intentionally NOT supported.
  */
-export type CsvRegisterKind = 'artworks' | 'gallery' | 'collectors' | 'certificates' | 'sales' | 'balances' | 'receipts' | 'expenses' | 'allocations';
+export type CsvRegisterKind = 'artworks' | 'gallery' | 'collectors' | 'certificates' | 'sales' | 'balances' | 'receipts' | 'expenses' | 'allocations' | 'installments';
 
 export interface CsvRegisterOption {
   title: string;
@@ -46,6 +46,11 @@ export const csvRegisterOptions: Record<CsvRegisterKind, CsvRegisterOption> = {
     title: 'Esporta incassi CSV',
     filename: 'incassi',
     success: 'Registro incassi esportato in CSV locale.'
+  },
+  installments: {
+    title: 'Esporta piani rateali CSV',
+    filename: 'pianirateali',
+    success: 'Piani rateali esportati in CSV locale.'
   },
   allocations: {
     title: 'Esporta ripartizioni CSV',

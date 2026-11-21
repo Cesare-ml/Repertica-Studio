@@ -100,6 +100,13 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
                     e.created_at,e.updated_at,p.name
              FROM expenses e LEFT JOIN allocation_parts p ON p.id=e.fund ORDER BY e.expense_date,e.id"
         ),
+        "installments" => (
+            "installment_id;sale_id;position;due_date;amount_cents;notes;artwork_code;artwork_title;collector_name",
+            "SELECT i.id,i.sale_id,i.position,i.due_date,i.amount_cents,i.notes,a.code,a.title,c.name
+             FROM sale_installments i JOIN sales s ON s.id=i.sale_id
+             JOIN artworks a ON a.id=s.artwork_id JOIN collectors c ON c.id=s.collector_id
+             ORDER BY i.due_date,i.sale_id,i.position"
+        ),
         "allocations" => (
             "sale_id;sold_at;artwork_id;artwork_code;artwork_title;net_cents;part_id;part_name;share_bp",
             "SELECT s.id,s.sold_at,s.artwork_id,a.code,a.title,

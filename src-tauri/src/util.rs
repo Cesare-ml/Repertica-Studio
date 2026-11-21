@@ -12,6 +12,8 @@ pub fn friendly(error: impl std::fmt::Display) -> String {
         "Esiste già un certificato con questo numero"
     } else if has("UNIQUE constraint failed: sales.artwork_id") {
         "Questa opera ha già una vendita registrata"
+    } else if has("UNIQUE constraint failed: artwork_images.image_path") || has("UNIQUE constraint failed: collector_images.image_path") {
+        "Questa immagine è già usata in una galleria"
     } else if has("certificate_immutable") {
         "I certificati emessi non possono essere modificati o eliminati"
     } else if has("receipt_exceeds_sale") {
@@ -36,6 +38,24 @@ pub fn friendly(error: impl std::fmt::Display) -> String {
         return text;
     };
     message.to_string()
+}
+
+/// Lower-case and strip common Latin accents so that "Cafè" matches "cafe".
+pub fn fold(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+            'ç' => 'c',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'ì' | 'í' | 'î' | 'ï' => 'i',
+            'ñ' => 'n',
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' => 'o',
+            'ù' | 'ú' | 'û' | 'ü' => 'u',
+            'ý' | 'ÿ' => 'y',
+            other => other,
+        })
+        .collect()
 }
 
 /// ENOSPC (28), ERROR_DISK_FULL (112), ERROR_HANDLE_DISK_FULL (39) and SQLite's "database or disk is full".

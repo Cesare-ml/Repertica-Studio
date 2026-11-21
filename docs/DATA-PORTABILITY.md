@@ -1,6 +1,6 @@
 # Esportazioni CSV locali — registri dell'archivio
 
-L'esportatore Rust `export_ledger_csv` supporta nove valori di `kind`:
+L'esportatore Rust `export_ledger_csv` supporta dieci valori di `kind`:
 
 | Tipo | Righe esportate | Contenuti |
 | --- | --- | --- |
@@ -9,6 +9,7 @@ L'esportatore Rust `export_ledger_csv` supporta nove valori di `kind`:
 | `collectors` | Tutti i collezionisti | UUID, nome completo, contatti e note private, date; in coda nome, cognome, dati di nascita, profili social, percorso della foto profilo e numero di fotografie |
 | `certificates` | Tutti i certificati | UUID del certificato e opera, seriale, date, emittente, destinatario, note e **snapshot_json originale immutabile** |
 | `sales` | Tutte le vendite | UUID opera/collezionista, importi in centesimi e le tre quote storiche predefinite (personale, attività, risparmio; 0 per le vendite che non le usano: le ripartizioni personalizzate sono nel registro `allocations`) |
+| `installments` | Tutte le rate dei piani rateali | UUID rata/vendita, posizione, scadenza, importo in centesimi, note, codice e titolo dell'opera, nome del collezionista |
 | `allocations` | Una riga per vendita e per parte di ripartizione | UUID vendita/opera, netto in centesimi, UUID e nome della parte, quota in punti base congelata sulla vendita |
 | `balances` | Tutti i saldi delle vendite | UUID vendita/opera/collezionista, data, valuta, lordo, incassato dichiarato e residuo in centesimi (anche vendite senza incassi) |
 | `expenses` | Tutte le spese | UUID, date, causali, fornitori, importi in centesimi, fondo (UUID e, in coda, nome della parte) |

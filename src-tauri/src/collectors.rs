@@ -213,8 +213,8 @@ fn image_row(r: &Row<'_>) -> rusqlite::Result<CollectorImage> {
 }
 const IMAGE_FIELDS: &str = "id,collector_id,kind,image_path,created_at";
 
-fn remove_media_file(db: &Database, relative: &str) {
-    if safe_relative(relative) { let _ = fs::remove_file(db.directory.join(relative)); }
+fn remove_media_file(conn: &Connection, db: &Database, relative: &str) {
+    crate::media::remove_file_unless_catalogued(conn, &db.directory, relative);
 }
 
 /// Add a photograph. A new profile photograph replaces the previous one, whose file is
@@ -250,7 +250,7 @@ fn add_image_core(db: &Database, collector_id: &str, source_path: &str, kind: &s
         let _ = fs::remove_file(db.directory.join(&relative));
         return Err(err(e));
     }
-    if let Some(old) = replaced { remove_media_file(db, &old); }
+    if let Some(old) = replaced { remove_media_file(&conn, db, &old); }
     Ok(image)
 }
 
@@ -259,7 +259,7 @@ fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
     let path: String = conn.query_row("SELECT image_path FROM collector_images WHERE id=?1", params![image_id], |r| r.get(0))
         .optional().map_err(err)?.ok_or("Fotografia non trovata")?;
     conn.execute("DELETE FROM collector_images WHERE id=?1", params![image_id]).map_err(err)?;
-    remove_media_file(db, &path);
+    remove_media_file(&conn, db, &path);
     Ok(())
 }
 
@@ -273,7 +273,7 @@ fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
     let affected = conn.execute("DELETE FROM collectors WHERE id=?1", params![id])
         .map_err(|_| "Non puoi eliminare un collezionista collegato a una vendita".to_string())?;
     if affected == 0 { return Err("Collezionista non trovato".into()); }
-    for path in paths { remove_media_file(db, &path); }
+    for path in paths { remove_media_file(&conn, db, &path); }
     Ok(())
 }
 

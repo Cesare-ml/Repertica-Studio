@@ -13,6 +13,8 @@ Gestionale artistico **gratuito, open source e locale**, realizzato con Angular 
 - **Collezionisti**: scheda completa (nome e cognome, contatti, indirizzo, profili social e sito, dati di nascita facoltativi, note), foto profilo e altre fotografie, filtri per acquirenti e dati incompleti. Dalla lista si possono consultare le opere acquistate e aprirle nell'archivio; dalle opere vendute si può raggiungere il relativo collezionista.
 - **Vendite**: registrazione importi in centesimi, cliente e opera associati; una vendita per opera nella prima versione.
 - **Certificati**: registro immutabile con numero progressivo univoco, fotografia della scheda al momento dell'emissione e stampa/salvataggio PDF tramite dialogo di stampa.
+- **Media center e strumenti immagine**: libreria con versioni non distruttive (ritaglio, prospettiva, rotazione, luce e colore), tag, raccolte, cestino e ricerca di duplicati; le foto si possono modificare già quando si inserisce un'opera. Un file **RAW** si può allegare a ogni opera.
+- **Vendite rateali**: piani da 2 a 60 rate con stato di ogni rata calcolato dagli incassi registrati.
 - **Assistenti IA locali (MCP)**: server opzionale in sola lettura (senza rete, contatti e fotografie), collegabile a Claude Desktop con un clic da Impostazioni; nessun comando da terminale. Vedi [docs/MCP.md](docs/MCP.md).
 - **Ripartizione delle vendite configurabile**: da 1 a 12 parti con nome e percentuale a scelta (tre predefinite), disattivabile; le quote restano congelate su ogni vendita.
 - **Backup automatico** (facoltativo): giornaliero, settimanale o mensile all'ora scelta, con verifica e conservazione opzionale delle ultime N copie.

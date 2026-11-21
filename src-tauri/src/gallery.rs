@@ -129,13 +129,16 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
         return Err("Immagini principale e aggiuntiva duplicate".into());
     }
 
-    tx.execute("UPDATE artworks SET image_path=?2,updated_at=?3 WHERE id=?1",
-        params![artwork_id, new_primary, Utc::now().to_rfc3339()]).map_err(err)?;
+    // The catalogue link travels with the picture it describes.
+    let new_media: Option<String> = tx.query_row("SELECT media_id FROM artwork_images WHERE id=?1", params![image_id], |r| r.get(0)).map_err(err)?;
+    let old_media: Option<String> = tx.query_row("SELECT image_media_id FROM artworks WHERE id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
+    tx.execute("UPDATE artworks SET image_path=?2,image_media_id=?4,updated_at=?3 WHERE id=?1",
+        params![artwork_id, new_primary, Utc::now().to_rfc3339(), new_media]).map_err(err)?;
     if let Some(old_path) = old_primary {
         // The old cover has no caption. Do not retain the promoted photo's
         // potentially misleading caption on a different image.
-        tx.execute("UPDATE artwork_images SET image_path=?2,caption=NULL WHERE id=?1",
-            params![image_id, old_path]).map_err(err)?;
+        tx.execute("UPDATE artwork_images SET image_path=?2,caption=NULL,media_id=?3 WHERE id=?1",
+            params![image_id, old_path, old_media]).map_err(err)?;
     } else {
         // No old cover to swap: the gallery reference becomes the primary one.
         tx.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
@@ -214,7 +217,7 @@ fn gallery_image_data_core(db: &Database, image_id: &str) -> Result<String, Stri
 pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
     gallery_image_data_core(&db, &image_id)
 }
-fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result<(), String> {
+pub(crate) fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result<(), String> {
     let conn = db.conn.lock().map_err(err)?;
     let (artwork_id, relative): (String, String) = conn.query_row(
         "SELECT artwork_id,image_path FROM artwork_images WHERE id=?1",
@@ -227,7 +230,7 @@ fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result<(), String
     conn.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
     if !preserve {
         // A failed unlink leaves an unreferenced file, never a broken DB link.
-        let _ = fs::remove_file(db.directory.join(relative));
+        crate::media::remove_file_unless_catalogued(&conn, &db.directory, &relative);
     }
     Ok(())
 }
@@ -513,3 +516,6 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+pub(crate) fn delete_gallery_image_for_test(db: &Database, id: &str) { delete_gallery_image_core(db, id).unwrap(); }

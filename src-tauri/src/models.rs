@@ -30,6 +30,7 @@ pub struct SaleInput {
     pub sold_at: String, pub notes: Option<String>,
     #[serde(default)] pub tax_cents: i64,
     #[serde(default)] pub shipping_cents: i64,
+    #[serde(default)] pub payment: Option<crate::installments::PaymentInput>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Certificate {
@@ -57,12 +58,15 @@ pub struct NewSaleInput {
     pub amount_cents: i64, pub sold_at: String, pub notes: Option<String>,
     #[serde(default)] pub tax_cents: i64,
     #[serde(default)] pub shipping_cents: i64,
+    #[serde(default)] pub payment: Option<crate::installments::PaymentInput>,
 }
 /// Everything needed to create an artwork in one step: record, photographs and sale.
 #[derive(Debug, Deserialize)]
 pub struct NewArtworkInput {
     pub artwork: ArtworkInput,
-    #[serde(default)] pub cover_path: Option<String>,
-    #[serde(default)] pub gallery_paths: Vec<String>,
+    /// Cover and gallery pictures: files from disk (optionally edited first) or library items.
+    #[serde(default)] pub cover: Option<crate::media::PhotoSource>,
+    #[serde(default)] pub gallery: Vec<crate::media::PhotoSource>,
+    #[serde(default)] pub raw_path: Option<String>,
     #[serde(default)] pub sale: Option<NewSaleInput>,
 }

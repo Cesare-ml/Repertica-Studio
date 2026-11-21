@@ -8,6 +8,10 @@ import { AppLanguage, chooseLanguage, translate } from './i18n';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
 import { csvRegisterOptions, type CsvRegisterKind } from './csv-registers';
+import { PaymentPlanComponent } from './payment-plan.component';
+import { MediaCenterComponent } from './media-center.component';
+import { MediaEditorComponent } from './media-editor.component';
+import { emptyPayment, installmentRows, paymentToInput, toCents, type PaymentDraft } from './payments';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
 import type { ArtworkOrder, CollectorFilter } from './archive-filters';
 import type {
@@ -15,10 +19,13 @@ import type {
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
-  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, CollectorImage, AllocationPlan, AllocationPart, BackupScheduleStatus
+  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, CollectorImage, AllocationPlan, AllocationPart, BackupScheduleStatus, Installment,
+  EditOperation, PhotoSource, RawFile, MediaItem, PreviewData
 } from './models';
 
-type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
+/** A picture chosen for a new artwork, possibly edited before it is stored. */
+interface PendingPhoto { path?: string; mediaId?: string; label: string; operations: EditOperation[]; thumb: string; }
+type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
   code: null, title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
@@ -37,7 +44,7 @@ const statusLabels: Record<ArtworkStatus, string> = {
 @Component({
   selector: 'rp-root',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -46,6 +53,7 @@ export class AppComponent implements OnInit {
   readonly sections: { id: Section; label: string }[] = [
     { id: 'overview', label: 'Panoramica' },
     { id: 'artworks', label: 'Opere' },
+    { id: 'media', label: 'Libreria immagini' },
     { id: 'collectors', label: 'Collezionisti' },
     { id: 'sales', label: 'Vendite' },
     { id: 'certificates', label: 'Certificati' },
@@ -103,6 +111,12 @@ export class AppComponent implements OnInit {
   };
   settingsDraft: StudioSettings = {...this.settings};
   rateEuro = .16;
+  installments: Installment[] = [];
+  installmentsBySale: Record<string, Installment[]> = {};
+  salePayment: PaymentDraft = emptyPayment(today());
+  newSalePayment: PaymentDraft = emptyPayment(today());
+  planDraft: PaymentDraft = emptyPayment(today());
+  planEditing = false;
   schedule: BackupScheduleStatus | null = null;
   scheduleDraft = { enabled: false, frequency: 'DAILY' as BackupScheduleStatus['frequency'], time_of_day: '20:00',
     weekday: 0, day_of_month: 1, destination: null as string | null, keep_last: 0 };
@@ -155,8 +169,16 @@ export class AppComponent implements OnInit {
   certificateDialog = false;
   artworkDraft: ArtworkInput = freshArtwork();
   nextCode = '';
-  newCoverPath: string | null = null;
-  newGalleryPaths: string[] = [];
+  get editingArtwork(): Artwork | null { return this.artworks.find(a => a.id === this.artworkDraft.id) ?? null; }
+  newCover: PendingPhoto | null = null;
+  newGallery: PendingPhoto[] = [];
+  newRawPath: string | null = null;
+  editingPending: { cover: boolean; index: number; photo: PendingPhoto; source: PreviewData } | null = null;
+  libraryPicker: { purpose: 'new-cover' | 'new-gallery' | 'existing-cover' | 'existing-gallery'; artworkId?: string } | null = null;
+  rawByArtwork: Record<string, RawFile> = {};
+  mediaOpenId: string | null = null;
+  readonly rawExtensions = ['cr2', 'cr3', 'crw', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'dng', 'orf', 'rw2', 'raf', 'pef', 'srw', '3fr',
+    'fff', 'erf', 'kdc', 'dcr', 'mrw', 'x3f', 'iiq', 'rwl', 'raw', 'gpr', 'mef', 'mos', 'cap', 'rwz'];
   withSale = false;
   newSaleDraft = this.freshNewSale();
   codePolicy: CodePolicy = { prefix: 'ART', scope: 'GLOBAL', padding: 4, separator: '-' };
@@ -214,6 +236,7 @@ export class AppComponent implements OnInit {
   }
   navigate(section: Section): void {
     this.section = section;
+    this.mediaOpenId = null;
     this.search = '';
     this.errorMessage = '';
     this.notice = '';
@@ -325,6 +348,9 @@ export class AppComponent implements OnInit {
       this.artworks=artworks; this.collectors=collectors; this.sales=sales; this.certificates=certificates;
       this.overview=overview; this.dataPath=dataPath; this.expenses=expenses; this.finances=finances;
       this.receipts=receipts;
+      this.installments = await api.listSaleInstallments();
+      this.rawByArtwork = Object.fromEntries((await api.listArtworkRawFiles()).map(f => [f.artwork_id, f]));
+      this.installmentsBySale = this.installments.reduce((map, item) => { (map[item.sale_id] ??= []).push(item); return map; }, {} as Record<string, Installment[]>);
       this.receiptYear=receiptYear;
       this.balancesBySale=Object.fromEntries(balances.map(b=>[b.sale_id,b]));
       // Build indexes once per refresh instead of scanning the full sales register for every row.
@@ -404,7 +430,7 @@ export class AppComponent implements OnInit {
     return this.tr(labels[problem]);
   }
   mediaArtworkLabel(id: string): string {
-    return this.artworks.find(a => a.id === id)?.title || id;
+    return this.artworks.find(a => a.id === id)?.title || this.collectors.find(c => c.id === id)?.name || id;
   }
   async chooseBackupDestination(): Promise<void> {
     if (this.busy || !this.initialized) return;
@@ -667,8 +693,8 @@ export class AppComponent implements OnInit {
   fileName(path: string): string { return path.split(/[\\/]/).pop() ?? path; }
   async newArtwork(): Promise<void> {
     this.estimateCents = null; this.artworkDraft = freshArtwork();
-    this.newCoverPath = null; this.newGalleryPaths = []; this.withSale = false;
-    this.newSaleDraft = this.freshNewSale(); this.nextCode = '';
+    this.newCover = null; this.newGallery = []; this.newRawPath = null; this.withSale = false;
+    this.newSaleDraft = this.freshNewSale(); this.newSalePayment = emptyPayment(today()); this.nextCode = '';
     this.artworkDialog = true;
     await this.refreshNextCode();
   }
@@ -677,10 +703,15 @@ export class AppComponent implements OnInit {
     try { this.nextCode = await api.nextArchiveCode(this.artworkDraft.year); } catch { this.nextCode = ''; }
     this.change.detectChanges();
   }
+  private async pending(path: string): Promise<PendingPhoto> {
+    let thumb = '';
+    try { thumb = (await api.mediaFilePreview(path, 260)).data_url; } catch (error) { this.errorMessage = this.error(error); }
+    return { path, label: this.fileName(path), operations: [], thumb };
+  }
   async pickCover(): Promise<void> {
     try {
       const path = await this.pickPhoto(this.tr('Scegli copertina…'));
-      if (path) this.newCoverPath = path;
+      if (path) this.newCover = await this.pending(path);
     } catch (error) { this.errorMessage = this.error(error); }
     this.change.detectChanges();
   }
@@ -688,12 +719,109 @@ export class AppComponent implements OnInit {
     try {
       const selected = await open({ directory: false, multiple: true, title: this.tr('Aggiungi fotografie…'),
         filters: [{ name: 'JPEG / PNG / WebP', extensions: ['jpg', 'jpeg', 'png', 'webp'] }] });
-      const paths = Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [];
-      this.newGalleryPaths = [...new Set([...this.newGalleryPaths, ...paths])].slice(0, 20);
+      const paths = (Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : [])
+        .filter(p => !this.newGallery.some(g => g.path === p)).slice(0, 20 - this.newGallery.length);
+      for (const path of paths) this.newGallery = [...this.newGallery, await this.pending(path)];
     } catch (error) { this.errorMessage = this.error(error); }
     this.change.detectChanges();
   }
-  removeNewGalleryPhoto(index: number): void { this.newGalleryPaths = this.newGalleryPaths.filter((_, i) => i !== index); }
+  removeNewGalleryPhoto(index: number): void { this.newGallery = this.newGallery.filter((_, i) => i !== index); }
+  async editPending(cover: boolean, index = 0): Promise<void> {
+    const photo = cover ? this.newCover : this.newGallery[index];
+    if (!photo?.path) return;
+    try {
+      const source = await api.mediaFilePreview(photo.path, 1400);
+      this.editingPending = { cover, index, photo, source };
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  readonly previewPending = (operations: EditOperation[]): Promise<PreviewData> =>
+    api.mediaFilePreview(this.editingPending!.photo.path!, 1400, operations);
+  async applyPendingEdit(operations: EditOperation[]): Promise<void> {
+    const pending = this.editingPending;
+    if (!pending?.photo.path) return;
+    pending.photo.operations = operations;
+    try { pending.photo.thumb = (await api.mediaFilePreview(pending.photo.path, 260, operations)).data_url; }
+    catch (error) { this.errorMessage = this.error(error); }
+    this.editingPending = null;
+    this.change.detectChanges();
+  }
+  clearPendingEdit(photo: PendingPhoto): void {
+    photo.operations = [];
+    if (photo.path) void api.mediaFilePreview(photo.path, 260).then(p => { photo.thumb = p.data_url; this.change.detectChanges(); });
+  }
+  openLibraryPicker(purpose: 'new-cover' | 'new-gallery' | 'existing-cover' | 'existing-gallery', artworkId?: string): void {
+    this.libraryPicker = { purpose, artworkId };
+  }
+  async onLibraryPicked(item: MediaItem): Promise<void> {
+    const picker = this.libraryPicker;
+    if (!picker) return;
+    this.libraryPicker = null;
+    const label = item.title || item.original_name;
+    try {
+      if (picker.purpose === 'new-cover' || picker.purpose === 'new-gallery') {
+        const thumb = await api.mediaThumbnail(item.id);
+        const photo: PendingPhoto = { mediaId: item.id, label, operations: [], thumb };
+        if (picker.purpose === 'new-cover') this.newCover = photo;
+        else if (this.newGallery.length < 20 && !this.newGallery.some(g => g.mediaId === item.id)) this.newGallery = [...this.newGallery, photo];
+      } else if (picker.artworkId) {
+        const artworkId = picker.artworkId;
+        if (picker.purpose === 'existing-cover') {
+          if (await this.run(() => api.artworkSetCoverFromMedia(artworkId, item.id), this.tr('Copertina aggiornata'))) {
+            delete this.thumbnails[artworkId]; await this.refresh();
+          }
+        } else if (await this.run(() => api.artworkAddGalleryFromMedia(artworkId, item.id, this.galleryCaption || null), this.tr('Fotografia aggiunta alla galleria'))) {
+          this.galleryImages = await api.listArtworkGallery(artworkId);
+          this.galleryCaption = '';
+        }
+      }
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  /** Open a picture of an artwork in the library, where it can be edited (a new version is created). */
+  async editInMediaCenter(path: string | null): Promise<void> {
+    if (!path) return;
+    try {
+      const id = await api.mediaIdForPath(path);
+      if (!id) { this.errorMessage = this.tr('Immagine non trovata nella libreria'); return; }
+      this.artworkDialog = false; this.closeGallery();
+      this.navigate('media');
+      this.mediaOpenId = id;
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async pickRaw(): Promise<void> {
+    try {
+      const selected = await open({ directory: false, multiple: false, title: this.tr('Scegli file RAW…'),
+        filters: [{ name: 'RAW', extensions: this.rawExtensions }] });
+      if (typeof selected === 'string') this.newRawPath = selected;
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async attachRaw(artworkId: string): Promise<void> {
+    if (this.busy) return;
+    try {
+      const selected = await open({ directory: false, multiple: false, title: this.tr('Scegli file RAW…'),
+        filters: [{ name: 'RAW', extensions: this.rawExtensions }] });
+      if (typeof selected !== 'string') return;
+      await this.run(() => api.attachArtworkRaw(artworkId, selected), this.tr('File RAW allegato'));
+    } catch (error) { this.errorMessage = this.error(error); }
+  }
+  async removeRaw(artworkId: string): Promise<void> {
+    if (!window.confirm(this.tr('Rimuovere il file RAW allegato? Il file dell’archivio verrà eliminato.'))) return;
+    await this.run(() => api.removeArtworkRaw(artworkId), this.tr('File RAW rimosso'));
+  }
+  async exportRaw(artworkId: string): Promise<void> {
+    const raw = this.rawByArtwork[artworkId];
+    if (!raw || this.busy) return;
+    try {
+      const extension = raw.original_name.split('.').pop() ?? 'raw';
+      const destination = await save({ title: this.tr('Salva copia del file RAW'), defaultPath: raw.original_name,
+        filters: [{ name: extension.toUpperCase(), extensions: [extension] }] });
+      if (typeof destination !== 'string') return;
+      await this.run(() => api.exportArtworkRaw(artworkId, destination), this.tr('Copia del file RAW salvata'));
+    } catch (error) { this.errorMessage = this.error(error); }
+  }
   onWithSaleChange(): void {
     if (this.withSale && !this.newSaleDraft.collector_id) {
       this.newSaleDraft.collector_id = this.collectors.length ? '' : '__new__';
@@ -745,7 +873,10 @@ export class AppComponent implements OnInit {
       if (![tax, shipping].every(v => Number.isFinite(v) && v >= 0) || tax + shipping > Math.round(amount * 100)) {
         this.errorMessage = this.tr('Importo tasse (€)') + ' / ' + this.tr('Spese spedizione (€)'); return;
       }
+      const payment = paymentToInput(this.newSalePayment, Math.round(amount * 100));
+      if (!payment.ok) { this.errorMessage = this.tr(payment.error); return; }
       sale = {
+        payment: payment.input,
         collector_id: newCollector ? null : draft.collector_id,
         new_collector_name: newCollector ? (draft.new_collector_name ?? '').trim() : null,
         amount_cents: Math.round(amount * 100), sold_at: draft.sold_at, notes: draft.notes,
@@ -753,9 +884,10 @@ export class AppComponent implements OnInit {
       };
     }
     const { id: _unused, ...record } = this.artworkDraft;
+    const source = (photo: PendingPhoto): PhotoSource => ({ path: photo.path ?? null, media_id: photo.mediaId ?? null, operations: photo.operations });
     const input: NewArtworkInput = {
       artwork: { ...record, code: null, status: this.withSale ? 'sold' : record.status },
-      cover_path: this.newCoverPath, gallery_paths: this.newGalleryPaths, sale
+      cover: this.newCover ? source(this.newCover) : null, gallery: this.newGallery.map(source), raw_path: this.newRawPath, sale
     };
     if (await this.run(() => api.createArtworkFull(input), this.tr('Opera salvata'))) this.artworkDialog = false;
   }
@@ -1009,6 +1141,7 @@ export class AppComponent implements OnInit {
       collector_id: this.collectors[0]?.id ?? '',
       amount_eur: null, taxes_eur:0, shipping_eur:0, sold_at: today(), notes: null
     };
+    this.salePayment = emptyPayment(today());
     this.saleDialog = true;
   }
   async saveSale(): Promise<void> {
@@ -1021,16 +1154,47 @@ export class AppComponent implements OnInit {
     if (![tax_cents,shipping_cents].every(v=>Number.isFinite(v)&&v>=0) || tax_cents+shipping_cents>Math.round(amount*100)) {
       this.errorMessage=this.tr('Importo tasse (€)')+' / '+this.tr('Spese spedizione (€)');return;
     }
+    const payment = paymentToInput(this.salePayment, Math.round(amount * 100));
+    if (!payment.ok) { this.errorMessage = this.tr(payment.error); return; }
     const input = {
       artwork_id: this.saleDraft.artwork_id, collector_id: this.saleDraft.collector_id,
       amount_cents: Math.round(amount * 100), tax_cents, shipping_cents,
-      sold_at: this.saleDraft.sold_at, notes: this.saleDraft.notes
+      sold_at: this.saleDraft.sold_at, notes: this.saleDraft.notes, payment: payment.input
     };
     if (await this.run(() => api.recordSale(input), 'Vendita registrata e stato dell’opera aggiornato')) this.saleDialog = false;
   }
   async deleteSale(sale: Sale): Promise<void> {
     if (!window.confirm(`Eliminare la vendita di "${sale.artwork_title}"? L'opera tornerà disponibile.`)) return;
     await this.run(() => api.deleteSale(sale.id), 'Vendita eliminata');
+  }
+  get saleAmountCents(): number | null {
+    const cents = toCents(this.saleDraft.amount_eur);
+    return Number.isFinite(cents) && cents > 0 ? cents : null;
+  }
+  get newSaleAmountCents(): number | null {
+    const cents = toCents(this.newSaleDraft.amount_eur);
+    return Number.isFinite(cents) && cents > 0 ? cents : null;
+  }
+  nextInstallment(saleId: string): Installment | null {
+    return (this.installmentsBySale[saleId] ?? []).find(item => item.status !== 'PAID') ?? null;
+  }
+  installmentStatusLabel(status: Installment['status']): string {
+    return this.tr({ PAID: 'Pagata', PARTIAL: 'Parzialmente pagata', OVERDUE: 'Scaduta', DUE: 'Da incassare' }[status]);
+  }
+  startPlanEdit(sale: Sale): void {
+    const existing = this.installmentsBySale[sale.id] ?? [];
+    this.planDraft = { ...emptyPayment(today()), mode: 'INSTALLMENTS', count: Math.max(2, existing.length || 3),
+      installments: existing.map(i => ({ due_date: i.due_date, amount_eur: i.amount_cents / 100, notes: i.notes })) };
+    this.planEditing = true;
+  }
+  async savePlan(sale: Sale): Promise<void> {
+    const plan = installmentRows(this.planDraft.installments, sale.amount_cents);
+    if (!plan.ok) { this.errorMessage = this.tr(plan.error); return; }
+    if (await this.run(() => api.saveSaleInstallments(sale.id, plan.items), this.tr('Piano rateale salvato'))) this.planEditing = false;
+  }
+  async removePlan(sale: Sale): Promise<void> {
+    if (!window.confirm(this.tr('Rimuovere il piano rateale? Gli incassi registrati non vengono modificati.'))) return;
+    await this.run(() => api.saveSaleInstallments(sale.id, []), this.tr('Piano rateale rimosso'));
   }
   balanceForSale(sale: Sale): SaleBalance {
     return this.balancesBySale[sale.id] ?? {
@@ -1042,6 +1206,7 @@ export class AppComponent implements OnInit {
     return this.receipts.filter(receipt=>receipt.sale_id===saleId);
   }
   openSaleReceipts(sale: Sale): void {
+    this.planEditing = false;
     this.selectedReceiptSale=sale;
     this.receiptAttachments = {};
     this.receiptPreview = null;

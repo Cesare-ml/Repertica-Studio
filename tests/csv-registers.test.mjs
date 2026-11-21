@@ -5,9 +5,9 @@ import { csvRegisterOptions } from '../src/app/csv-registers.ts';
 import { translate } from '../src/app/i18n.ts';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
-const kinds = ['artworks', 'gallery', 'collectors', 'certificates', 'sales', 'balances', 'receipts', 'expenses', 'allocations'];
+const kinds = ['artworks', 'gallery', 'collectors', 'certificates', 'sales', 'balances', 'receipts', 'expenses', 'allocations', 'installments'];
 
-test('all nine backend CSV register kinds have unique local export labels and filenames', () => {
+test('all ten backend CSV register kinds have unique local export labels and filenames', () => {
   assert.deepEqual(Object.keys(csvRegisterOptions).sort(), [...kinds].sort());
   const backend = read('src-tauri/src/export.rs');
   const filenames = new Set();

@@ -168,3 +168,35 @@ test('scheduled backup is opt-in, local and reports through a native event', () 
   assert.match(get('src/app/app.component.html'), /Attiva il backup automatico/);
 });
 
+test('media center, image editor, RAW attachment and installments are wired end to end', () => {
+  const lib = get('src-tauri/src/lib.rs');
+  for (const command of ['media::media_list', 'media::media_apply_edit', 'media::media_restore_revision', 'media::media_purge',
+    'raw_files::attach_artwork_raw', 'raw_files::export_artwork_raw', 'installments::save_sale_installments', 'installments::generate_installment_plan']) {
+    assert.ok(lib.includes(command), command);
+  }
+  const html = get('src/app/app.component.html');
+  assert.match(html, /<rp-media-center/);
+  assert.match(html, /<rp-media-editor/);
+  assert.match(html, /<rp-payment-plan/);
+  const api = get('src/app/api.ts');
+  for (const name of ['mediaApplyEdit', 'mediaRestoreRevision', 'attachArtworkRaw', 'saveSaleInstallments']) assert.ok(api.includes(name), name);
+});
+
+test('the new artwork dialog shows photographs and the RAW file before the descriptive fields', () => {
+  const html = get('src/app/app.component.html');
+  const dialog = html.slice(html.indexOf('aria-labelledby="artwork-title"'));
+  const photos = dialog.indexOf('Fotografie e file RAW');
+  const firstField = dialog.indexOf("tr('Titolo *')");
+  assert.ok(photos > 0 && firstField > photos, 'photographs come first');
+  assert.ok(dialog.indexOf("tr('Codice archivio')") > photos);
+});
+
+test('edits never overwrite the original: the engine only writes new revision files', () => {
+  const media = get('src-tauri/src/media.rs');
+  const production = media.slice(0, media.indexOf('#[cfg(test)]'));
+  assert.match(production, /'ORIGINAL'/);
+  assert.match(production, /kind,image_path,width,height,size_bytes,sha256,operations_json,created_at\)\s*VALUES\(\?1,\?2,\?3,'EDIT'/);
+  assert.doesNotMatch(production, /fs::write\(.*image_path/);
+  assert.doesNotMatch(get('src-tauri/src/imaging.rs'), /std::net|TcpStream|reqwest/);
+});
+
