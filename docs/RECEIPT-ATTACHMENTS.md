@@ -1,4 +1,4 @@
-# Allegati locali degli incassi — prima fase backend (SQLite v6)
+# Allegati locali degli incassi — interfaccia vendite + SQLite v6
 
 Gli incassi sono registrazioni **manuali**, non pagamenti verificati dalla banca.
 La migrazione transazionale SQLite **v5 → v6** aggiunge la tabella
@@ -27,9 +27,25 @@ Le operazioni sono serializzate dal mutex del database, lo stesso del backup.
 Se la copia del file riesce ma l'inserimento SQLite fallisce, il nuovo file
 viene rimosso. Nessun servizio remoto, account o libreria di upload cloud.
 
-**Stato:** è pronta l'API Rust con test; **la selezione file e la visualizzazione
-degli allegati nel registro vendite Angular sono ancora da integrare**.
-Non considerare la funzionalità completata finché il flusso UI non è collaudato.
+**Stato:** l'interfaccia Angular del registro vendite ora consente di
+scegliere tramite dialogo nativo un PDF, JPEG, PNG o WebP per ogni incasso,
+mostrare il nome originale, consultare le immagini, esportare qualsiasi
+documento su un percorso scelto dall'utente e rimuovere l'allegato dopo conferma.
+La cancellazione dell'incasso viene disabilitata se ha un allegato collegato:
+occorre prima rimuovere il documento. Il salvataggio rispetta il limite Rust
+di 12 MiB e il file originale non deve restare accessibile dopo l'acquisizione.
+
+**PDF:** per non allentare le restrizioni di sicurezza della WebView Tauri
+(`object-src 'none'`, `frame-src 'none'`), non viene incorporato un visualizzatore
+PDF. Usa **Esporta documento** per creare una copia verificata e aprirla
+con il lettore PDF del sistema operativo. La scrittura richiede estensione
+coerente col formato, rifiuta sovrascritture e impedisce di salvare all'interno
+della cartella dell'archivio attivo. La lettura previa verifica
+l'SHA-256 originale del file; gli errori vengono mostrati senza
+sostituire file già esistenti.
+
+**Da collaudare:** dialoghi nativi, anteprima delle immagini ed esportazione
+PDF su Windows/macOS/Linux, inclusi dischi esterni e file protetti.
 
 ## Portabilità e ripristino
 
@@ -58,4 +74,4 @@ la lettura e la rimozione, oltre al rifiuto di un backup cui è stato tolto
 un allegato sia dal disco sia dal manifest. Test aggiuntivi verificano backup
 con manifest ricalcolato dopo alterazioni del file, dell'hash SQLite o del MIME,
 nonché il rifiuto della pubblicazione di backup da una sorgente già corrotta.
-Restano necessari i test reali su Windows/macOS/Linux, USB e NAS, compreso il flusso interattivo Angular.
+Restano necessari i test reali su Windows/macOS/Linux, USB e NAS, compreso il flusso interattivo Angular. Il test Node controlla i collegamenti IPC e la CSP, non simula una WebView o un dialogo nativo.

@@ -65,6 +65,7 @@ pub fn run() {
             receipt_attachments::attach_sale_receipt_file,
             receipt_attachments::sale_receipt_attachment_data,
             receipt_attachments::remove_sale_receipt_attachment,
+            receipt_attachments::export_sale_receipt_attachment,
             export::export_ledger_csv
         ])
         .run(tauri::generate_context!())

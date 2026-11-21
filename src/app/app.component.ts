@@ -14,7 +14,7 @@ import type {
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
-  MediaAudit, MediaIssue
+  MediaAudit, MediaIssue, ReceiptAttachment
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
@@ -80,6 +80,10 @@ export class AppComponent implements OnInit {
   receipts: SaleReceipt[] = [];
   balancesBySale: Record<string, SaleBalance> = {};
   selectedReceiptSale: Sale | null = null;
+  receiptAttachments: Record<string, ReceiptAttachment | null> = {};
+  receiptAttachmentsLoading = false;
+  receiptPreview: { name: string; src: string } | null = null;
+  private receiptAttachmentLoadVersion = 0;
   receiptDraft = {
     amount_eur: null as number | null, received_at: today(),
     method: 'bank_transfer' as SaleReceiptMethod,
@@ -311,7 +315,8 @@ export class AppComponent implements OnInit {
       unreadable: 'File non leggibile',
       not_regular: 'File non regolare o collegamento simbolico',
       invalid_size: 'Dimensione file non valida',
-      invalid_header: 'Formato o intestazione non valida'
+      invalid_header: 'Formato o intestazione non valida',
+      invalid_snapshot: 'Snapshot del certificato non valido'
     };
     return this.tr(labels[problem]);
   }
@@ -682,9 +687,12 @@ export class AppComponent implements OnInit {
   }
   openSaleReceipts(sale: Sale): void {
     this.selectedReceiptSale=sale;
+    this.receiptAttachments = {};
+    this.receiptPreview = null;
     const remaining=this.balanceForSale(sale).outstanding_cents;
     this.receiptDraft={amount_eur:remaining>0?remaining/100:null,
       received_at:today(),method:'bank_transfer',reference:null,notes:null};
+    void this.loadReceiptAttachments(sale.id);
   }
   async saveSaleReceipt(): Promise<void> {
     const sale=this.selectedReceiptSale;
@@ -705,6 +713,93 @@ export class AppComponent implements OnInit {
   async deleteSaleReceipt(receipt: SaleReceipt): Promise<void> {
     if (!window.confirm(this.tr('Confermi eliminazione incasso?'))) return;
     await this.run(()=>api.deleteSaleReceipt(receipt.id),this.tr('Incasso eliminato'));
+  }
+
+  private async loadReceiptAttachments(saleId: string): Promise<void> {
+    const version = ++this.receiptAttachmentLoadVersion;
+    this.receiptAttachmentsLoading = true;
+    try {
+      const entries = await Promise.all(this.saleReceipts(saleId).map(async (receipt) =>
+        [receipt.id, await api.getReceiptAttachment(receipt.id)] as const));
+      if (version === this.receiptAttachmentLoadVersion && this.selectedReceiptSale?.id === saleId) {
+        this.receiptAttachments = Object.fromEntries(entries);
+      }
+    } catch (error) {
+      if (version === this.receiptAttachmentLoadVersion && this.selectedReceiptSale?.id === saleId) {
+        this.errorMessage = this.error(error);
+      }
+    } finally {
+      if (version === this.receiptAttachmentLoadVersion) {
+        this.receiptAttachmentsLoading = false;
+        this.change.detectChanges();
+      }
+    }
+  }
+  async attachReceiptFile(receipt: SaleReceipt): Promise<void> {
+    if (this.busy || this.receiptAttachmentsLoading || !this.initialized) return;
+    try {
+      const selected = await open({
+        directory: false, multiple: false, title: this.tr('Allega documento'),
+        filters: [{ name: 'PDF / JPEG / PNG / WebP', extensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'] }]
+      });
+      if (typeof selected !== 'string' || this.selectedReceiptSale?.id !== receipt.sale_id) return;
+      const success = await this.run(
+        () => api.attachReceiptFile(receipt.id, selected), this.tr('Documento allegato'));
+      if (success) await this.loadReceiptAttachments(receipt.sale_id);
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    }
+    this.change.detectChanges();
+  }
+  async viewReceiptImage(receipt: SaleReceipt, file: ReceiptAttachment): Promise<void> {
+    if (this.busy || this.receiptAttachmentsLoading || !file.mime_type.startsWith('image/')) return;
+    this.busy = true;
+    this.errorMessage = '';
+    try {
+      const data = await api.receiptAttachmentData(receipt.id);
+      if (!data.startsWith(`data:${file.mime_type};base64,`)) {
+        throw new Error(this.tr('Formato documento non valido'));
+      }
+      if (this.selectedReceiptSale?.id === receipt.sale_id) {
+        this.receiptPreview = { name: file.original_name, src: data };
+      }
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    } finally {
+      this.busy = false;
+      this.change.detectChanges();
+    }
+  }
+  async exportReceiptFile(receipt: SaleReceipt, file: ReceiptAttachment): Promise<void> {
+    if (this.busy || this.receiptAttachmentsLoading || !this.initialized) return;
+    const ext = file.mime_type === 'application/pdf' ? 'pdf' :
+      file.mime_type === 'image/jpeg' ? 'jpg' :
+      file.mime_type === 'image/png' ? 'png' : 'webp';
+    try {
+      const destination = await save({
+        title: this.tr('Esporta documento'),
+        defaultPath: `ReperticaStudio-incasso-${receipt.id.slice(0, 8)}.${ext}`,
+        filters: [{ name: 'PDF / JPEG / PNG / WebP', extensions: [ext] }]
+      });
+      if (typeof destination !== 'string') return;
+      await this.run(
+        () => api.exportReceiptAttachment(receipt.id, destination), this.tr('Documento esportato'));
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    }
+    this.change.detectChanges();
+  }
+  async removeReceiptFile(receipt: SaleReceipt): Promise<void> {
+    if (this.busy || this.receiptAttachmentsLoading ||
+      !window.confirm(this.tr('Confermi rimozione dell’allegato?'))) return;
+    const success = await this.run(
+      () => api.removeReceiptAttachment(receipt.id), this.tr('Documento rimosso'));
+    if (success) {
+      this.receiptPreview = null;
+      if (this.selectedReceiptSale?.id === receipt.sale_id) {
+        await this.loadReceiptAttachments(receipt.sale_id);
+      }
+    }
   }
   newCertificate(): void {
     this.certificateDraft = {

@@ -27,7 +27,7 @@ export interface GalleryImage {
   caption: string | null; created_at: string; sort_order: number;
 }
 
-export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header';
+export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header' | 'invalid_snapshot';
 export interface MediaIssue {
   artworkId: string; imageId: string | null; role: 'primary' | 'gallery' | 'certificate';
   path: string; problem: MediaProblem;
@@ -100,6 +100,11 @@ export type SaleReceiptMethod = 'bank_transfer' | 'cash' | 'card' | 'other';
 export interface SaleReceipt {
   id: string; sale_id: string; received_at: string; amount_cents: number;
   method: SaleReceiptMethod; reference: string | null; notes: string | null; created_at: string;
+}
+export interface ReceiptAttachment {
+  receipt_id: string; media_path: string; original_name: string;
+  mime_type: 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp';
+  size_bytes: number; sha256: string; created_at: string;
 }
 export type SaleReceiptInput = Pick<SaleReceipt, 'sale_id' | 'received_at' | 'amount_cents' | 'method' | 'reference' | 'notes'>;
 export interface MonthlyReceipt {

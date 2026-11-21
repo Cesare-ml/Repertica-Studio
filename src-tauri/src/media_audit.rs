@@ -124,6 +124,10 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
         rows
     };
 
+    // Invalid certificate snapshots cannot be trusted to expose a historic image.
+    // Keep a separate issue for each one instead of silently skipping it.
+    let mut snapshot_issues: Vec<MediaIssue> = Vec::new();
+
     // A certificate keeps the cover path frozen at issuance. The file may no
     // longer be referenced by the artwork or its gallery after a replacement.
     // Inspect each historical reference independently, without editing SQLite.
@@ -136,16 +140,32 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
         ))).map_err(error)?;
         for snapshot in snapshots {
             let (artwork_id, certificate_id, json) = snapshot.map_err(error)?;
-            // Legacy malformed JSON has no reliably discoverable media path.
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
-                if let Some(path) = value.get("image_path").and_then(|v| v.as_str()) {
-                    references.push(MediaReference {
-                        artwork_id,
-                        image_id: Some(certificate_id),
-                        role: "certificate".into(),
-                        path: path.to_owned(),
-                    });
-                }
+            // Missing or null image_path is legitimate for a certificate without
+            // a photograph; malformed JSON, non-objects and other value types are not.
+            let image_path = match serde_json::from_str::<serde_json::Value>(&json) {
+                Ok(serde_json::Value::Object(fields)) => match fields.get("image_path") {
+                    None | Some(serde_json::Value::Null) => Ok(None),
+                    Some(serde_json::Value::String(path)) => Ok(Some(path.clone())),
+                    _ => Err(()),
+                },
+                _ => Err(()),
+            };
+            match image_path {
+                Ok(Some(path)) => references.push(MediaReference {
+                    artwork_id,
+                    image_id: Some(certificate_id),
+                    role: "certificate".into(),
+                    path,
+                }),
+                Ok(None) => {},
+                Err(()) => snapshot_issues.push(MediaIssue {
+                    artwork_id,
+                    image_id: Some(certificate_id),
+                    role: "certificate".into(),
+                    // Never expose raw or untrusted snapshot JSON in a diagnostic.
+                    path: "snapshot_json".into(),
+                    problem: "invalid_snapshot",
+                }),
             }
         }
     }
@@ -154,6 +174,17 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
         checked: 0, healthy: 0, problems: 0, truncated: false,
         issues: Vec::new(),
     };
+    // Include unreadable historical snapshots in the same bounded, read-only
+    // report. A broken snapshot counts as one checked item, not a healthy image.
+    for issue in snapshot_issues {
+        result.checked += 1;
+        result.problems += 1;
+        if result.issues.len() < MAX_VISIBLE_ISSUES {
+            result.issues.push(issue);
+        } else {
+            result.truncated = true;
+        }
+    }
     for entry in references {
         result.checked += 1;
         if let Some(problem) = check_media(&db.directory, &entry.path) {
@@ -270,8 +301,12 @@ mod tests {
             }
         }
         let report = audit_core(&db).unwrap();
-        // The malformed legacy snapshot has no discoverable image reference.
-        assert_eq!((report.checked, report.healthy, report.problems), (4, 2, 2));
+        // A malformed historical snapshot is a visible problem, never skipped.
+        assert_eq!((report.checked, report.healthy, report.problems), (5, 2, 3));
+        let legacy = report.issues.iter().find(|i| i.image_id.as_deref() == Some("legacy")).unwrap();
+        assert_eq!(legacy.problem, "invalid_snapshot");
+        assert_eq!(legacy.role, "certificate");
+        assert_eq!(legacy.path, "snapshot_json");
         let historical = report.issues.iter().find(|i| i.image_id.as_deref() == Some("old")).unwrap();
         assert_eq!(historical.role, "certificate");
         assert_eq!(historical.artwork_id, "a");
@@ -282,12 +317,52 @@ mod tests {
 
         fs::write(db.directory.join("media/old.jpg"), [0xff, 0xd8, 0xff, 0]).unwrap();
         let repaired = audit_core(&db).unwrap();
-        assert_eq!((repaired.checked, repaired.healthy, repaired.problems), (4, 3, 1));
+        assert_eq!((repaired.checked, repaired.healthy, repaired.problems), (5, 3, 2));
         // Auditing must leave historical certificate records untouched.
         let conn = db.conn.lock().unwrap();
         let count: i64 = conn.query_row("SELECT count(*) FROM certificates", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 4);
     }
 
+    #[test]
+    fn malformed_certificate_snapshots_are_reported_without_exposing_or_changing_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        artwork(&db, "a", None);
+        let snapshots = [
+            ("syntax", "{not valid"),
+            ("array", "[]"),
+            ("bad_path_type", r#"{"image_path":42}"#),
+            ("no_picture", r#"{"image_path":null}"#),
+            ("legacy_without_path", "{}"),
+        ];
+        {
+            let conn = db.conn.lock().unwrap();
+            for (id, json) in snapshots {
+                conn.execute(
+                    "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                     VALUES(?1,'a',?1,'2026-11-21','Artist',?2,'t')",
+                    params![id, json],
+                ).unwrap();
+            }
+        }
+
+        let report = audit_core(&db).unwrap();
+        assert_eq!((report.checked, report.healthy, report.problems), (3, 0, 3));
+        assert!(!report.truncated);
+        for id in ["syntax", "array", "bad_path_type"] {
+            let issue = report.issues.iter().find(|i| i.image_id.as_deref() == Some(id)).unwrap();
+            assert_eq!((issue.problem, issue.path.as_str(), issue.role.as_str()),
+                ("invalid_snapshot", "snapshot_json", "certificate"));
+        }
+        let conn = db.conn.lock().unwrap();
+        for (id, original) in snapshots {
+            let saved: String = conn.query_row(
+                "SELECT snapshot_json FROM certificates WHERE id = ?1",
+                [id], |r| r.get(0)
+            ).unwrap();
+            assert_eq!(saved, original);
+        }
+    }
 
 }

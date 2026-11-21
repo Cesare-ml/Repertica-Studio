@@ -77,12 +77,15 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              ORDER BY s.sold_at,s.id"
         ),
         "receipts" => (
-            "receipt_id;sale_id;received_at;artwork_id;artwork_code;artwork_title;collector_id;collector_name;amount_cents;currency;method;reference;notes;created_at",
+            "receipt_id;sale_id;received_at;artwork_id;artwork_code;artwork_title;collector_id;collector_name;amount_cents;currency;method;reference;notes;created_at;attachment_path;attachment_original_name;attachment_mime;attachment_size_bytes;attachment_sha256;attachment_created_at",
             "SELECT r.id,r.sale_id,r.received_at,s.artwork_id,a.code,a.title,s.collector_id,c.name,
-                    r.amount_cents,s.currency,r.method,r.reference,r.notes,r.created_at
+                    r.amount_cents,s.currency,r.method,r.reference,r.notes,r.created_at,
+                    evidence.media_path,evidence.original_name,evidence.mime_type,
+                    evidence.size_bytes,evidence.sha256,evidence.created_at
              FROM sale_receipts r JOIN sales s ON s.id=r.sale_id
              JOIN artworks a ON a.id=s.artwork_id
              JOIN collectors c ON c.id=s.collector_id
+             LEFT JOIN sale_receipt_attachments evidence ON evidence.receipt_id=r.id
              ORDER BY r.received_at,r.created_at,r.id"
         ),
         "expenses" => (
@@ -187,6 +190,49 @@ mod tests {
         assert!(!sales.starts_with("\u{feff}receipt_id;"));
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM sale_receipts", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn receipts_csv_links_optional_local_evidence_metadata_without_exporting_file_bytes() {
+        use sha2::{Digest, Sha256};
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let proof = b"%PDF-1.7\nPayment evidence";
+        let relative = "media/receipt-proof.pdf";
+        fs::write(db.directory.join(relative), proof).unwrap();
+        let sha = format!("{:x}", Sha256::digest(proof));
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A-1','Opera','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Collector','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',5000,'2026-11-01','t');
+            INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('r1','s','2026-11-05',2000,'cash','t'),
+                      ('r2','s','2026-11-06',1000,'card','t');
+        "#).unwrap();
+        conn.execute(
+            "INSERT INTO sale_receipt_attachments(
+                receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at
+             ) VALUES('r1',?1,'=proof.pdf','application/pdf',?2,?3,'t')",
+            rusqlite::params![relative, proof.len() as i64, sha],
+        ).unwrap();
+
+        let csv = render_csv(&conn, "receipts").unwrap();
+        assert!(csv.starts_with(
+            "\u{feff}receipt_id;sale_id;received_at;artwork_id;artwork_code;artwork_title;collector_id;collector_name;amount_cents;currency;method;reference;notes;created_at;attachment_path;attachment_original_name;attachment_mime;attachment_size_bytes;attachment_sha256;attachment_created_at\r\n"
+        ));
+        assert!(csv.contains(&format!(
+            ";\"{relative}\";\"'=proof.pdf\";\"application/pdf\";{};\"{sha}\";\"t\"\r\n",
+            proof.len()
+        )), "{csv}");
+        let without_evidence = csv.lines().find(|line| line.starts_with("\"r2\";")).unwrap();
+        assert!(without_evidence.ends_with(";\"\";\"\";\"\";\"\";\"\";\"\""), "{without_evidence}");
+        assert_eq!(csv.matches("\r\n").count(), 3);
+        assert!(!csv.contains("Payment evidence")); // Bytes stay in the verified backup, not the CSV.
     }
 
     #[test]

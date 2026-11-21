@@ -3,7 +3,7 @@ import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
-  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, MediaAudit
+  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -38,6 +38,16 @@ export const api = {
   receiptYearOverview: (year: number) => invoke<ReceiptYearOverview>('receipt_year_overview', {year}),
   recordSaleReceipt: (input: SaleReceiptInput) => invoke<SaleReceipt>('record_sale_receipt', {input}),
   deleteSaleReceipt: (id: string) => invoke<void>('delete_sale_receipt', {id}),
+  getReceiptAttachment: (receiptId: string) =>
+    invoke<ReceiptAttachment | null>('get_sale_receipt_attachment', {receiptId}),
+  attachReceiptFile: (receiptId: string, sourcePath: string) =>
+    invoke<ReceiptAttachment>('attach_sale_receipt_file', {receiptId, sourcePath}),
+  receiptAttachmentData: (receiptId: string) =>
+    invoke<string>('sale_receipt_attachment_data', {receiptId}),
+  removeReceiptAttachment: (receiptId: string) =>
+    invoke<void>('remove_sale_receipt_attachment', {receiptId}),
+  exportReceiptAttachment: (receiptId: string, destination: string) =>
+    invoke<string>('export_sale_receipt_attachment', {receiptId, destination}),
   listCertificates: () => invoke<Certificate[]>('list_certificates'),
   issueCertificate: (input: CertificateInput) => invoke<Certificate>('issue_certificate', { input }),
   overview: () => invoke<Overview>('overview'),

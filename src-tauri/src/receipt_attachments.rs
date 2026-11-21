@@ -191,6 +191,50 @@ pub fn sale_receipt_attachment_data(db: State<'_, Database>, receipt_id: String)
 pub fn remove_sale_receipt_attachment(db: State<'_, Database>, receipt_id: String)
     -> Result<(), String> { detach_core(&db, &receipt_id) }
 
+
+fn export_core(db: &Database, receipt_id: &str, destination: &Path) -> Result<String, String> {
+    // Reuse the read path: it validates the stored file type, length and original
+    // SHA-256 *before* any external file is written. No original source path is used.
+    let url = data_core(db, receipt_id)?;
+    let (prefix, encoded) = url.split_once(";base64,").ok_or("Formato documento interno non valido")?;
+    let ext = match prefix {
+        "data:application/pdf" => "pdf",
+        "data:image/jpeg" => "jpg",
+        "data:image/png" => "png",
+        "data:image/webp" => "webp",
+        _ => return Err("Tipo documento non consentito".into()),
+    };
+    if !destination.is_absolute()
+        || !destination.extension().and_then(|v| v.to_str()).is_some_and(|v| v.eq_ignore_ascii_case(ext)) {
+        return Err(format!("Seleziona un percorso assoluto con estensione .{ext}"));
+    }
+    let parent = destination.parent().ok_or("Cartella di esportazione non valida")?;
+    let parent = fs::canonicalize(parent).map_err(err)?;
+    if !parent.is_dir() { return Err("Cartella di esportazione non valida".into()); }
+    let live = fs::canonicalize(&db.directory).map_err(err)?;
+    if parent.starts_with(live) {
+        return Err("Non esportare documenti all'interno dell'archivio attivo".into());
+    }
+    let name = destination.file_name().ok_or("Nome file non valido")?;
+    let target = parent.join(name);
+    let bytes = STANDARD.decode(encoded).map_err(err)?;
+    let mut output = OpenOptions::new().write(true).create_new(true)
+        .open(&target).map_err(err)?;
+    let written = output.write_all(&bytes).and_then(|_| output.sync_all());
+    drop(output);
+    if let Err(e) = written {
+        let _ = fs::remove_file(&target);
+        return Err(err(e));
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+#[tauri::command]
+pub fn export_sale_receipt_attachment(
+    db: State<'_, Database>, receipt_id: String, destination: String,
+) -> Result<String, String> {
+    export_core(&db, &receipt_id, Path::new(&destination))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +261,12 @@ mod tests {
         assert_eq!(saved.mime_type, "application/pdf");
         assert_eq!(saved.size_bytes, 16);
         assert!(data_core(&db, "r").unwrap().starts_with("data:application/pdf;base64,"));
+        let exported = tmp.path().join("copy.pdf");
+        assert_eq!(export_core(&db, "r", &exported).unwrap(), exported.to_string_lossy());
+        assert_eq!(fs::read(&exported).unwrap(), b"%PDF-1.7\nreceipt");
+        assert!(export_core(&db, "r", &exported).is_err()); // never overwrite
+        assert!(export_core(&db, "r", &tmp.path().join("wrong.png")).is_err());
+        assert!(export_core(&db, "r", &db.directory.join("media/private.pdf")).is_err());
         assert!(attach_core(&db, "r", &source).is_err());
         assert!(attach_core(&db, "unknown", &source).is_err());
         assert!(db.conn.lock().unwrap().execute("DELETE FROM sale_receipts WHERE id='r'", []).is_err());
