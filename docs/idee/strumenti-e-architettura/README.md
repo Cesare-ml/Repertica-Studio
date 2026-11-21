@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (quattordicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (quindicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -23,13 +23,14 @@ Data ricognizione: **2026-11-21** (quattordicesima ricognizione). Stato uniforme
 | [REPS-TECH-015](REPS-TECH-015-diagnostica-assistenza-locale-report-privato.md) | Diagnostica per assistenza **solo su richiesta**, codice errore e report tecnico minimo senza dati dell'archivio, senza telemetria (coordinata con issue #12) | P2 | Proposta — da valutare |
 | [REPS-TECH-016](REPS-TECH-016-allegati-documentali-locali-multi-entita.md) | Allegati documentali locali riutilizzabili e verificabili, con collegamenti espliciti a più schede e senza cloud; non sostituisce allegati incasso v6 | P2 | Proposta — da valutare |
 | [REPS-TECH-017](REPS-TECH-017-protezione-archivio-attivo-cifratura-facoltativa.md) | Protezione facoltativa dei dati dell'**archivio attivo a riposo** (SQLite, WAL, media, allegati e residui), distinta dai backup cifrati di TECH-006; alternative OS prima di cifratura integrata | P2–P3 | Proposta — da valutare |
+| [REPS-TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) | Esportazioni CSV degli otto registri a memoria contenuta, snapshot coerenti e pubblicazione finale non distruttiva; robustezza verificata su dischi e NAS | P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
 Verificati sul branch `main` al **21 novembre 2026**: [README](../../../README.md), [MVP](../../MVP.md), [economia e localizzazione](../../ECONOMY-I18N.md), modelli dati e codice nativo di `db.rs`, `backup.rs`, `export.rs`, `commands.rs`.
 
 - **Già presente**: database locale SQLite, backup completo a cartella scelta con manifest e hash SHA-256, ispezione prima del ripristino e conservazione della copia precedente. Le schede non ripropongono questo sistema.
-- **Già presente**: sette CSV unidirezionali per **opere, collezionisti, certificati, vendite, saldi, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
+- **Già presente**: otto CSV unidirezionali per **opere, galleria fotografica, collezionisti, certificati, vendite, saldi, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
 - **Già pianificato**: [issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5) per migrazione assistita **da Gestionale Opere**; TECH-001 è indipendente dalla fonte, non realizza l'esportatore privato e propone prima importazione in archivio vuoto.
 - **Già pianificato**: [issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) per MCP **STDIO read-only**. TECH-002 non è un server MCP: descrive un eventuale sistema di regole **interne** all'app, attivato su esplicita autorizzazione.
 - **Già pianificato**: [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) per aggiornamenti firmati. Nessuna proposta li riguarda.
@@ -152,3 +153,11 @@ Nuova lettura diretta di `main`: [README](../../../README.md), [MVP](../../MVP.m
 - **Distinzione esplicita:** TECH-006 protegge le **copie di backup**, non l'archivio attivo; TECH-007 tratta posizione dei file; TECH-012 checkpoint prima di migrazione; TECH-001 portabilità. La PR [#14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) raccoglie 21 proposte gestionali distinte. L'eventuale cifratura non deve rendere illegibili dati senza la chiave, creare rollback/backup in chiaro silenziosi o imporre account.
 - **Sicurezza e decisione:** priorità ipotetica P2–P3 e **complessità alta/molto alta** per crittografia integrata; la guida alla cifratura OS è una possibile alternativa a rischio minore. Da verificare soprattutto bisogno reale, licenza, compatibilità con media/CSV/backup e recupero offline multipiattaforma. Nessun componente crittografico scelto né implementato.
 - **Perimetro:** aggiornata esclusivamente questa scheda e l'indice in `docs/idee/strumenti-e-architettura/`. Le **diciassette** proposte restano **«Proposta — da valutare»**, senza approvazioni, issue, modifiche al software o merge. La PR tecnica [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) rimane in bozza.
+
+
+## Quindicesima ricognizione — 21 novembre 2026
+
+- **[REPS-TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) — Esportazioni CSV scalabili e pubblicazione sicura dei file.** Nuova lettura diretta di [README](../../../README.md), [MVP](../../MVP.md), [DATA-PORTABILITY](../../DATA-PORTABILITY.md), [export.rs](../../../src-tauri/src/export.rs), [API Angular](../../../src/app/api.ts), [metadati CSV UI](../../../src/app/csv-registers.ts) e dei cataloghi documentali delle PR [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) e [#14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il codice corrente accumula **l'intero CSV in una String Rust** e mantiene il mutex SQLite durante la generazione, prima di scrivere il file definitivo. In caso di arresto anomalo, quest'ultimo potrebbe rimanere parziale. La proposta valuta writer a flusso, snapshot coerente e pubblicazione che non sovrascrive file, più test su USB/NAS. **Non** è stato misurato un problema reale di memoria o perdita: benchmark e verifica del bisogno sono prerequisiti.
+- **Funzioni presenti da conservare:** otto CSV integrali (artworks, gallery, collectors, certificates, sales, balances, receipts, expenses), separatore punto e virgola, UTF-8/BOM, CRLF, escaping formule, centesimi interi, percorso scelto dall'utente, nessuna sovrascrittura intenzionale. Gli export rimangono lettura/analisi, **non** un formato di restore; backup completo separato e verificato.
+- **Confini anti-doppione:** TECH-001 riguarda portabilità semantica con reimportazione; TECH-008 filtri salvati; TECH-009/012 backup e migrazioni; TECH-015 diagnostica di supporto. Il filone [Gestione e UX, PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) comprende ora **22** studi professionali, non modificati. Questa proposta è solo sull'affidabilità degli export esistenti, senza nuovi campi commerciali.
+- **Decisioni ancora aperte:** dimensione e frequenza reali degli export, accettabilità di brevi blocchi di scrittura, supporto alle cancellazioni, garanzie realistiche sui filesystem di rete. Priorità **P2 ipotetica** e complessità media/alta. **Diciotto proposte** nel catalogo, tutte **Proposta — da valutare**; nessuna approvazione, mandato, issue, sviluppo o merge.
