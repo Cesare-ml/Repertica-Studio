@@ -33,3 +33,22 @@ Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** co
 Il certificato conserva uno snapshot immutabile della scheda al momento dell'emissione. Quando l'immagine principale viene sostituita, il file originale può non comparire più né nella scheda attuale né nella galleria: rimane però necessario per il certificato storico. La verifica del backup controlla ora anche i percorsi `image_path` presenti negli snapshot JSON **validi** dei certificati. Un backup che ometta una di queste immagini viene rifiutato **prima** di sostituire l'archivio attivo, anche se SQLite e tutti gli hash dei file ancora elencati nel manifest risultano corretti.
 
 I file storici sono copiati nel backup insieme agli altri media. Gli snapshot storici malformati, che possono esistere in vecchi archivi, vengono conservati senza tentare di dedurne percorsi: non è possibile certificare automaticamente le loro immagini. Il controllo non recupera fotografie già eliminate; per quelle occorre una copia precedente. Il ripristino richiede sempre collaudo desktop reale da dischi esterni e NAS.
+
+## Verifica completa della directory media
+
+La verifica del backup controlla anche che la cartella `media/` sia una directory
+reale, non un collegamento simbolico, e che **ogni file fisicamente presente**
+in `media/` sia elencato nel `manifest.json`. Il controllo riguarda anche i
+file che non sono referenziati da opere o certificati: potrebbero essere
+materiali storici ancora importanti per l'utente. In precedenza un file
+aggiunto manualmente a una cartella di backup senza aggiornarne il manifest
+poteva essere ignorato durante il ripristino e quindi andare perduto
+silenziosamente. Adesso l'ispezione e il ripristino rifiutano quel backup
+prima di sostituire l'archivio attivo.
+
+I file e i nomi non regolari, le sottocartelle e i link simbolici dentro
+`media/` sono respinti. Non modificare direttamente un backup verificato:
+se occorre integrare file, importarli prima nell'archivio attivo e creare un
+nuovo backup da Impostazioni. L'archivio precedente resta preservato in
+caso di errore. Sono disponibili test automatici per file aggiuntivi non
+registrati e, su Unix, per una cartella media collegata all'esterno.
