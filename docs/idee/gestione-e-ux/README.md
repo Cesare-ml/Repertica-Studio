@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (ventiduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **29 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-21** (ventitreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **30 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -35,6 +35,16 @@ Aggiornato: **2026-11-21** (ventiduesima ricognizione). Stato delle proposte: **
 | [REPS-UX-027](REPS-UX-027-valute-estere-vendite-incassi-costi.md) | Valuta originaria di vendite, rate, incassi e spese, con riepiloghi per valuta e nessuna conversione implicita; compatibilità dei dati EUR esistenti | P1–P2* | Proposta — da valutare |
 | [REPS-UX-028](REPS-UX-028-giustificativi-locali-spese-acquisti.md) | Giustificativi PDF/immagine locali per spese e acquisti, distinti dagli allegati agli incassi e senza generare ulteriori movimenti contabili | P1–P2* | Proposta — da valutare |
 | [REPS-UX-029](REPS-UX-029-dismissione-documentata-opere-senza-cancellazione.md) | Dismissione deliberata e documentata (distruzione/donazione/trasferimento), con storia dell'opera e decisione separate da movimento fisico, vendite e perdita non accertata | P2* | Proposta — da valutare |
+
+| [REPS-UX-030](REPS-UX-030-quadratura-facoltativa-estratti-conto-locali.md) | Quadratura facoltativa **solo locale** di incassi/spese con movimenti da CSV bancario selezionato dall'utente, anteprima e collegamenti manuali; nessun nuovo incasso automatico né collegamento online | P2–P3* | Proposta — da valutare |
+
+## Ventitreesima ricognizione (21 novembre 2026) — REPS-UX-030
+
+- **[REPS-UX-030 — Quadratura facoltativa con estratti conto locali](REPS-UX-030-quadratura-facoltativa-estratti-conto-locali.md):** uno studio UX per confrontare gli **incassi e le spese già registrati** con transazioni di un CSV bancario scelto manualmente dall'utente; import in anteprima, conferma **uno a uno** e vista delle differenze. Un match non genera nuovi incassi, spese, versamenti, rate o saldi e non diventa attestazione bancaria. Un accredito mancante può soltanto proporre l'apertura del normale form con conferma distinta.
+- **Riscontro su `main`:** [SALE-RECEIPTS](../../SALE-RECEIPTS.md) distingue già gli incassi manuali dalle vendite e offre saldi/CSV; [RECEIPT-ATTACHMENTS](../../RECEIPT-ATTACHMENTS.md) permette documenti locali degli incassi; `finance.rs` conserva le spese, senza verifica bancaria. [ECONOMY-I18N](../../ECONOMY-I18N.md) dichiara la riconciliazione bancaria **fuori dall'ambito attuale**. **Nessuna domanda utente misurata o bug accertato:** può essere sufficiente una semplice spunta manuale senza importazione.
+- **Anti-doppione:** UX-024 riguarda **scadenze/rate** (già in parte esistenti), UX-027 la **valuta**, UX-028 gli **allegati delle spese**, UX-013 le **rettifiche commerciali**. TECH-019 della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) tratta l'**import di cataloghi tabellari**, non il confronto gestionale dei movimenti; TECH-025 la minimizzazione degli **export**. Nessun file tecnico modificato.
+- **Limiti e rischi:** niente collegamenti bancari o credenziali, niente conto ufficiale o contabilità fiscale; il CSV è un documento di fonte non autenticata. Escludere per default IBAN, nomi e causali non necessari; niente trasmissione, log o esposizione MCP. Offline, lingua di sistema/fallback inglese, backup completo e output strutturato locale con conferma delle informazioni sensibili.
+- **Priorità P2–P3 ipotetica:** fase iniziale consigliata = validare con operatori se la funzione risolve davvero errori e se è preferibile al semplice controllo manuale. Solo studio documentale: **30 proposte**, tutte «Proposta — da valutare»; nessuna approvazione, incarico di sviluppo o merge.
 
 ## Ventiduesima ricognizione (21 novembre 2026) — REPS-UX-029
 
