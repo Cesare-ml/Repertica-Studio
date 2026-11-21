@@ -131,6 +131,7 @@
         <div class="finance-top-actions">
           <button class="secondary" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
           <button class="secondary" type="button" (click)="exportLedger('receipts')" [disabled]="busy || !initialized">{{ tr('Esporta incassi CSV') }}</button>
+          <button class="secondary" type="button" (click)="exportLedger('balances')" [disabled]="busy || !initialized">{{ tr('Esporta saldi vendite CSV') }}</button>
           <button class="primary" type="button" (click)="newSale()" [disabled]="!initialized || !sellableArtworks.length || !collectors.length">{{ tr('+ Registra vendita') }}</button>
         </div></div>
       <p class="hint" *ngIf="!sellableArtworks.length || !collectors.length">{{ tr('Per registrare una vendita occorrono almeno un\'opera disponibile e un collezionista.') }}</p>

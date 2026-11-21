@@ -1,9 +1,9 @@
 /**
- * User-facing metadata for the six local SQLite CSV registers.
+ * User-facing metadata for the seven local SQLite CSV registers.
  * Filename suggestions are stable and translated by UI messages, not by the
  * OS locale: importing these CSVs back is intentionally NOT supported.
  */
-export type CsvRegisterKind = 'artworks' | 'collectors' | 'certificates' | 'sales' | 'receipts' | 'expenses';
+export type CsvRegisterKind = 'artworks' | 'collectors' | 'certificates' | 'sales' | 'balances' | 'receipts' | 'expenses';
 
 export interface CsvRegisterOption {
   title: string;
@@ -31,6 +31,11 @@ export const csvRegisterOptions: Record<CsvRegisterKind, CsvRegisterOption> = {
     title: 'Esporta vendite CSV',
     filename: 'vendite',
     success: 'Registro vendite esportato in CSV locale.'
+  },
+  balances: {
+    title: 'Esporta saldi vendite CSV',
+    filename: 'saldivendite',
+    success: 'Saldi vendite esportati in CSV locale.'
   },
   receipts: {
     title: 'Esporta incassi CSV',
