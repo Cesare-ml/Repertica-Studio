@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (decima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (undicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -23,6 +23,7 @@ Aggiornato: **2026-11-21** (decima ricognizione). Stato delle proposte: **Propos
 | [REPS-UX-015](REPS-UX-015-ricognizioni-inventariali-discrepanze.md) | Ricognizioni inventariali e discrepanze di presenza fisica delle opere | P1–P2 | Proposta — da valutare |
 | [REPS-UX-016](REPS-UX-016-valutazioni-coperture-assicurative-scadenze.md) | Valutazioni documentate e riferimenti a coperture assicurative dichiarate, con scadenze da verificare | P2 | Proposta — da valutare |
 | [REPS-UX-017](REPS-UX-017-vendita-multiopera-ripartizione-importi.md) | Vendite con più opere, riepilogo unitario e ripartizione esplicita degli importi | P1–P2 | Proposta — da valutare |
+| [REPS-UX-018](REPS-UX-018-catalogazione-seriale-schede-bozza.md) | Catalogazione seriale con riuso controllato dei campi e bozze opzionali da completare | P1–P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -129,3 +130,14 @@ Confrontati nuovamente `main` ([README](../../../README.md), [MVP](../../MVP.md)
 - **Evitati i doppioni:** UX-002 riguarda trattative precedenti alla vendita; UX-003 attribuisce costi; UX-012 documenta conto vendita; UX-013 rimane il riferimento unico per eventuali resi/storni; [issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) riguarda i registri finanziari. TECH-001 (portabilità) e TECH-008 (filtri) sono soltanto punti di interoperabilità potenziali, non documenti modificati. Il riepilogo non costituisce una fattura o una prova di incasso.
 - **Da validare:** frequenza reale delle vendite multiopera, bisogno di sconti collettivi, trattamento di arrotondamenti e incassi comuni, eventuali resi parziali. La vendita singola deve restare il percorso più semplice. Priorità P1–P2 **solo ipotetica**.
 - **Perimetro:** aggiunti soltanto questa scheda e l'indice Markdown sotto `docs/idee/gestione-e-ux/`. Nessun codice, test, workflow, configurazione, issue di implementazione o documento dell'altro filone modificato. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta in bozza, senza merge. **Stato: Proposta — da valutare**.
+
+
+## Undicesima ricognizione (21 novembre 2026)
+
+Riletti il branch `main` ([README](../../../README.md), [MVP](../../MVP.md), [modelli](../../../src/app/models.ts), [comandi](../../../src-tauri/src/commands.rs), [schema](../../../src-tauri/src/db.rs), [economia e lingue](../../ECONOMY-I18N.md), [portabilità](../../DATA-PORTABILITY.md)), i **17 studi UX precedenti**, le **13 schede tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) e le issue/PR aperte. Selezionata **una sola** nuova idea circoscritta al lavoro di inserimento manuale di numerose opere.
+
+- **[REPS-UX-018](REPS-UX-018-catalogazione-seriale-schede-bozza.md) — Catalogazione seriale con riuso controllato dei dati e schede da completare.** Oggi il salvataggio delle opere avviene una scheda per volta, con codice unico case-insensitive e titolo obbligatorio; non risulta nel branch `main` un flusso «Salva e continua» per lotti manuali o bozze recuperabili dopo il riavvio. Proposta per chi censisce molte opere nello stesso contesto, **non** necessaria a chi ne inserisce una occasionalmente.
+- **Minima evoluzione da validare prima di aggiungere complessità:** mantenere il modulo singolo, permettere il riuso **esplicito e campo per campo** di tecnica/supporto/ubicazione e fare un nuovo salvataggio per opera. Bozze persistenti e fotografie temporanee sono una **fase eventuale distinta**, non requisiti già approvati. Le bozze non diventano un nuovo stato commerciale `artworks.status`.
+- **Confini anti-doppione:** UX-005 edizioni numerate, UX-011 cicli creativi, UX-015 verifica fisica inventario; TECH-001 import strutturato da file, TECH-008 filtri/viste su record esistenti, TECH-010 revisioni di metadati. Qui non si importa da file, non si creano serie o vendite, non si modificano in blocco opere esistenti. La [PR #35](https://github.com/Cesare-ml/Repertica-Studio/pull/35) sulle modifiche concorrenti è ancora aperta: non se ne presume la presenza su `main`.
+- **Validazione:** servono osservazioni reali su dimensioni dei lotti, numero di campi ripetuti, errori e interruzioni. P1–P2 è soltanto una priorità ipotetica. Misurare tempi ed errori rispetto all'inserimento singolo prima di prendere decisioni.
+- **Perimetro:** aggiunti esclusivamente questa scheda Markdown e l'indice in `docs/idee/gestione-e-ux/`. Nessuna modifica a codice, test, build, workflow, impostazioni, dipendenze o file dell'altro filone. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta **in bozza**, senza merge; tutte le **18 idee** conservano lo stato **«Proposta — da valutare»** e nessuna viene assegnata allo sviluppo.
