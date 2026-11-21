@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (diciannovesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (ventesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -23,11 +23,20 @@ Data ricognizione: **2026-11-21** (diciannovesima ricognizione). Stato uniforme:
 | [REPS-TECH-015](REPS-TECH-015-diagnostica-assistenza-locale-report-privato.md) | Diagnostica per assistenza **solo su richiesta**, codice errore e report tecnico minimo senza dati dell'archivio, senza telemetria (coordinata con issue #12) | P2 | Proposta — da valutare |
 | [REPS-TECH-016](REPS-TECH-016-allegati-documentali-locali-multi-entita.md) | Allegati documentali locali riutilizzabili e verificabili, con collegamenti espliciti a più schede e senza cloud; non sostituisce allegati incasso v6 | P2 | Proposta — da valutare |
 | [REPS-TECH-017](REPS-TECH-017-protezione-archivio-attivo-cifratura-facoltativa.md) | Protezione facoltativa dei dati dell'**archivio attivo a riposo** (SQLite, WAL, media, allegati e residui), distinta dai backup cifrati di TECH-006; alternative OS prima di cifratura integrata | P2–P3 | Proposta — da valutare |
-| [REPS-TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) | Esportazioni CSV degli otto registri a memoria contenuta, snapshot coerenti e pubblicazione finale non distruttiva; robustezza verificata su dischi e NAS | P2 | Proposta — da valutare |
+| [REPS-TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) | Esportazioni CSV dei registri esistenti a memoria contenuta, snapshot coerenti e pubblicazione finale non distruttiva; robustezza verificata su dischi e NAS | P2 | Proposta — da valutare |
 | [REPS-TECH-019](REPS-TECH-019-importazione-guidata-cataloghi-tabellari.md) | Importazione guidata da **CSV/TSV esterni non standard** con mappatura colonne, preflight di tutte le righe e conferma non distruttiva; distinta dal formato Repertica e dalla migrazione Gestionale Opere | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-020](REPS-TECH-020-accessibilita-flussi-critici-tastiera-screen-reader.md) | Accessibilità verificabile dei dialoghi e delle operazioni critiche: focus, tastiera, screen reader, annunci, conferme, zoom e prove native, senza modificare logica e dati | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-021](REPS-TECH-021-gestione-colore-icc-derivati-fotografici.md) | Gestione colore ICC e interpretazione dei derivati fotografici nel Media Center: indagine su profili, preview, revisione ed export senza alterare originali | P2 | Proposta — da valutare |
 | [REPS-TECH-022](REPS-TECH-022-preflight-spazio-operazioni-locali.md) | Preflight prudente della capacità e dei volumi prima di backup/ripristino, senza promettere spazio garantito né eliminare copie esistenti | P2 | Proposta — da valutare |
+| [REPS-TECH-023](REPS-TECH-023-certificati-pdf-a-conservazione-verificabile.md) | Certificati da snapshot immutabili in PDF/A **validato realmente e offline**, distinguendo conservazione documentale, accessibilità e autenticità dell'opera | P2 | Proposta — da valutare |
+
+## Ventesima ricognizione — 21 novembre 2026 — REPS-TECH-023
+
+- **[REPS-TECH-023 — Certificati d'opera in PDF/A verificabile, generati da snapshot storici](REPS-TECH-023-certificati-pdf-a-conservazione-verificabile.md):** approfondita la possibile esportazione **offline** di un singolo certificato già emesso come PDF/A conservabile, con validazione effettiva del profilo dichiarato, font incorporati, testo Unicode, salvataggio non distruttivo e distinzione netta tra **conformità di un documento digitale** e **autenticità dell'opera/firma**. L'attuale stampa di sistema rimane disponibile; nessun documento storico viene alterato.
+- **Riscontro su `main`:** [`docs/MVP.md`](../../MVP.md) indica esplicitamente che l'output è tramite stampa di sistema e non PDF/A; [`src/app/app.component.ts`](../../../src/app/app.component.ts) chiama `window.print()`, mentre [`docs/DATA-PORTABILITY.md`](../../DATA-PORTABILITY.md) conserva `snapshot_json` nel registro certificati e gli archivi completi includono le immagini storiche ancora referenziate. L'idea riguarda il documento esportato, non aggiunge un nuovo certificato, e non corregge un bug già dimostrato.
+- **Non duplicazione:** TECH-001 tratta esportazione semantica/reimportazione dell'archivio, TECH-018 CSV, TECH-020 accessibilità della UI (PDF/UA resta una verifica distinta); UX-007 nella [PR Gestione e UX #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) riguarda dossier **commerciali**, non la copia documentale di un certificato storico. Nessun file dell'altro filone modificato.
+- **Riferimenti:** [veraPDF — profili di validazione](https://docs.verapdf.org/validation/) e [PDF Association — dichiarazioni di conformità](https://pdfa.org/resource/pdf-declarations/). La semplice etichetta PDF/A non prova la conformità. La scelta di profilo, motore e priorità **P2** è soltanto ipotetica, da validare con professionisti e test multipiattaforma.
+- **Ricalibrazione di stato:** in [`docs/MCP.md`](../../MCP.md) su `main` è **già presente** un server MCP STDIO di sola lettura, con collegamento guidato per assistenti locali. La precedente TECH-014 va letta come approfondimento/possibile evoluzione delle protezioni, **non** come richiesta di creare ex novo un MCP mancante. Il catalogo conta **23 proposte**, tutte **«Proposta — da valutare»**, senza approvazione, implementazione, issue operativa o merge; revisione nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
 
 ## Diciannovesima ricognizione — 21 novembre 2026 — REPS-TECH-022
 
