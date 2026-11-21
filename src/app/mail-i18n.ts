@@ -6,6 +6,7 @@ import type { AppLanguage } from './i18n';
  */
 type Variants = [it:string, es:string, fr:string, de:string];
 const dictionary: Record<string,Variants> = {
+  'This message contained HTML. It has been converted to safe plain text; remote images are not loaded.':['Questo messaggio conteneva HTML. È stato convertito in testo semplice; le immagini remote non vengono caricate.','Este mensaje contenía HTML. Se convirtió a texto plano seguro; las imágenes remotas no se cargan.','Ce message contenait du HTML. Il a été converti en texte brut sûr ; les images distantes ne sont pas chargées.','Diese Nachricht enthielt HTML. Sie wurde in sicheren Klartext umgewandelt; entfernte Bilder werden nicht geladen.'],
   'Attach files':['Allega file','Adjuntar archivos','Joindre des fichiers','Dateien anhängen'],
   'Choose attachments (max 5 files)':['Scegli allegati (massimo 5 file)','Elegir adjuntos (máximo 5)','Choisir les pièces jointes (5 max.)','Anhänge auswählen (max. 5)'],
   'You can attach up to five files.':['Puoi allegare al massimo cinque file.','Puedes adjuntar hasta cinco archivos.','Vous pouvez joindre au maximum cinq fichiers.','Sie können höchstens fünf Dateien anhängen.'],
