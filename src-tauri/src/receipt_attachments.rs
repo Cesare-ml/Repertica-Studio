@@ -56,7 +56,7 @@ fn safe_media_path(relative: &str) -> bool {
         && name.starts_with("receipt-")
         && name.len() <= 100
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-        && ["pdf", "jpg", "png", "webp"].iter().any(|ext| name.ends_with(&format!(".{ext}")))
+        && ["pdf", "jpg", "png", "webp"].iter().any(|ext| name.ends_with(format!(".{ext}").as_str()))
 }
 fn regular_file(path: &Path) -> Result<u64, String> {
     let metadata = fs::symlink_metadata(path).map_err(err)?;
@@ -250,9 +250,11 @@ mod tests {
         let dest = tmp.path().join("backups");
         fs::create_dir(&dest).unwrap();
         let backup = crate::backup::create_backup_core(&db, &dest).unwrap();
-        let folder = Path::new(&backup.directory);
-        assert_eq!(backup.schema_version, 6);
-        assert!(crate::backup::inspect_backup_core(folder).unwrap().verified);
+        let summary = serde_json::to_value(&backup).unwrap();
+        let directory = summary["directory"].as_str().unwrap();
+        let folder = Path::new(directory);
+        assert_eq!(summary["schemaVersion"], 6);
+        assert_eq!(serde_json::to_value(crate::backup::inspect_backup_core(folder).unwrap()).unwrap()["verified"], true);
         let manifest_path = folder.join("manifest.json");
         let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
         manifest["files"].as_array_mut().unwrap().retain(|v|v["path"] != attachment.media_path);
