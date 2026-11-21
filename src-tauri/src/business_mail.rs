@@ -277,6 +277,20 @@ fn text_part(part:&ParsedMail<'_>,depth:usize)->Option<String>{
     }
     None
 }
+fn html_part(part:&ParsedMail<'_>,depth:usize)->Option<String>{
+    if depth>12{return None;}
+    if part.ctype.mimetype.eq_ignore_ascii_case("text/html") && part.subparts.is_empty() {
+        let disposition=part.get_content_disposition();
+        if !matches!(disposition.disposition,mailparse::DispositionType::Attachment) {
+            return part.get_body().ok()
+                .and_then(|html|html2text::from_read(html.as_bytes(),90).ok());
+        }
+    }
+    for child in &part.subparts {
+        if let Some(text)=html_part(child,depth+1){return Some(text);}
+    }
+    None
+}
 fn count_attachments(part:&ParsedMail<'_>,depth:usize)->usize{
     if depth>12{return 0;}
     if part.subparts.is_empty() {
@@ -309,8 +323,11 @@ pub async fn mail_read_message(db:State<'_,Database>,account_id:String,folder:St
         let raw=f.body().ok_or_else(||"Corpo del messaggio non disponibile".to_string())?;
         if raw.len()>MAX_MESSAGE_BYTES as usize{return Err("Messaggio troppo grande".into());}
         let parsed=mailparse::parse_mail(raw).map_err(|_|"Messaggio MIME non leggibile".to_string())?;
-        let body=text_part(&parsed,0);
-        let html_only=body.is_none();
+        let plain=text_part(&parsed,0);
+        let html_only=plain.is_none();
+        // HTML is converted to inert text: no HTML, CSS, scripts or remote assets
+        // are ever interpreted by the WebView.
+        let body=plain.or_else(||html_part(&parsed,0));
         let header=message_header(f,&folder,uid_validity)
             .or_else(||{let(subject,from,date)=headers_from_raw(raw);Some(MailHeader{
                uid,uid_validity,folder:folder.clone(),subject,from,date,
