@@ -1,4 +1,5 @@
-//! Offline CSV exports of recorded sales and expenses. These are NOT cash receipts.
+//! Offline CSV exports of artwork, collector, certificate, sale and expense registers.
+//! CSV exports are for inspection/analysis, NOT a restore format or verified cash receipts.
 //! All money is exported as integer cents to avoid rounding or locale ambiguity.
 use crate::db::Database;
 use rusqlite::{types::ValueRef, Connection};
@@ -26,6 +27,24 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
     // Deliberately export all rows, not the on-screen year filter. Each record
     // carries its date; no historic record is silently omitted.
     let (header, query) = match kind {
+        "artworks" => (
+            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at",
+            "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,
+                    description,location,status,image_path,created_at,updated_at
+             FROM artworks ORDER BY code COLLATE NOCASE,id"
+        ),
+        "collectors" => (
+            "collector_id;name;email;phone;address;notes;created_at;updated_at",
+            "SELECT id,name,email,phone,address,notes,created_at,updated_at
+             FROM collectors ORDER BY name COLLATE NOCASE,id"
+        ),
+        "certificates" => (
+            "certificate_id;artwork_id;artwork_code;current_artwork_title;serial;issued_at;artist_name;collector_name;notes;snapshot_json;created_at",
+            "SELECT c.id,c.artwork_id,a.code,a.title,c.serial,c.issued_at,c.artist_name,
+                    c.collector_name,c.notes,c.snapshot_json,c.created_at
+             FROM certificates c JOIN artworks a ON a.id=c.artwork_id
+             ORDER BY c.issued_at,c.serial,c.id"
+        ),
         "sales" => (
             "sale_id;sold_at;artwork_id;artwork_code;artwork_title;collector_id;collector_name;currency;gross_cents;tax_cents;shipping_cents;net_cents;personal_bp;activity_bp;savings_bp;notes;created_at",
             "SELECT s.id,s.sold_at,s.artwork_id,a.code,a.title,s.collector_id,c.name,s.currency,
@@ -62,6 +81,7 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
                     append_text_cell(&mut out, text);
                 }
                 ValueRef::Integer(value) => out.push_str(&value.to_string()),
+                ValueRef::Real(value) if value.is_finite() => out.push_str(&value.to_string()),
                 ValueRef::Real(_) | ValueRef::Blob(_) => {
                     return Err("Il registro contiene un tipo SQLite non previsto".into());
                 }
@@ -139,6 +159,49 @@ seconda riga','t','t')", []).unwrap();
         assert!(expenses.contains("\"'+SUM(A1:A9)\""));
         assert!(expenses.contains("\"Prima riga\nseconda riga\""));
         assert!(render_csv(&conn, "unknown").is_err());
+    }
+
+
+    #[test]
+    fn exports_archive_registers_with_stable_ids_and_certificate_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute("INSERT INTO artworks(id,code,title,width_cm,height_cm,status,image_path,created_at,updated_at)
+            VALUES('art','=OP-1','Titolo attuale',12.5,9.25,'available','media/art.jpg','t','t')", []).unwrap();
+        conn.execute("INSERT INTO collectors(id,name,email,created_at,updated_at)
+            VALUES('person','  @formula','person@example.test','t','t')", []).unwrap();
+        conn.execute(r#"INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+            VALUES('cert','art','RS-0001','2026-11-21','+ARTIST','{"title":"Titolo originario"}','t')"#, []).unwrap();
+
+        let artworks = render_csv(&conn, "artworks").unwrap();
+        assert!(artworks.starts_with("\u{feff}artwork_id;code;title;"));
+        assert!(artworks.contains("\"art\";\"'=OP-1\";\"Titolo attuale\""));
+        assert!(artworks.contains(";12.5;9.25;"));
+        assert!(artworks.contains("\"media/art.jpg\""));
+
+        let collectors = render_csv(&conn, "collectors").unwrap();
+        assert!(collectors.starts_with("\u{feff}collector_id;name;email;"));
+        assert!(collectors.contains("\"person\";\"'  @formula\";\"person@example.test\""));
+
+        let certificates = render_csv(&conn, "certificates").unwrap();
+        assert!(certificates.starts_with("\u{feff}certificate_id;artwork_id;artwork_code;current_artwork_title;"));
+        assert!(certificates.contains("\"cert\";\"art\";\"'=OP-1\";\"Titolo attuale\";\"RS-0001\""));
+        assert!(certificates.contains("\"'+ARTIST\""));
+        assert!(certificates.contains("\"{\"\"title\"\":\"\"Titolo originario\"\"}\""));
+    }
+
+    #[test]
+    fn archive_register_exports_are_non_destructive_and_reject_replacing_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        for kind in ["artworks", "collectors", "certificates"] {
+            let csv = dir.path().join(format!("{kind}.csv"));
+            export_file(&db, kind, &csv).unwrap();
+            assert!(fs::read_to_string(&csv).unwrap().contains("created_at"));
+            assert!(export_file(&db, kind, &csv).is_err());
+        }
+        assert!(export_file(&db, "artworks", &db.directory.join("artworks.csv")).is_err());
     }
 
     #[test]
