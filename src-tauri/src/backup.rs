@@ -2,7 +2,7 @@
 //! copied media and a SHA-256 manifest. No network or third-party account is involved.
 use crate::db::{self, Database};
 use chrono::Utc;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -110,6 +110,27 @@ fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
     std::io::copy(&mut input, &mut output).map_err(error)?;
     output.sync_all().map_err(error)
 }
+// Verify a cross-row financial invariant independently of the SQLite write triggers.
+// An exported database can have valid pages, hashes and foreign keys even if someone
+// disabled its triggers before adding excessive payment records. Never restore such
+// an archive into the live collection.
+fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
+    let invalid: Option<(String, i64, i64)> = conn.query_row(
+        "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0)
+         FROM sales s LEFT JOIN sale_receipts r ON r.sale_id = s.id
+         GROUP BY s.id
+         HAVING COALESCE(SUM(r.amount_cents), 0) > s.amount_cents
+         LIMIT 1",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).optional().map_err(error)?;
+    if let Some((id, sale, received)) = invalid {
+        return Err(format!(
+            "Il backup contiene incassi superiori al valore della vendita {id} ({received} > {sale} centesimi)"
+        ));
+    }
+    Ok(())
+}
+
 fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String> {
     check_regular(path)?;
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -122,6 +143,8 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
     if !(1..=5).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    // Legacy schemas 1-3 have no sale_receipts table: never infer payments.
+    if schema >= 4 { validate_receipt_balances(&conn)?; }
     let mut counts = [0_i64; 4];
     for (i, table) in ["artworks", "collectors", "sales", "certificates"].iter().enumerate() {
         counts[i] = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).map_err(error)?;
@@ -470,6 +493,59 @@ mod tests {
         let foreign_keys:i64=conn.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get(0)).unwrap();
         assert_eq!(foreign_keys,0);
     }
+    #[test]
+    fn rehashed_backup_with_overpaid_sale_is_rejected_without_touching_live_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',10000,'2026-11-21','t')", []).unwrap();
+            conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('r1','s','2026-11-21',4000,'cash','t')", []).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // Simulate a manipulated but valid SQLite database whose write trigger
+        // was removed. Recalculate its SHA-256 so the failure isn't an hash error.
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute_batch(
+                "DROP TRIGGER sale_receipts_limit_insert;
+                 INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                 VALUES('r2','s','2026-11-22',7000,'cash','t');"
+            ).unwrap();
+            let integrity: String = snapshot.query_row(
+                "PRAGMA integrity_check", [], |row| row.get(0)
+            ).unwrap();
+            assert_eq!(integrity, "ok");
+            let foreign_keys: i64 = snapshot.query_row(
+                "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
+            ).unwrap();
+            assert_eq!(foreign_keys, 0);
+        }
+        let manifest_path = folder.join(MANIFEST_FILE);
+        let mut manifest: Manifest = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        let db_record = manifest.files.iter_mut().find(|file| file.path == DB_FILE).unwrap();
+        *db_record = record(folder, DB_FILE).unwrap();
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("incassi superiori"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        let conn = db.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT count(*) FROM sale_receipts", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 1);
+        assert!(db.directory.join(DB_FILE).exists());
+    }
+
     #[test]
     fn corrupted_media_is_rejected_before_restore() {
         let tmp = tempfile::tempdir().unwrap();
