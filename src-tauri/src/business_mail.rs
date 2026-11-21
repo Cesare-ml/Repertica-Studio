@@ -30,6 +30,7 @@ fn valid_host(host:&str)->bool {
             && !part.starts_with('-') && !part.ends_with('-')
             && part.bytes().all(|b| b.is_ascii_alphanumeric() || b==b'-'))
         && !h.eq_ignore_ascii_case("localhost")
+        && h.parse::<std::net::IpAddr>().is_err()
 }
 fn valid_email(email:&str)->bool {
     email.len()<=254 && email.len()>4 && !email.chars().any(|c| c.is_whitespace() || c.is_control())
@@ -427,7 +428,7 @@ fn load_outbound_attachments(paths:&[String])->Result<Vec<(String,Vec<u8>,Conten
         if total>15*1024*1024{return Err("Allegati troppo grandi (limite 15 MiB)".into());}
         let name=file.file_name().and_then(|s|s.to_str())
             .ok_or_else(||"Nome allegato non valido".to_string())?.to_string();
-        if name.len()>180 || name.chars().any(|c|c.is_control() || ['/', '\','<','>'].contains(&c)){
+        if name.len()>180 || name.chars().any(|c|c.is_control() || ['/', '\\','<','>'].contains(&c)){
             return Err("Nome allegato non valido".into());
         }
         let bytes=fs::read(file).map_err(|_|"Allegato non leggibile".to_string())?;
