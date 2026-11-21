@@ -27,6 +27,15 @@ export interface GalleryImage {
   caption: string | null; created_at: string; sort_order: number;
 }
 
+export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header';
+export interface MediaIssue {
+  artworkId: string; imageId: string | null; role: 'primary' | 'gallery';
+  path: string; problem: MediaProblem;
+}
+export interface MediaAudit {
+  checked: number; healthy: number; problems: number; truncated: boolean; issues: MediaIssue[];
+}
+
 export interface Collector {
   id: string; name: string; email: string | null; phone: string | null;
   address: string | null; notes: string | null; created_at: string; updated_at: string;
