@@ -50,6 +50,34 @@ fn extension_of(path: &Path) -> Option<String> {
     path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).filter(|e| EXTENSIONS.contains(&e.as_str()))
 }
 
+/// Reject a media directory redirected outside of this local archive.
+fn regular_media_dir(directory: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(directory.join("media")).map_err(err)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err("La cartella media non è una directory regolare".into());
+    }
+    Ok(())
+}
+
+/// Never trust database paths blindly after an import or external file modification.
+fn regular_raw_path(directory: &Path, relative: &str) -> Result<PathBuf, String> {
+    let name = relative.strip_prefix("media/raw-").ok_or("Percorso RAW non valido")?;
+    if name.is_empty() || name.len() > 100 || name.contains("..")
+        || name.contains(['/', '\\'])
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        || extension_of(Path::new(name)).is_none()
+    {
+        return Err("Percorso RAW non valido".into());
+    }
+    regular_media_dir(directory)?;
+    let path = directory.join(relative);
+    let metadata = fs::symlink_metadata(&path).map_err(err)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("Il RAW archiviato non è un file regolare".into());
+    }
+    Ok(path)
+}
+
 /// A validated RAW file already copied into the media folder, not yet linked to an artwork.
 #[derive(Debug)]
 pub struct StagedRaw {
@@ -81,6 +109,7 @@ pub fn stage(directory: &Path, source: &Path, max_bytes: u64) -> Result<StagedRa
     let mut header = [0_u8; 16];
     let count = input.read(&mut header).map_err(err)?;
     if !looks_like_raw(&header[..count]) { return Err("Il contenuto non corrisponde a un file RAW fotografico".into()); }
+    regular_media_dir(directory)?;
     let relative = format!("media/raw-{}.{extension}", Uuid::new_v4());
     let full = directory.join(&relative);
     let mut output = OpenOptions::new().write(true).create_new(true).open(&full).map_err(err)?;
@@ -121,9 +150,9 @@ pub fn link(conn: &Connection, artwork_id: &str, staged: &StagedRaw) -> Result<O
 }
 
 pub fn remove_file(directory: &Path, relative: &str) {
-    let ok = relative.strip_prefix("media/")
-        .is_some_and(|name| name.starts_with("raw-") && !name.contains(['/', '\\']) && !name.contains(".."));
-    if ok { let _ = fs::remove_file(directory.join(relative)); }
+    if let Ok(path) = regular_raw_path(directory, relative) {
+        let _ = fs::remove_file(path);
+    }
 }
 
 fn row(conn: &Connection, artwork_id: &str) -> Result<Option<RawFile>, String> {
@@ -150,6 +179,7 @@ pub fn attach_core(db: &Database, artwork_id: &str, source: &Path, max_bytes: u6
 }
 
 pub fn remove_core(db: &Database, artwork_id: &str) -> Result<(), String> {
+    regular_media_dir(&db.directory)?;
     let conn = db.conn.lock().map_err(err)?;
     let file = row(&conn, artwork_id)?.ok_or("Nessun file RAW allegato")?;
     conn.execute("DELETE FROM artwork_raw_files WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
@@ -159,11 +189,19 @@ pub fn remove_core(db: &Database, artwork_id: &str) -> Result<(), String> {
 
 /// Save a copy of the RAW file outside the archive. Never overwrites an existing file.
 pub fn export_core(db: &Database, artwork_id: &str, destination: &Path) -> Result<String, String> {
-    let source = {
+    let file = {
         let conn = db.conn.lock().map_err(err)?;
-        let file = row(&conn, artwork_id)?.ok_or("Nessun file RAW allegato")?;
-        db.directory.join(file.media_path)
+        row(&conn, artwork_id)?.ok_or("Nessun file RAW allegato")?
     };
+    let source = regular_raw_path(&db.directory, &file.media_path)?;
+    if file.size_bytes <= 0 || file.size_bytes as u64 > MAX_RAW_BYTES {
+        return Err("Dimensione RAW registrata non valida".into());
+    }
+    let metadata = fs::symlink_metadata(&source).map_err(err)?;
+    if metadata.len() != file.size_bytes as u64 {
+        return Err("Il file RAW è cambiato rispetto ai metadati registrati".into());
+    }
+
     let live = fs::canonicalize(&db.directory).map_err(err)?;
     let parent = destination.parent().ok_or("Percorso di destinazione non valido")?;
     let parent = fs::canonicalize(parent).map_err(err)?;
@@ -173,10 +211,39 @@ pub fn export_core(db: &Database, artwork_id: &str, destination: &Path) -> Resul
     let mut input = File::open(&source).map_err(err)?;
     let mut output = OpenOptions::new().write(true).create_new(true).open(&target)
         .map_err(|e| format!("Impossibile creare il file (scegli un nuovo nome se esiste già): {}", err(e)))?;
-    let copied = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
+
+    // Stream and verify copied bytes against immutable recorded metadata.
+    // A damaged RAW must never be presented as a valid portable copy.
+    let copied = (|| -> std::io::Result<(u64, String)> {
+        let mut digest = Sha256::new();
+        let mut total = 0_u64;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = input.read(&mut buffer)?;
+            if count == 0 { break; }
+            total += count as u64;
+            if total > file.size_bytes as u64 {
+                return Err(std::io::Error::other("Il file RAW è cambiato durante l'esportazione"));
+            }
+            output.write_all(&buffer[..count])?;
+            digest.update(&buffer[..count]);
+        }
+        output.sync_all()?;
+        Ok((total, format!("{:x}", digest.finalize())))
+    })();
     drop(output);
-    if let Err(e) = copied { let _ = fs::remove_file(&target); return Err(err(e)); }
-    Ok(crate::util::display_path(&target))
+    match copied {
+        Ok((size, hash)) if size == file.size_bytes as u64 && hash.eq_ignore_ascii_case(&file.sha256) =>
+            Ok(crate::util::display_path(&target)),
+        Ok(_) => {
+            let _ = fs::remove_file(&target);
+            Err("Il file RAW è cambiato rispetto all'hash registrato: esportazione annullata".into())
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&target);
+            Err(err(e))
+        }
+    }
 }
 
 #[tauri::command]
@@ -302,5 +369,65 @@ mod tests {
         remove_file(&db.directory, "media/../../importante.txt");
         remove_file(&db.directory, "importante.txt");
         assert!(outside.is_file());
+    }
+
+    #[test]
+    fn changed_raw_cannot_be_exported_as_a_valid_copy() {
+        let (dir, db) = setup();
+        let source = raw(dir.path(), "foto.nef", b"II*\0", 64);
+        let saved = attach_core(&db, "a", &source, MAX_RAW_BYTES).unwrap();
+        let stored = db.directory.join(&saved.media_path);
+        // Same byte count, different contents: size checks alone would miss this.
+        fs::write(&stored, vec![42_u8; saved.size_bytes as usize]).unwrap();
+        let target = dir.path().join("invalid.nef");
+        assert!(export_core(&db, "a", &target).unwrap_err().contains("hash"));
+        assert!(!target.exists(), "a failed export must not leave a misleading copy");
+        assert!(row(&db.conn.lock().unwrap(), "a").unwrap().is_some(), "the database link survives");
+        // Even a corrupt relative path from SQLite cannot escape the archive.
+        db.conn.lock().unwrap().execute("UPDATE artwork_raw_files SET media_path='../outside.nef' WHERE artwork_id='a'", []).unwrap();
+        assert!(export_core(&db, "a", &target).unwrap_err().contains("Percorso"));
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_media_folder_cannot_touch_external_raws() {
+        use std::os::unix::fs::symlink;
+        let (dir, db) = setup();
+        let raw_source = raw(dir.path(), "foto.nef", b"II*\0", 64);
+        let saved = attach_core(&db, "a", &raw_source, MAX_RAW_BYTES).unwrap();
+        let external = dir.path().join("external");
+        fs::create_dir(&external).unwrap();
+        let external_raw = external.join(Path::new(&saved.media_path).file_name().unwrap());
+        fs::write(&external_raw, b"private file").unwrap();
+        fs::rename(db.directory.join("media"), db.directory.join("media-original")).unwrap();
+        symlink(&external, db.directory.join("media")).unwrap();
+
+        assert!(stage(&db.directory, &raw_source, MAX_RAW_BYTES).is_err());
+        assert!(remove_core(&db, "a").is_err());
+        remove_file(&db.directory, &saved.media_path);
+        let target = dir.path().join("export.nef");
+        assert!(export_core(&db, "a", &target).is_err());
+        assert!(!target.exists());
+        assert_eq!(fs::read(&external_raw).unwrap(), b"private file");
+        assert!(row(&db.conn.lock().unwrap(), "a").unwrap().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_raw_file_is_not_exported() {
+        use std::os::unix::fs::symlink;
+        let (dir, db) = setup();
+        let original = raw(dir.path(), "foto.nef", b"II*\0", 64);
+        let saved = attach_core(&db, "a", &original, MAX_RAW_BYTES).unwrap();
+        fs::remove_file(db.directory.join(&saved.media_path)).unwrap();
+        symlink(&original, db.directory.join(&saved.media_path)).unwrap();
+
+        let target = dir.path().join("copy.nef");
+        assert!(export_core(&db, "a", &target).unwrap_err().contains("regolare"));
+        assert!(!target.exists());
+        remove_file(&db.directory, &saved.media_path);
+        assert!(db.directory.join(&saved.media_path).is_symlink(), "removal must not touch tampered entries");
+        assert!(original.exists());
     }
 }
