@@ -200,6 +200,12 @@ td.money{color:#234f3c;font-weight:700;font-variant-numeric:tabular-nums}
  .certificate-main>p:first-child{font-size:10pt;letter-spacing:4px;color:#667c70}
  .certificate-main h2{font-size:35pt;margin:9mm 0 5mm}
  .certificate-number{font:13pt monospace;color:#4c7562}
+ .certificate-photo{display:flex;justify-content:center;align-items:center;margin:8mm 0;max-height:55mm}
+ .certificate-photo img{display:block;max-width:100%;max-height:55mm;object-fit:contain}
+ .certificate-page.has-photo .certificate-main{padding-top:10mm}
+ .certificate-page.has-photo .certificate-main h2{font-size:29pt;margin:5mm 0 3mm}
+ .certificate-page.has-photo .certificate-details{margin-top:9mm;gap:8mm}
+ .certificate-page.has-photo .certificate-sign{margin-top:12mm}
  .certificate-details{display:grid;grid-template-columns:repeat(2,1fr);gap:14mm 8mm;margin-top:20mm}
  .certificate-details div{display:flex;flex-direction:column;gap:3mm}
  .certificate-details span{font-size:9pt;color:#78887c}
