@@ -1,6 +1,6 @@
 # Esportazioni CSV locali — registri dell'archivio
 
-L'esportatore Rust `export_ledger_csv` supporta sei valori di `kind`:
+L'esportatore Rust `export_ledger_csv` supporta sette valori di `kind`:
 
 | Tipo | Righe esportate | Contenuti |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ L'esportatore Rust `export_ledger_csv` supporta sei valori di `kind`:
 | `collectors` | Tutti i collezionisti | UUID, contatti e note private, date |
 | `certificates` | Tutti i certificati | UUID del certificato e opera, seriale, date, emittente, destinatario, note e **snapshot_json originale immutabile** |
 | `sales` | Tutte le vendite | UUID opera/collezionista, importi in centesimi e quote storiche |
+| `balances` | Tutti i saldi delle vendite | UUID vendita/opera/collezionista, data, valuta, lordo, incassato dichiarato e residuo in centesimi (anche vendite senza incassi) |
 | `expenses` | Tutte le spese | UUID, date, causali, fornitori e importi in centesimi |
 | `receipts` | Tutti gli incassi registrati manualmente | UUID incasso/vendita/opera/collezionista, data, importo in centesimi, valuta, metodo, riferimento, note e data di registrazione |
 
@@ -21,8 +22,8 @@ Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** co
 - L'esportatore lavora offline e non crea account o servizi remoti.
 - I CSV contengono **dati personali in chiaro**. Conservare e condividere responsabilmente.
 - Il formato CSV è destinato a analisi e interoperabilità **in sola lettura**, non è un formato di reimportazione transazionale. Le immagini, i file associati e l'intero schema SQLite non sono contenuti nei CSV: per una copia completa portabile usare sempre **Impostazioni → Backup** e la sua verifica SHA-256.
-- L'esportazione `sales` registra vendite **non necessariamente incassate**: non deve essere descritta come saldo bancario. L'esportazione distinta `receipts` elenca **gli incassi dichiarati dall'utente**, non movimenti bancari verificati: un incasso può essere parziale; lo stesso `sale_id` può comparire più volte.
-- **Interfaccia**: Opere, Collezionisti, Certificati, Vendite (due pulsanti separati per vendite e incassi) e Acquisti e spese dispongono del pulsante CSV. Il dialogo nativo propone un nome `ReperticaStudio-<registro>-AAAA-MM-GG.csv` e lascia scegliere qualsiasi cartella accessibile. Se il percorso è già occupato, il backend rifiuta la sovrascrittura e mostra un errore; scegliere un nuovo nome. Le esportazioni includono **tutti** i record, anche se nell'interfaccia sono attivi filtri o un anno specifico.
+- L'esportazione `sales` registra vendite **non necessariamente incassate**: non deve essere descritta come saldo bancario. L'esportazione distinta `receipts` elenca **gli incassi dichiarati dall'utente**, non movimenti bancari verificati: un incasso può essere parziale; lo stesso `sale_id` può comparire più volte. Il registro `balances` riporta una riga per vendita con importo lordo, incassato dichiarato e residuo: non considera automaticamente pagate le vendite prive di incassi.
+- **Interfaccia**: Opere, Collezionisti, Certificati, Vendite (tre pulsanti separati per vendite, incassi e saldi) e Acquisti e spese dispongono del pulsante CSV. Il dialogo nativo propone un nome `ReperticaStudio-<registro>-AAAA-MM-GG.csv` e lascia scegliere qualsiasi cartella accessibile. Se il percorso è già occupato, il backend rifiuta la sovrascrittura e mostra un errore; scegliere un nuovo nome. Le esportazioni includono **tutti** i record, anche se nell'interfaccia sono attivi filtri o un anno specifico.
 
 ## Collaudo
 

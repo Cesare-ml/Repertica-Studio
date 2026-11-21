@@ -57,6 +57,19 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              LEFT JOIN sale_finances f ON f.sale_id=s.id
              ORDER BY s.sold_at,s.id"
         ),
+        "balances" => (
+            "sale_id;sold_at;artwork_id;artwork_code;artwork_title;collector_id;collector_name;currency;gross_cents;received_cents;outstanding_cents;created_at",
+            "SELECT s.id,s.sold_at,s.artwork_id,a.code,a.title,s.collector_id,c.name,s.currency,
+                    s.amount_cents,COALESCE(received.amount_cents,0),
+                    s.amount_cents-COALESCE(received.amount_cents,0),s.created_at
+             FROM sales s JOIN artworks a ON a.id=s.artwork_id
+             JOIN collectors c ON c.id=s.collector_id
+             LEFT JOIN (
+                SELECT sale_id,SUM(amount_cents) AS amount_cents
+                FROM sale_receipts GROUP BY sale_id
+             ) received ON received.sale_id=s.id
+             ORDER BY s.sold_at,s.id"
+        ),
         "receipts" => (
             "receipt_id;sale_id;received_at;artwork_id;artwork_code;artwork_title;collector_id;collector_name;amount_cents;currency;method;reference;notes;created_at",
             "SELECT r.id,r.sale_id,r.received_at,s.artwork_id,a.code,a.title,s.collector_id,c.name,
@@ -198,6 +211,37 @@ seconda riga','t','t')", []).unwrap();
         assert!(render_csv(&conn, "unknown").is_err());
     }
 
+
+
+    #[test]
+    fn balances_csv_preserves_partial_full_and_unpaid_sales_without_inventing_receipts() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES
+                ('a1','ART-1','One','t','t'),
+                ('a2','ART-2','Two','t','t'),
+                ('a3','ART-3','Three','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c1','=Collector','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES
+                ('s1','a1','c1',10001,'2026-11-01','t'),
+                ('s2','a2','c1',8000,'2026-11-02','t'),
+                ('s3','a3','c1',5000,'2026-11-03','t');
+            INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at) VALUES
+                ('r1','s1','2026-11-10',1500,'cash','t'),
+                ('r2','s1','2026-11-11',2001,'card','t'),
+                ('r3','s2','2026-11-12',8000,'bank_transfer','t');
+        "#).unwrap();
+        let csv = render_csv(&conn, "balances").unwrap();
+        assert!(csv.starts_with("\u{feff}sale_id;sold_at;artwork_id;"));
+        assert!(csv.contains("\"s1\";\"2026-11-01\";\"a1\";\"ART-1\";\"One\";\"c1\";\"'=Collector\";\"EUR\";10001;3501;6500;\"t\""));
+        assert!(csv.contains("\"s2\";\"2026-11-02\";\"a2\";\"ART-2\";\"Two\";\"c1\";\"'=Collector\";\"EUR\";8000;8000;0;\"t\""));
+        assert!(csv.contains("\"s3\";\"2026-11-03\";\"a3\";\"ART-3\";\"Three\";\"c1\";\"'=Collector\";\"EUR\";5000;0;5000;\"t\""));
+        assert_eq!(csv.matches("\r\n").count(), 4);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM sale_receipts", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+    }
 
     #[test]
     fn exports_archive_registers_with_stable_ids_and_certificate_snapshot() {

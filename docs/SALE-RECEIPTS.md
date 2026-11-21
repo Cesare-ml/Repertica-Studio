@@ -51,3 +51,20 @@ vincolo *tra più righe* qualora i trigger di SQLite fossero stati disattivati
 prima della creazione o modifica di una copia esterna. Il controllo aggiuntivo
 rifiuta l'archivio in tali condizioni **prima di toccare l'archivio attivo**.
 Non è una validazione bancaria, fiscale né una firma crittografica dei dati.
+
+
+## Esportazione CSV dei saldi di vendita
+
+Dal **Registro vendite → Esporta saldi vendite CSV** si crea un registro locale
+separato dal CSV delle vendite e da quello degli incassi. Ogni riga rappresenta
+una vendita (anche se non ha ancora incassi), con UUID della vendita, data,
+riferimenti a opera e collezionista, valuta, importo lordo, somma degli incassi
+registrati e importo ancora da incassare. I tre importi sono **centesimi interi**.
+
+Il saldo residuo è calcolato come `gross_cents - received_cents` da
+`sale_receipts`, senza inventare incassi per vendite storiche o prive di pagamenti.
+L'esportazione comprende tutte le vendite, indipendentemente dai filtri visivi
+e dalla data, e mantiene i riferimenti stabili. I campi di testo potenzialmente
+interpretabili come formule dai fogli di calcolo vengono neutralizzati.
+Il file CSV non sovrascrive un documento esistente, **non è un backup
+ripristinabile** e non attesta effettivi pagamenti bancari.
