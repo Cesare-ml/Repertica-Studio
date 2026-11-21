@@ -396,7 +396,7 @@ mod tests {
         let destination = tmp.path().join("disk");
         fs::create_dir(&destination).unwrap();
         let backup = create_backup_core(&db, &destination).unwrap();
-        assert_eq!(backup.schema_version, 3);
+        assert_eq!(backup.schema_version, 4);
         assert_eq!(backup.files, 3);
         assert!(backup.verified);
 
@@ -408,6 +408,34 @@ mod tests {
         fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
         assert!(inspect_backup_core(folder).is_err());
         assert!(restore_backup_core(&db, folder).is_err());
+    }
+    #[test]
+    fn receipts_are_included_in_verified_backup_and_survive_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',10000,'2026-11-21','t')",[]).unwrap();
+            conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('r','s','2026-11-21',3500,'bank_transfer','t')",[]).unwrap();
+        }
+        let destination=tmp.path().join("removable");
+        fs::create_dir(&destination).unwrap();
+        let backup=create_backup_core(&db,&destination).unwrap();
+        assert_eq!(backup.schema_version,4);
+        assert!(backup.verified);
+        {
+            let conn=db.conn.lock().unwrap();
+            conn.execute("DELETE FROM sale_receipts WHERE id='r'",[]).unwrap();
+        }
+        restore_backup_core(&db,Path::new(&backup.directory)).unwrap();
+        let conn=db.conn.lock().unwrap();
+        let received:i64=conn.query_row("SELECT amount_cents FROM sale_receipts WHERE id='r'",[],|r|r.get(0)).unwrap();
+        assert_eq!(received,3500);
+        let foreign_keys:i64=conn.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get(0)).unwrap();
+        assert_eq!(foreign_keys,0);
     }
     #[test]
     fn corrupted_media_is_rejected_before_restore() {
