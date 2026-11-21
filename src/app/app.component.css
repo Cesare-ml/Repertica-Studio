@@ -222,3 +222,10 @@ td.money{color:#234f3c;font-weight:700;font-variant-numeric:tabular-nums}
 .gallery-caption-edit{display:flex;flex-direction:column;gap:8px;min-width:0}
 .gallery-caption-edit input{width:100%;min-width:0}
 .gallery-caption-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Receipt evidence stays inside the local payment register; long filenames wrap
+   rather than expanding the dialog beyond the viewport. */
+.receipt-document{min-width:190px;max-width:290px;font-size:12px;vertical-align:top}
+.receipt-filename{display:block;font-weight:600;overflow-wrap:anywhere;margin-bottom:7px}
+.receipt-document-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.receipt-preview-image{display:block;max-width:100%;max-height:65vh;object-fit:contain;margin:auto;border-radius:9px;background:#f4f6f2}
