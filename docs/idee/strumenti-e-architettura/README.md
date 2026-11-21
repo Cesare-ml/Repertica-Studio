@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (diciassettesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (diciottesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -26,6 +26,17 @@ Data ricognizione: **2026-11-21** (diciassettesima ricognizione). Stato uniforme
 | [REPS-TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) | Esportazioni CSV degli otto registri a memoria contenuta, snapshot coerenti e pubblicazione finale non distruttiva; robustezza verificata su dischi e NAS | P2 | Proposta — da valutare |
 | [REPS-TECH-019](REPS-TECH-019-importazione-guidata-cataloghi-tabellari.md) | Importazione guidata da **CSV/TSV esterni non standard** con mappatura colonne, preflight di tutte le righe e conferma non distruttiva; distinta dal formato Repertica e dalla migrazione Gestionale Opere | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-020](REPS-TECH-020-accessibilita-flussi-critici-tastiera-screen-reader.md) | Accessibilità verificabile dei dialoghi e delle operazioni critiche: focus, tastiera, screen reader, annunci, conferme, zoom e prove native, senza modificare logica e dati | P1–P2 | Proposta — da valutare |
+| [REPS-TECH-021](REPS-TECH-021-gestione-colore-icc-derivati-fotografici.md) | Gestione colore ICC e interpretazione dei derivati fotografici nel Media Center: indagine su profili, preview, revisione ed export senza alterare originali | P2 | Proposta — da valutare |
+
+## Diciottesima ricognizione — 21 novembre 2026 — REPS-TECH-021
+
+- **[REPS-TECH-021 — Gestione colore ICC e tracciabilità cromatica dei derivati](REPS-TECH-021-gestione-colore-icc-derivati-fotografici.md):** approfondita l'interpretazione dei profili ICC durante anteprima, ritaglio, prospettiva e generazione dei derivati, che riguarda fotografi d'opera, gallerie e archivi con immagini destinate anche alla stampa. In `main`, `imaging.rs` applica l'orientamento EXIF, passa a `RgbImage` e codifica JPEG/PNG, ma nel percorso esaminato non rende esplicito un contratto di lettura, trasformazione e scrittura dei profili ICC. **Nessuna alterazione cromatica reale è stata misurata**: servono file campione e verifiche tra piattaforme prima di scegliere una soluzione.
+- **Perimetro:** protezione degli originali e revisioni storiche già esistenti; prima fase possibile soltanto diagnostica, poi eventuale conversione opt-in con profilo di output dichiarato. La scheda non propone CMM obbligatori, stampa certificata, calibrazione monitor o editing RAW.
+- **Anti-doppione:** TECH-013 protegge la *privacy* dei metadati nelle copie da condividere; TECH-005 riguarda prestazioni delle miniature, TECH-003 l'integrità dei media e TECH-001 il pacchetto aperto. La [PR UX #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) distingue crediti/permessi (UX-010) e dossier (UX-007) dal motore cromatico. Nessun file di quel filone è stato modificato.
+- **Aggiornamento di base:** sul `main` consultato ora `db.rs` dichiara schema SQLite **v14**, e [DATA-PORTABILITY](../../DATA-PORTABILITY.md) documenta **12** registri CSV. I conteggi minori nelle ricognizioni precedenti sono fotografie storiche dell'evoluzione, non lo stato attuale.
+- **Fonti:** [International Color Consortium — ICC specifications](https://www.color.org/icc_specs2/) e sorgenti locali [`imaging.rs`](../../../src-tauri/src/imaging.rs) / [`media.rs`](../../../src-tauri/src/media.rs). **Priorità P2 puramente ipotetica**, subordinata a interviste e prove. Nessuna idea approvata, nessun lavoro implementativo, issue operativa o merge.
+
+**Catalogo: 21 schede, tutte nello stato «Proposta — da valutare».** Revisione esclusivamente del proprietario nella [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
 
 ## Diciassettesima ricognizione — 21 novembre 2026 — REPS-TECH-020
 
@@ -47,7 +58,7 @@ Data ricognizione: **2026-11-21** (diciassettesima ricognizione). Stato uniforme
 Verificati sul branch `main` al **21 novembre 2026**: [README](../../../README.md), [MVP](../../MVP.md), [economia e localizzazione](../../ECONOMY-I18N.md), modelli dati e codice nativo di `db.rs`, `backup.rs`, `export.rs`, `commands.rs`.
 
 - **Già presente**: database locale SQLite, backup completo a cartella scelta con manifest e hash SHA-256, ispezione prima del ripristino e conservazione della copia precedente. Le schede non ripropongono questo sistema.
-- **Già presente**: nove CSV unidirezionali per **opere, galleria fotografica, collezionisti, certificati, vendite, ripartizioni, saldi, spese e incassi**, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
+- **Già presente (stato aggiornato al 21/11)**: dodici CSV unidirezionali, incluse opere, galleria fotografica, collezionisti e fotografie, certificati, file RAW, vendite, rate, ripartizioni, saldi, spese e incassi, con ID stabili e scelta esplicita della destinazione ([docs/DATA-PORTABILITY.md](../../DATA-PORTABILITY.md)). La proposta TECH-001 riguarda invece un **formato di interscambio semantico** per tutti i domini e la verifica di reimportabilità, che non sostituisce i backup.
 - **Già pianificato**: [issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5) per migrazione assistita **da Gestionale Opere**; TECH-001 è indipendente dalla fonte, non realizza l'esportatore privato e propone prima importazione in archivio vuoto.
 - **Già pianificato**: [issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) per MCP **STDIO read-only**. TECH-002 non è un server MCP: descrive un eventuale sistema di regole **interne** all'app, attivato su esplicita autorizzazione.
 - **Già pianificato**: [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) per aggiornamenti firmati. Nessuna proposta li riguarda.
