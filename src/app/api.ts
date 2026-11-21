@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
-  StudioSettings, Expense, ExpenseInput, FinanceOverview
+  StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage
 } from './models';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
@@ -13,6 +13,11 @@ export const api = {
   artworkImage: (artworkId: string) => invoke<string | null>('artwork_image_data', { artworkId }),
   saveArtworkImage: (artworkId: string, dataBase64: string) =>
     invoke<void>('save_artwork_image', { artworkId, dataBase64 }),
+  listArtworkGallery: (artworkId: string) => invoke<GalleryImage[]>('list_artwork_gallery', { artworkId }),
+  addArtworkGalleryImage: (artworkId: string, dataBase64: string, caption: string | null) =>
+    invoke<GalleryImage>('add_artwork_gallery_image', { artworkId, dataBase64, caption }),
+  artworkGalleryImageData: (imageId: string) => invoke<string>('artwork_gallery_image_data', { imageId }),
+  deleteArtworkGalleryImage: (imageId: string) => invoke<void>('delete_artwork_gallery_image', { imageId }),
   listCollectors: () => invoke<Collector[]>('list_collectors'),
   saveCollector: (input: CollectorInput) => invoke<Collector>('save_collector', { input }),
   deleteCollector: (id: string) => invoke<void>('delete_collector', { id }),
