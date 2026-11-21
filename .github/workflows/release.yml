@@ -29,6 +29,8 @@ jobs:
   check:
     name: Check version and keys
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,29 +51,29 @@ jobs:
           test "$tag" = "$app" && test "$tag" = "$pkg" && test "$tag" = "$crate" || { echo "::error::The tag does not match the version in tauri.conf.json, package.json and Cargo.toml"; exit 1; }
           test -n "$PUBLIC_KEY" || { echo "::error::Repository variable REPERTICA_UPDATER_PUBLIC_KEY is not set"; exit 1; }
           test -n "$PRIVATE_KEY" || { echo "::error::Repository secret TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
+      - name: Choose the platforms to build
+        id: plan
+        shell: bash
+        env:
+          ONLY_MACOS: ${{ inputs.only_macos }}
+        run: |
+          set -euo pipefail
+          windows='{"name":"Windows","runner":"windows-latest","args":"","target":""}'
+          arm='{"name":"macOS Apple Silicon","runner":"macos-15","args":"--target aarch64-apple-darwin","target":"aarch64-apple-darwin"}'
+          intel='{"name":"macOS Intel","runner":"macos-15-intel","args":"--target x86_64-apple-darwin","target":"x86_64-apple-darwin"}'
+          if [ "$ONLY_MACOS" = "true" ]; then list="$arm,$intel"; else list="$windows,$arm,$intel"; fi
+          echo "matrix={\"include\":[$list]}" >> "$GITHUB_OUTPUT"
+          echo "Building: $list"
   publish:
     name: ${{ matrix.name }}
     needs: check
-    if: ${{ !(inputs.only_macos && matrix.name == 'Windows') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       # One at a time: every job merges its platform into the same latest.json.
       max-parallel: 1
-      matrix:
-        include:
-          - name: Windows
-            runner: windows-latest
-            args: ''
-          - name: macOS Apple Silicon
-            runner: macos-15
-            args: '--target aarch64-apple-darwin'
-            target: aarch64-apple-darwin
-          - name: macOS Intel
-            runner: macos-15-intel
-            args: '--target x86_64-apple-darwin'
-            target: x86_64-apple-darwin
+      matrix: ${{ fromJSON(needs.check.outputs.matrix) }}
     env:
       CARGO_INCREMENTAL: '0'
       # macOS apps are ad-hoc signed (no Apple Developer ID); the update packages are minisign-signed.
