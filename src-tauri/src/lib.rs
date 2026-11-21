@@ -7,6 +7,7 @@ mod gallery;
 mod media_audit;
 mod models;
 mod receipts;
+mod receipt_attachments;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -60,6 +61,10 @@ pub fn run() {
             receipts::delete_sale_receipt,
             receipts::list_sale_balances,
             receipts::receipt_year_overview,
+            receipt_attachments::get_sale_receipt_attachment,
+            receipt_attachments::attach_sale_receipt_file,
+            receipt_attachments::sale_receipt_attachment_data,
+            receipt_attachments::remove_sale_receipt_attachment,
             export::export_ledger_csv
         ])
         .run(tauri::generate_context!())
