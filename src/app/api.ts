@@ -40,6 +40,7 @@ export const api = {
   deleteSaleReceipt: (id: string) => invoke<void>('delete_sale_receipt', {id}),
   listCertificates: () => invoke<Certificate[]>('list_certificates'),
   issueCertificate: (input: CertificateInput) => invoke<Certificate>('issue_certificate', { input }),
+  certificateImage: (certificateId: string) => invoke<string | null>('certificate_image_data', { certificateId }),
   overview: () => invoke<Overview>('overview'),
   dataDirectory: () => invoke<string>('data_directory'),
   createBackup: (destination: string) => invoke<BackupSummary>('create_backup', { destination }),
