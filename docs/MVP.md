@@ -19,7 +19,7 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 ## Limitazioni consapevoli 0.1.0
 
 - Certificato esportabile come PDF tramite stampa di sistema (o stampante PDF), non ancora PDF/A firmato digitalmente.
-- Sono supportate solo immagini principali PNG, JPEG o WebP; massimo 12 MiB per immagine.
+- Sono supportate immagini principali e fino a 20 immagini aggiuntive per opera, nei formati PNG, JPEG o WebP, massimo 12 MiB per immagine. Le immagini aggiuntive hanno didascalia facoltativa e sono caricate solo su richiesta in anteprima.
 - La migrazione da PostgreSQL del Gestionale Opere non è ancora automatizzata.
 - Backup e ripristino locali ora disponibili in impostazioni, con snapshot SQLite e media, verifica SHA-256, integrità SQLite e copia di sicurezza prima del ripristino. Mancano ancora test di accettazione su Windows/macOS e su dischi esterni/NAS reali; restano da sviluppare versionamento di immagini, gestione multivaluta, IVA, transazioni multi-opera e fatture.
 - Nessun server MCP nella build MVP iniziale: rimane obiettivo successivo, da includere come processo locale read-only con permessi rigorosi.
@@ -40,7 +40,7 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 
 1. Collaudo integrato su Windows/macOS/Linux, test su USB/NAS e gestione degli errori di disco pieno per backup e ripristino (formato a cartelle versionate con manifest, non ZIP).
 2. Importazione opzionale e assistita dal Gestionale Opere, solo da export esplicito e con dati dell'utente.
-3. Migliorare certificati PDF, stampa e firma, immagini multiple e ricerche avanzate.
+3. Migliorare certificati PDF, stampa e firma, ordinamento/gestione avanzata della galleria e ricerche avanzate.
 4. Collegamento MCP locale via STDIO senza aprire porte di rete.
 5. Aggiornamenti Tauri firmati via GitHub Release, solo dopo test end-to-end.
 6. Accessibilità, localizzazione e test UI desktop.
@@ -58,3 +58,13 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 - Un backup integro può comunque andare perso insieme al disco: conservare almeno una copia esterna e provarne periodicamente il ripristino.
 
 Non è ancora disponibile la gestione di più archivi **simultaneamente** nella stessa installazione. Il backup di un archivio diverso può essere ripristinato in quello attivo, ma la procedura sostituisce integralmente i dati presenti.
+
+## Galleria fotografica (schema SQLite v3)
+
+- L'immagine principale di un'opera resta nel campo storico artworks.image_path ed è indipendente dalle immagini aggiuntive.
+- La tabella artwork_images memorizza UUID, opera collegata (FK con cancellazione a cascata), percorso relativo nel media store, didascalia e data di inserimento. La migrazione automatica da schema 1/2 conserva l'immagine primaria e le relazioni esistenti.
+- Il modulo Rust gallery.rs controlla presenza dell'opera, numero massimo di immagini aggiuntive, formato riconosciuto dai byte, limite 12 MiB e percorso media. Nessun upload verso server e nessun percorso esterno accettato come immagine.
+- La nuova finestra Galleria nelle opere consente aggiunta, visualizzazione su richiesta ed eliminazione delle foto aggiuntive. L'eliminazione di un'opera senza vendite/certificati elimina anche le sue fotografie locali.
+- I backup versionati restano nel formato manifest 1 ma accettano gli schemi SQLite 1–3; su schema 3 verificano che ogni percorso presente in artwork_images sia incluso e protetto dal manifest SHA-256. Un backup schema 3 deve essere ripristinato con una versione dell'app che supporta schema 3: vecchie versioni non potranno aprirlo.
+- I certificati già emessi restano snapshot immutabili e non acquisiscono automaticamente nuove fotografie.
+- Da collaudare su desktop reale: caricamenti multipli di immagini grandi, eliminazione/restore, consumo memoria e compatibilità Windows/macOS/Linux.
