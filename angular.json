@@ -22,7 +22,7 @@
             "styles": [
               "src/styles.css"
             ],
-            "assets": []
+            "assets": [{ "glob": "**/*.svg", "input": "src/assets/icons", "output": "assets/icons" }]
           },
           "configurations": {
             "production": {
