@@ -15,8 +15,11 @@ La migrazione SQLite v3→v4 è additiva e transazionale. I backup completi
 (SQLite + media + manifest SHA-256) accettano schemi 1–4 e comprendono
 automaticamente gli incassi. Le vecchie versioni dell'app non aprono v4.
 Il CSV delle vendite **non** è un estratto degli incassi; rimane un
-registro del fatturato. Un export CSV degli incassi e report di cassa
-separati sono incrementi successivi.
+registro del fatturato. L'esportazione CSV `receipts` è ora disponibile dalla sezione Vendite, con
+identificativi di vendita, opera e collezionista, data, importo esatto in
+centesimi, metodo e riferimenti; include tutti gli incassi senza filtri.
+Non equivale a estratto conto bancario, documento fiscale o backup
+ripristinabile. I report di cassa mensili sono incrementi successivi.
 
 Comandi Tauri: `list_sale_receipts`, `record_sale_receipt`,
 `delete_sale_receipt`, `list_sale_balances`.
