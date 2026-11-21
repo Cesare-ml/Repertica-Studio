@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (ventesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (ventunesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -29,6 +29,15 @@ Data ricognizione: **2026-11-21** (ventesima ricognizione). Stato uniforme: **Pr
 | [REPS-TECH-021](REPS-TECH-021-gestione-colore-icc-derivati-fotografici.md) | Gestione colore ICC e interpretazione dei derivati fotografici nel Media Center: indagine su profili, preview, revisione ed export senza alterare originali | P2 | Proposta — da valutare |
 | [REPS-TECH-022](REPS-TECH-022-preflight-spazio-operazioni-locali.md) | Preflight prudente della capacità e dei volumi prima di backup/ripristino, senza promettere spazio garantito né eliminare copie esistenti | P2 | Proposta — da valutare |
 | [REPS-TECH-023](REPS-TECH-023-certificati-pdf-a-conservazione-verificabile.md) | Certificati da snapshot immutabili in PDF/A **validato realmente e offline**, distinguendo conservazione documentale, accessibilità e autenticità dell'opera | P2 | Proposta — da valutare |
+| [REPS-TECH-024](REPS-TECH-024-metadati-fotografici-iptc-xmp-interoperabili.md) | Lettura e interscambio selettivo dei metadati fotografici IPTC/XMP, con conflitti espliciti, originali intatti e nessun trasferimento implicito di diritti | P2 | Proposta — da valutare |
+
+## Ventunesima ricognizione — 21 novembre 2026 — REPS-TECH-024
+
+- **[REPS-TECH-024 — Metadati fotografici IPTC/XMP interoperabili](REPS-TECH-024-metadati-fotografici-iptc-xmp-interoperabili.md):** approfondita una possibile funzione facoltativa del **Media Center**, per leggere i crediti e le descrizioni già presenti nei file fotografici e, solo dopo confronto e conferma, adottare selettivamente informazioni oppure esportare un sidecar interoperabile. **Prima fase preferibile: sola ispezione read-only**, nessuna scrittura sull'originale. Non viene dichiarata né dedotta la titolarità dei diritti sull'opera a partire dai tag della fotografia. **P2 ipotetica**, da validare con fotografi, artisti, gallerie e archivi.
+- **Evidenza su `main`:** `src-tauri/src/media.rs` dispone di campi manuali `credits`, `copyright_status`, `title` e `description`, oltre alle revisioni; `imaging.rs` legge l'orientamento EXIF, ma i percorsi esaminati non documentano una mappatura IPTC/XMP. `raw_files.rs` gestisce RAW e hash, non emerge un'interfaccia sidecar XMP. Nessuna incompatibilità esterna è stata dimostrata con test reali; il bisogno resta da convalidare.
+- **Anti-doppione:** TECH-013 controlla **privacy e rimozione metadati** nelle copie condivise; TECH-021 gestisce **ICC e colore**; TECH-001/019 interscambiano **archivi/cataloghi**, non campi incorporati in una singola foto; UX-010 nella [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) documenta **diritti e autorizzazioni**, che nessun XMP può sostituire. La [PR #58](https://github.com/Cesare-ml/Repertica-Studio/pull/58) sui CSV media è complementare e va ricontrollata prima di una futura decisione.
+- **Tutela dei dati:** non incorporare GPS, note private e seriali nei file destinati alla condivisione senza scelta informata. L'archivio e il backup rimangono autosufficienti; niente dipendenza obbligatoria da RAW/sidecar su dischi esterni. Fonti di studio: [IPTC Photo Metadata Standard 2025.1](https://www.iptc.org/std/photometadata/specification/IPTC-PhotoMetadata-2025.1.html) e [Adobe XMP specifications](https://developer.adobe.com/xmp/docs/xmp-specifications/).
+- **Stato della ricognizione:** **24 proposte**, tutte **«Proposta — da valutare»**; una sola nuova scheda Markdown e questo indice modificati esclusivamente nella cartella tecnica. Nessuna approvazione, assegnazione, modifica a codice/configurazioni, issue, implementazione o merge. La revisione è lasciata al proprietario nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
 
 ## Ventesima ricognizione — 21 novembre 2026 — REPS-TECH-023
 
