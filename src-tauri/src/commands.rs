@@ -367,6 +367,14 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&stored).unwrap()["image_path"].as_str(),
             Some(original.as_str())
         );
+        drop(conn);
+        // Backups copy the complete local media store, including historical photos
+        // no longer referenced by the active artwork or gallery.
+        let destination = tempfile::tempdir().unwrap();
+        let backup = crate::backup::create_backup_core(&db, destination.path()).unwrap();
+        let value = serde_json::to_value(backup).unwrap();
+        let backup_dir = value["directory"].as_str().unwrap();
+        assert!(std::path::Path::new(backup_dir).join(original).is_file());
     }
 
     #[test]
