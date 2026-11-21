@@ -3,7 +3,7 @@
     <div class="brand"><div class="brand-mark">R</div><div><strong>Repertica</strong><span>STUDIO</span></div></div>
     <nav [attr.aria-label]="tr('Sezioni principali')">
       <button type="button" *ngFor="let item of sections" [class.active]="section === item.id"
-        (click)="navigate(item.id)"><span class="nav-icon" [ngClass]="'nav-icon--' + item.id" aria-hidden="true"></span>{{ tr(item.label) }}</button>
+        (click)="navigate(item.id)" [attr.aria-current]="section === item.id ? 'page' : null"><span class="nav-icon" [ngClass]="'nav-icon--' + item.id" aria-hidden="true"></span>{{ tr(item.label) }}</button>
     </nav>
     <div class="sidebar-bottom">
       <small class="attribution">Powered by Repertica</small>
@@ -68,9 +68,9 @@
     <section *ngIf="section === 'artworks'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Archivio opere') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
-          <button class="secondary" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
-          <button class="primary" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button>
+          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
+          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
+          <button class="primary action-glyph action-glyph--artworks" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button>
         </div></div>
       <p class="hint" *ngIf="!artworks.length">{{ tr('Suggerimento: dopo aver creato un’opera usa «Foto» per la copertina e «Galleria» per altre fotografie (fino a 20).') }}</p>
       <div class="filter-row archive-filters">
@@ -99,10 +99,10 @@
             <td><button *ngIf="salesByArtwork[a.id] as sale" type="button" class="link-button"
               (click)="openCollectorFromArtwork(a.id)" [attr.aria-label]="'Apri il collezionista ' + sale.collector_name">{{ sale.collector_name }}</button>
               <span *ngIf="!salesByArtwork[a.id]">—</span></td>
-            <td class="actions"><button class="small" type="button" (click)="editArtwork(a)">{{ tr('Modifica') }}</button>
-              <button class="small" type="button" [disabled]="busy" (click)="chooseCoverPhoto(a)">{{ tr('Foto') }}</button>
-              <button class="small" type="button" (click)="openGallery(a)">{{ tr('Galleria') }}</button>
-              <button class="small danger-text" type="button" (click)="deleteArtwork(a)">{{ tr('Elimina') }}</button></td>
+            <td class="actions"><button class="small action-glyph action-glyph--edit" type="button" (click)="editArtwork(a)">{{ tr('Modifica') }}</button>
+              <button class="small action-glyph action-glyph--photo" type="button" [disabled]="busy" (click)="chooseCoverPhoto(a)">{{ tr('Foto') }}</button>
+              <button class="small action-glyph action-glyph--gallery" type="button" (click)="openGallery(a)">{{ tr('Galleria') }}</button>
+              <button class="small danger-text action-glyph action-glyph--delete" type="button" (click)="deleteArtwork(a)">{{ tr('Elimina') }}</button></td>
           </tr></tbody></table>
         <div class="empty-state" *ngIf="!visibleArtworks.length"><strong>{{ tr('Nessuna opera trovata') }}</strong><p>{{ tr('Modifica i filtri o la ricerca per visualizzare altre opere.') }}</p>
           <button type="button" class="small" (click)="search = ''; artworkStatusFilter = 'all'; artworkCollectorFilter = 'all'; artworkOrder = 'recent'">{{ tr('Azzera filtri') }}</button></div>
@@ -112,8 +112,8 @@
     <section *ngIf="section === 'collectors'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Collezionisti e contatti') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary" type="button" (click)="exportLedger('collectors')" [disabled]="busy || !initialized">{{ tr('Esporta collezionisti CSV') }}</button>
-          <button class="primary" type="button" (click)="newCollector()" [disabled]="!initialized">{{ tr('+ Nuovo contatto') }}</button>
+          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('collectors')" [disabled]="busy || !initialized">{{ tr('Esporta collezionisti CSV') }}</button>
+          <button class="primary action-glyph action-glyph--collectors" type="button" (click)="newCollector()" [disabled]="!initialized">{{ tr('+ Nuovo contatto') }}</button>
         </div></div>
       <div class="filter-row"><input type="search" [placeholder]="tr('Nome, email, telefono o opera acquisita…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca collezionisti')">
         <div class="chips" role="group" [attr.aria-label]="tr('Filtra collezionisti')">
@@ -134,8 +134,8 @@
                 [attr.aria-controls]="'collector-works-' + c.id">
                 {{ salesByCollector[c.id]?.length || 0 }} · {{ tr(expandedCollectorId === c.id ? 'Nascondi' : 'Dettagli') }}
               </button></td>
-              <td class="actions"><button class="small" type="button" (click)="editCollector(c)">{{ tr('Modifica') }}</button>
-                <button class="small danger-text" type="button" (click)="deleteCollector(c)">{{ tr('Elimina') }}</button></td></tr>
+              <td class="actions"><button class="small action-glyph action-glyph--edit" type="button" (click)="editCollector(c)">{{ tr('Modifica') }}</button>
+                <button class="small danger-text action-glyph action-glyph--delete" type="button" (click)="deleteCollector(c)">{{ tr('Elimina') }}</button></td></tr>
             <tr *ngIf="expandedCollectorId === c.id" class="collector-details" [id]="'collector-works-' + c.id">
               <td colspan="5">
                 <div class="collector-history-header"><strong>Opere acquistate da {{ c.name }}</strong>
@@ -155,10 +155,10 @@
     <section *ngIf="section === 'sales'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Registro vendite') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
-          <button class="secondary" type="button" (click)="exportLedger('receipts')" [disabled]="busy || !initialized">{{ tr('Esporta incassi CSV') }}</button>
-          <button class="secondary" type="button" (click)="exportLedger('balances')" [disabled]="busy || !initialized">{{ tr('Esporta saldi vendite CSV') }}</button>
-          <button class="primary" type="button" (click)="newSale()" [disabled]="!initialized || !sellableArtworks.length || !collectors.length">{{ tr('+ Registra vendita') }}</button>
+          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
+          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('receipts')" [disabled]="busy || !initialized">{{ tr('Esporta incassi CSV') }}</button>
+          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('balances')" [disabled]="busy || !initialized">{{ tr('Esporta saldi vendite CSV') }}</button>
+          <button class="primary action-glyph action-glyph--sales" type="button" (click)="newSale()" [disabled]="!initialized || !sellableArtworks.length || !collectors.length">{{ tr('+ Registra vendita') }}</button>
         </div></div>
       <p class="hint" *ngIf="!sellableArtworks.length || !collectors.length">{{ tr('Per registrare una vendita occorrono almeno un\'opera disponibile e un collezionista.') }}</p>
       <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Data') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Incassato') }}</th><th>{{ tr('Da incassare') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
@@ -166,21 +166,21 @@
           <td class="money">{{ euros(s.amount_cents) }}</td>
           <td class="money">{{ euros(balanceForSale(s).received_cents) }}</td>
           <td class="money">{{ euros(balanceForSale(s).outstanding_cents) }}</td>
-          <td class="actions"><button class="small" type="button" (click)="openSaleReceipts(s)">{{ tr('Gestisci incassi') }}</button>
-            <button class="small danger-text" type="button" (click)="deleteSale(s)">{{ tr('Annulla vendita') }}</button></td></tr></tbody></table>
+          <td class="actions"><button class="small action-glyph action-glyph--sales" type="button" (click)="openSaleReceipts(s)">{{ tr('Gestisci incassi') }}</button>
+            <button class="small danger-text action-glyph action-glyph--delete" type="button" (click)="deleteSale(s)">{{ tr('Annulla vendita') }}</button></td></tr></tbody></table>
         <div class="empty-state" *ngIf="!sales.length"><strong>{{ tr('Nessuna vendita ancora registrata.') }}</strong><p>{{ tr('Per registrare una vendita servono un’opera disponibile e un collezionista. Gli incassi si aggiungono dopo, anche in più rate.') }}</p></div></div>
     </section>
 
     <section *ngIf="section === 'certificates'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Certificati delle opere') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary" type="button" (click)="exportLedger('certificates')" [disabled]="busy || !initialized">{{ tr('Esporta certificati CSV') }}</button>
-          <button class="primary" type="button" (click)="newCertificate()" [disabled]="!initialized || !artworks.length">{{ tr('+ Emissione certificato') }}</button>
+          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('certificates')" [disabled]="busy || !initialized">{{ tr('Esporta certificati CSV') }}</button>
+          <button class="primary action-glyph action-glyph--certificates" type="button" (click)="newCertificate()" [disabled]="!initialized || !artworks.length">{{ tr('+ Emissione certificato') }}</button>
         </div></div>
       <div class="hint">{{ tr('I certificati sono documenti da controllare e firmare dall\'artista; non costituiscono da soli una verifica indipendente di autenticità.') }}</div>
       <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Numero') }}</th><th>{{ tr('Opera') }}</th><th>{{ tr('Artista') }}</th><th>{{ tr('Emesso il') }}</th><th>{{ tr('Documento') }}</th></tr></thead>
         <tbody><tr *ngFor="let c of certificates"><td><strong>{{ c.serial }}</strong></td><td>{{ c.artwork_title }}</td><td>{{ c.artist_name }}</td>
-          <td>{{ date(c.issued_at) }}</td><td class="actions"><button class="small" type="button" (click)="printCertificate(c)">{{ tr('Stampa / PDF') }}</button></td></tr></tbody></table>
+          <td>{{ date(c.issued_at) }}</td><td class="actions"><button class="small action-glyph action-glyph--print" type="button" (click)="printCertificate(c)">{{ tr('Stampa / PDF') }}</button></td></tr></tbody></table>
         <div class="empty-state" *ngIf="!certificates.length"><strong>{{ tr('Non hai ancora emesso certificati.') }}</strong><p>{{ tr('Il certificato congela i dati dell’opera al momento dell’emissione e poi non si può più modificare: controlla la scheda prima di emetterlo.') }}</p></div></div>
     </section>
 
@@ -190,7 +190,7 @@
         <div><h2>{{ tr('Economia dello studio') }}</h2></div>
         <div class="finance-top-actions">
           <label class="year-select"><span>{{ tr('Anno di riferimento') }}</span><select [(ngModel)]="financeYear" (ngModelChange)="loadFinanceYear()"><option *ngFor="let y of financeYears" [ngValue]="y">{{ y }}</option></select></label>
-          <button type="button" class="primary" (click)="newExpense()" [disabled]="!initialized">{{ tr('+ Registra spesa') }}</button>
+          <button type="button" class="primary action-glyph action-glyph--finance" (click)="newExpense()" [disabled]="!initialized">{{ tr('+ Registra spesa') }}</button>
         </div>
       </div>
       <p class="hint">{{ tr('La vendita non equivale a un incasso. Questi dati non sostituiscono la contabilità fiscale.') }}</p>
@@ -232,11 +232,12 @@
         </div>
       </div>
       <div class="panel finance-summary">
-        <div class="panel-heading"><div><h3>{{ tr('Saldi teorici') }}</h3><p>{{ tr('Distribuzione dei ricavi netti e spese assegnate ai fondi') }}</p></div></div>
-        <div class="finance-balances">
-          <div><span>{{ tr('Quota personale') }}</span><strong>{{ euros(finances?.personal_cents || 0) }}</strong></div>
-          <div><span>{{ tr('Fondo attività') }}</span><strong>{{ euros(finances?.activity_balance_cents || 0) }}</strong></div>
-          <div><span>{{ tr('Fondo risparmio') }}</span><strong>{{ euros(finances?.savings_balance_cents || 0) }}</strong></div>
+        <div class="panel-heading"><div><h3>{{ tr('Saldi teorici') }}</h3><p>{{ tr('Distribuzione dei ricavi netti e spese assegnate ai fondi') }}</p></div>
+          <button type="button" class="secondary small action-glyph action-glyph--export" (click)="exportLedger('allocations')" [disabled]="busy || !initialized">{{ tr('Esporta ripartizioni CSV') }}</button></div>
+        <p class="hint" *ngIf="finances && !finances.allocation_enabled">{{ tr('La ripartizione delle vendite è disattivata: le nuove vendite non vengono suddivise.') }}</p>
+        <div class="finance-balances" *ngIf="finances?.parts?.length">
+          <div *ngFor="let part of finances!.parts" [class.inactive-part]="!part.active"><span>{{ partName(part.part_id, part.name) }}<small *ngIf="!part.active"> · {{ tr('non più attiva') }}</small></span>
+            <strong>{{ euros(part.pays_expenses ? part.balance_cents : part.share_cents) }}</strong></div>
         </div>
         <div class="finance-month-table table-scroll">
           <table><thead><tr><th>{{ tr('Mese') }}</th><th>{{ tr('Ricavi lordi') }}</th><th>{{ tr('Ricavi netti') }}</th><th>{{ tr('Spese') }}</th><th>{{ tr('Risultato') }}</th></tr></thead>
@@ -248,16 +249,16 @@
       </div>
       <div class="section-tools expenses-heading"><div><h2>{{ tr('Acquisti e spese') }}</h2></div>
         <div class="finance-top-actions">
-          <button type="button" class="secondary" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
-          <button type="button" class="secondary" (click)="newExpense()">{{ tr('+ Registra spesa') }}</button>
+          <button type="button" class="secondary action-glyph action-glyph--export" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
+          <button type="button" class="secondary action-glyph action-glyph--finance" (click)="newExpense()">{{ tr('+ Registra spesa') }}</button>
         </div></div>
       <div class="panel table-scroll"><table>
         <thead><tr><th>{{ tr('Data') }}</th><th>{{ tr('Categoria') }}</th><th>{{ tr('Descrizione') }}</th><th>{{ tr('Fornitore') }}</th><th>{{ tr('Fondo') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
         <tbody><tr *ngFor="let e of expenses"><td>{{ date(e.expense_date) }}</td><td>{{ categoryLabel(e.category) }}</td>
           <td><strong>{{ e.description }}</strong></td><td>{{ e.supplier || '—' }}</td>
-          <td>{{ tr(e.fund === 'activity' ? 'Fondo attività' : 'Fondo risparmio') }}</td>
+          <td>{{ fundLabel(e.fund) }}</td>
           <td class="money">{{ euros(e.amount_cents) }}</td>
-          <td class="actions"><button type="button" class="small" (click)="editExpense(e)">{{ tr('Modifica') }}</button><button type="button" class="small danger-text" (click)="deleteExpense(e)">{{ tr('Elimina') }}</button></td></tr></tbody>
+          <td class="actions"><button type="button" class="small action-glyph action-glyph--edit" (click)="editExpense(e)">{{ tr('Modifica') }}</button><button type="button" class="small danger-text action-glyph action-glyph--delete" (click)="deleteExpense(e)">{{ tr('Elimina') }}</button></td></tr></tbody>
       </table><div class="empty-state" *ngIf="!expenses.length">{{ tr('Nessuna spesa registrata') }}</div></div>
     </section>
 
@@ -269,7 +270,7 @@
         <div class="backup-block">
           <h3>{{ tr('Diagnostica fotografie dell’archivio') }}</h3>
           <p>{{ tr('Verifica in sola lettura percorsi, presenza e intestazione delle immagini JPEG, PNG e WebP. Non modifica file e non confronta hash storici.') }}</p>
-          <button type="button" class="secondary" (click)="verifyArtworkMedia()" [disabled]="busy || !initialized">{{ tr('Verifica fotografie') }}</button>
+          <button type="button" class="secondary action-glyph action-glyph--shield" (click)="verifyArtworkMedia()" [disabled]="busy || !initialized">{{ tr('Verifica fotografie') }}</button>
           <div *ngIf="mediaAudit as audit" class="backup-result" role="status" aria-live="polite">
             <strong>{{ tr('Riferimenti controllati') }}: {{ audit.checked }} · {{ tr('Fotografie leggibili') }}: {{ audit.healthy }} · {{ tr('Problemi rilevati') }}: {{ audit.problems }}</strong>
             <p *ngIf="audit.problems === 0">{{ tr('Nessun problema rilevato nel controllo locale.') }}</p>
@@ -306,7 +307,7 @@
             <summary>{{ tr('Configurazione manuale per altri assistenti') }}</summary>
             <p>{{ tr('Aggiungi questa configurazione ai server MCP del tuo assistente e riavvia l’assistente.') }}</p>
             <pre class="mcp-config" *ngIf="mcpSetup" tabindex="0">{{ mcpConfigJson }}</pre>
-            <button type="button" class="secondary" (click)="copyMcpConfig()" [disabled]="!mcpSetup">{{ tr('Copia configurazione') }}</button>
+            <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyMcpConfig()" [disabled]="!mcpSetup">{{ tr('Copia configurazione') }}</button>
           </details>
         </div>
         <div class="backup-block code-settings">
@@ -321,7 +322,7 @@
               <option value="-">-</option><option value=".">.</option><option value="_">_</option></select></label>
           </div>
           <p class="code-example">{{ tr('Esempio') }}: <strong>{{ codeExample }}</strong></p>
-          <button type="button" class="secondary" (click)="saveCodePolicy()" [disabled]="busy">{{ tr('Salva codice archivio') }}</button>
+          <button type="button" class="secondary action-glyph action-glyph--confirm" (click)="saveCodePolicy()" [disabled]="busy">{{ tr('Salva codice archivio') }}</button>
         </div>
         <div class="backup-block economy-settings">
           <h3>{{ tr('Lingua dell’app') }}</h3><p>{{ tr('La lingua iniziale segue quella del sistema operativo. Se non disponibile, Repertica usa l\'inglese.') }}</p>
@@ -343,24 +344,71 @@
           </div>
           <p class="backup-note">{{ tr('Metodo superficie: larghezza × altezza × tariffa per cm² × coefficiente. Il prezzo suggerito non modifica il prezzo storico delle vendite.') }}</p>
         </div>
+        <div class="backup-block economy-settings allocation-editor">
+          <h3>{{ tr('Ripartizione vendite') }}</h3>
+          <p>{{ tr('Distribuzione dei ricavi netti. Le percentuali sono fissate al momento della vendita.') }}</p>
+          <label class="inline-check"><input type="checkbox" [(ngModel)]="allocationDraft.enabled"> {{ tr('Ripartisci i ricavi netti delle vendite') }}</label>
+          <ng-container *ngIf="allocationDraft.enabled">
+            <div class="allocation-row allocation-head" aria-hidden="true"><span>{{ tr('Nome') }}</span><span>%</span><span>{{ tr('Copre le spese') }}</span><span></span></div>
+            <div class="allocation-row" *ngFor="let part of allocationDraft.parts; let i = index">
+              <input [(ngModel)]="part.name" maxlength="60" [attr.aria-label]="tr('Nome')">
+              <input type="number" min="0" max="100" step="0.01" [(ngModel)]="part.percent" [attr.aria-label]="'%'">
+              <label class="inline-check"><input type="checkbox" [(ngModel)]="part.pays_expenses"> <span class="sr-only">{{ tr('Copre le spese') }}</span></label>
+              <button type="button" class="small danger-text" (click)="removeAllocationPart(i)" [disabled]="allocationDraft.parts.length <= 1" [attr.aria-label]="tr('Rimuovi')">×</button>
+            </div>
+            <div class="allocation-actions">
+              <button type="button" class="secondary small" (click)="addAllocationPart()" [disabled]="allocationDraft.parts.length >= 12">{{ tr('+ Aggiungi parte') }}</button>
+              <button type="button" class="secondary small" (click)="splitAllocationEvenly()">{{ tr('Dividi in parti uguali') }}</button>
+            </div>
+            <p class="allocation-total" [class.invalid]="!allocationValid">{{ tr('Totale') }}: {{ allocationTotal.toFixed(2) }}% <span *ngIf="!allocationValid">— {{ tr('Deve essere 100%') }}</span></p>
+          </ng-container>
+          <p class="backup-note" *ngIf="!allocationDraft.enabled">{{ tr('Con la ripartizione disattivata le nuove vendite non vengono suddivise. Le vendite già registrate mantengono le loro quote.') }}</p>
+          <button type="button" class="primary action-glyph action-glyph--confirm" (click)="saveAllocationPlan()" [disabled]="busy || (allocationDraft.enabled && !allocationValid)">{{ tr('Salva ripartizione') }}</button>
+        </div>
         <div class="backup-block economy-settings">
-          <h3>{{ tr('Ripartizione vendite') }}</h3><p>{{ tr('Distribuzione dei ricavi netti. Le percentuali sono fissate al momento della vendita.') }}</p>
+          <h3>{{ tr('Tasse e tesoreria') }}</h3>
           <div class="settings-form-grid">
-            <label class="settings-input"><span>{{ tr('Quota personale (%)') }}</span><input type="number" min="0" max="100" step="0.01" [(ngModel)]="personalPercent"></label>
-            <label class="settings-input"><span>{{ tr('Quota attività (%)') }}</span><input type="number" min="0" max="100" step="0.01" [(ngModel)]="activityPercent"></label>
-            <label class="settings-input"><span>{{ tr('Quota risparmio (%)') }}</span><input type="number" min="0" max="100" step="0.01" [(ngModel)]="savingsPercent"></label>
             <label class="settings-input"><span>{{ tr('Tasse predefinite (%)') }}</span><input type="number" min="0" max="100" step="0.01" [(ngModel)]="defaultTaxPercent"></label>
             <label class="settings-input"><span>{{ tr('Data inizio tesoreria') }}</span><input type="date" [(ngModel)]="settingsDraft.treasury_start_date"></label>
           </div>
-          <p class="allocation-total">Totale quote: {{ (personalPercent+activityPercent+savingsPercent).toFixed(2) }}% <span *ngIf="!allocationValid">{{ tr('— Deve essere 100%') }}</span></p>
-          <button type="button" class="primary" (click)="saveEconomySettings()" [disabled]="busy">{{ tr('Salva impostazioni') }}</button>
+          <button type="button" class="primary action-glyph action-glyph--confirm" (click)="saveEconomySettings()" [disabled]="busy">{{ tr('Salva impostazioni') }}</button>
+        </div>
+        <div class="backup-block auto-backup">
+          <h3>{{ tr('Backup automatico') }}</h3>
+          <p>{{ tr('Crea copie verificate dell’archivio nel giorno e all’ora scelti mentre l’app è aperta. Se il computer era spento, la copia mancata viene eseguita alla prima occasione.') }}</p>
+          <label class="inline-check"><input type="checkbox" [(ngModel)]="scheduleDraft.enabled"> {{ tr('Attiva il backup automatico') }}</label>
+          <ng-container *ngIf="scheduleDraft.enabled">
+            <div class="settings-grid">
+              <label class="settings-input"><span>{{ tr('Frequenza') }}</span><select [(ngModel)]="scheduleDraft.frequency">
+                <option value="DAILY">{{ tr('Ogni giorno') }}</option><option value="WEEKLY">{{ tr('Ogni settimana') }}</option><option value="MONTHLY">{{ tr('Ogni mese') }}</option></select></label>
+              <label class="settings-input" *ngIf="scheduleDraft.frequency === 'WEEKLY'"><span>{{ tr('Giorno della settimana') }}</span><select [(ngModel)]="scheduleDraft.weekday">
+                <option *ngFor="let day of weekdayIndexes" [ngValue]="day">{{ weekdayLabel(day) }}</option></select></label>
+              <label class="settings-input" *ngIf="scheduleDraft.frequency === 'MONTHLY'"><span>{{ tr('Giorno del mese') }}</span><input type="number" min="1" max="28" [(ngModel)]="scheduleDraft.day_of_month"></label>
+              <label class="settings-input"><span>{{ tr('Ora') }}</span><input type="time" [(ngModel)]="scheduleDraft.time_of_day"></label>
+              <label class="settings-input"><span>{{ tr('Conserva solo le ultime copie automatiche (0 = tutte)') }}</span><input type="number" min="0" max="365" [(ngModel)]="scheduleDraft.keep_last"></label>
+            </div>
+            <div class="backup-field"><strong>{{ tr('Cartella di destinazione') }}</strong><code class="path">{{ scheduleDraft.destination || tr('Nessuna cartella selezionata') }}</code></div>
+            <div class="backup-actions"><button type="button" class="secondary action-glyph action-glyph--folder" (click)="chooseScheduleDestination()" [disabled]="busy || !initialized">{{ tr('Scegli cartella…') }}</button></div>
+            <p class="backup-note">{{ tr('Le copie contengono i dati in chiaro: scegli una cartella protetta.') }}</p>
+          </ng-container>
+          <div class="mcp-status" *ngIf="schedule as s" role="status" aria-live="polite">
+            <span class="status-pill" [class.ok]="s.last_status === 'OK'" [class.warn]="s.last_status === 'ERROR'">
+              {{ s.last_status === 'OK' ? tr('Ultimo backup riuscito') : s.last_status === 'ERROR' ? tr('Ultimo tentativo non riuscito') : tr('Nessun backup eseguito finora') }}</span>
+            <span *ngIf="s.last_success_at">{{ dateTime(s.last_success_at) }}</span>
+            <small *ngIf="s.last_status === 'ERROR' && s.last_message">{{ s.last_message }}</small>
+            <small *ngIf="s.enabled && s.next_run_at">{{ tr('Prossimo backup') }}: {{ dateTime(s.next_run_at) }}</small>
+          </div>
+          <div class="backup-actions">
+            <button type="button" class="primary action-glyph action-glyph--confirm" (click)="saveBackupSchedule()" [disabled]="busy">{{ tr('Salva backup automatico') }}</button>
+            <button type="button" class="secondary action-glyph action-glyph--shield" (click)="runBackupNow()" [disabled]="busy || !schedule?.destination">{{ tr('Esegui ora') }}</button>
+          </div>
         </div>
         <div class="backup-block">
           <div class="backup-heading"><div><h3>{{ tr('Backup del tuo archivio') }}</h3><p>{{ tr('Salva opere, fotografie, collezionisti, vendite e certificati in una cartella a tua scelta: anche su un disco esterno, NAS o nella cartella di un altro archivio.') }}</p></div></div>
           <div class="backup-field"><strong>{{ tr('Cartella di destinazione') }}</strong><code class="path">{{ backupDestination || 'Nessuna cartella selezionata' }}</code></div>
           <div class="backup-actions">
-            <button type="button" class="secondary" (click)="chooseBackupDestination()" [disabled]="busy || !initialized">{{ tr('Scegli cartella…') }}</button>
-            <button type="button" class="primary" (click)="makeBackup()" [disabled]="busy || !backupDestination">{{ busy ? 'Operazione in corso…' : 'Crea backup verificato' }}</button>
+            <button type="button" class="secondary action-glyph action-glyph--folder" (click)="chooseBackupDestination()" [disabled]="busy || !initialized">{{ tr('Scegli cartella…') }}</button>
+            <button type="button" class="primary action-glyph action-glyph--shield" (click)="makeBackup()" [disabled]="busy || !backupDestination">{{ busy ? 'Operazione in corso…' : 'Crea backup verificato' }}</button>
           </div>
           <div *ngIf="lastBackup" class="backup-result">
             <strong>{{ tr('Ultimo backup verificato ✓') }}</strong>
@@ -373,14 +421,14 @@
           <h3>{{ tr('Ripristina o trasferisci un archivio') }}</h3>
           <p>{{ tr('Puoi utilizzare un backup creato su questo computer o proveniente da un altro archivio Repertica Studio compatibile.') }}</p>
           <div class="backup-actions">
-            <button type="button" class="secondary" (click)="chooseRestoreFolder()" [disabled]="busy || !initialized">{{ tr('Seleziona backup da verificare…') }}</button>
+            <button type="button" class="secondary action-glyph action-glyph--folder" (click)="chooseRestoreFolder()" [disabled]="busy || !initialized">{{ tr('Seleziona backup da verificare…') }}</button>
           </div>
           <div *ngIf="restoreCandidate" class="backup-result">
             <strong>{{ tr('Backup verificato ✓') }}</strong>
             <p>{{ date(restoreCandidate.createdAt) }} · {{ restoreCandidate.artworks }} opere · {{ restoreCandidate.collectors }} collezionisti · {{ bytes(restoreCandidate.totalBytes) }}</p>
             <code class="path">{{ restoreCandidate.directory }}</code>
             <p class="warning">{{ tr('Il ripristino sostituisce l\'archivio attuale. Repertica conserverà prima una copia dell\'archivio presente, senza cancellarla.') }}</p>
-            <button type="button" class="primary" (click)="restoreSelectedBackup()" [disabled]="busy">{{ tr('Conferma ripristino') }}</button>
+            <button type="button" class="primary action-glyph action-glyph--restore" (click)="restoreSelectedBackup()" [disabled]="busy">{{ tr('Conferma ripristino') }}</button>
           </div>
           <p class="backup-note">{{ tr('Prima di eliminare una vecchia copia, verifica di riuscire ad aprire e utilizzare l\'archivio ripristinato.') }}</p>
         </div>
@@ -419,7 +467,7 @@
         <div><strong>{{ tr('Copertina') }}</strong>
           <span class="file-name" *ngIf="newCoverPath; else noCover">{{ fileName(newCoverPath) }}</span>
           <ng-template #noCover><span class="file-name muted">{{ tr('Nessuna copertina selezionata') }}</span></ng-template></div>
-        <div class="photo-actions"><button type="button" class="secondary small" (click)="pickCover()" [disabled]="busy">{{ newCoverPath ? tr('Cambia copertina…') : tr('Scegli copertina…') }}</button>
+        <div class="photo-actions"><button type="button" class="secondary small action-glyph action-glyph--photo" (click)="pickCover()" [disabled]="busy">{{ newCoverPath ? tr('Cambia copertina…') : tr('Scegli copertina…') }}</button>
           <button type="button" class="small danger-text" *ngIf="newCoverPath" (click)="newCoverPath = null">{{ tr('Rimuovi') }}</button></div>
       </div>
       <div class="photo-pick">
@@ -445,7 +493,7 @@
         <label class="full"><span>{{ tr('Note') }}</span><textarea [(ngModel)]="newSaleDraft.notes" rows="2"></textarea></label>
       </div>
     </fieldset>
-    <div class="dialog-bottom"><button class="secondary" type="button" (click)="artworkDialog=false">{{ tr('Annulla') }}</button><button class="primary" type="button" [disabled]="busy || !artworkDraft.title.trim()" (click)="saveArtwork()">{{ tr('Salva opera') }}</button></div>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="artworkDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !artworkDraft.title.trim()" (click)="saveArtwork()">{{ tr('Salva opera') }}</button></div>
   </div>
 </div>
 
@@ -458,7 +506,7 @@
     <p class="form-note">{{ tr('Puoi scegliere una fotografia aggiuntiva come nuova copertina.') }}</p>
     <div class="gallery-upload">
       <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span><input maxlength="300" [(ngModel)]="galleryCaption"></label>
-      <button class="secondary" type="button" [disabled]="busy || galleryImages.length >= 20" (click)="addGalleryPhoto()">{{ tr('Aggiungi fotografia') }}</button>
+      <button class="secondary action-glyph action-glyph--photo" type="button" [disabled]="busy || galleryImages.length >= 20" (click)="addGalleryPhoto()">{{ tr('Aggiungi fotografia') }}</button>
     </div>
     <div class="gallery-grid" *ngIf="galleryImages.length; else emptyGallery">
       <div class="gallery-photo" *ngFor="let img of galleryImages; let i = index">
@@ -468,20 +516,20 @@
           <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span>
             <input [(ngModel)]="editingGalleryCaption" maxlength="300" [disabled]="busy"></label>
           <div class="gallery-caption-actions">
-            <button class="small primary" type="button" [disabled]="busy" (click)="saveGalleryCaption(img)">{{ tr('Salva didascalia') }}</button>
+            <button class="small primary action-glyph action-glyph--confirm" type="button" [disabled]="busy" (click)="saveGalleryCaption(img)">{{ tr('Salva didascalia') }}</button>
             <button class="small secondary" type="button" [disabled]="busy" (click)="cancelGalleryCaptionEdit()">{{ tr('Annulla') }}</button>
           </div>
         </div>
         <ng-template #readGalleryCaption>
           <p>{{ img.caption || tr('Senza didascalia') }}</p>
-          <button class="small secondary" type="button" [disabled]="busy" (click)="startGalleryCaptionEdit(img)">{{ tr('Modifica') }}</button>
+          <button class="small secondary action-glyph action-glyph--edit" type="button" [disabled]="busy" (click)="startGalleryCaptionEdit(img)">{{ tr('Modifica') }}</button>
         </ng-template>
         <div class="gallery-caption-actions" role="group" [attr.aria-label]="tr('Ordina fotografie')">
           <button class="small secondary" type="button" [disabled]="busy || i === 0" (click)="moveGalleryPhoto(img, 'up')">{{ tr('Sposta prima') }}</button>
           <button class="small secondary" type="button" [disabled]="busy || i === galleryImages.length - 1" (click)="moveGalleryPhoto(img, 'down')">{{ tr('Sposta dopo') }}</button>
         </div>
         <button class="small secondary" type="button" [disabled]="busy" (click)="makeGalleryPrimary(img)">{{ tr('Imposta come principale') }}</button>
-        <button class="small danger-text" type="button" [disabled]="busy" (click)="removeGalleryPhoto(img)">{{ tr('Elimina') }}</button>
+        <button class="small danger-text action-glyph action-glyph--delete" type="button" [disabled]="busy" (click)="removeGalleryPhoto(img)">{{ tr('Elimina') }}</button>
       </div>
     </div>
     <ng-template #emptyGallery><p class="empty-state">{{ tr('Nessuna fotografia aggiuntiva.') }}</p></ng-template>
@@ -497,7 +545,7 @@
         <div class="photo-pick">
           <div class="profile-block"><span class="avatar large"><img *ngIf="profilePreview" [src]="profilePreview" alt=""><span *ngIf="!profilePreview">{{ collectorDraft.first_name.slice(0, 1).toUpperCase() || '?' }}</span></span>
             <div><strong>{{ tr('Foto profilo') }}</strong><span class="file-name muted" *ngIf="!profilePreview">{{ tr('Nessuna foto profilo') }}</span></div></div>
-          <div class="photo-actions"><button type="button" class="secondary small" (click)="setCollectorProfile()" [disabled]="busy">{{ profilePreview ? tr('Cambia foto profilo…') : tr('Scegli foto profilo…') }}</button>
+          <div class="photo-actions"><button type="button" class="secondary small action-glyph action-glyph--photo" (click)="setCollectorProfile()" [disabled]="busy">{{ profilePreview ? tr('Cambia foto profilo…') : tr('Scegli foto profilo…') }}</button>
             <button type="button" class="small danger-text" *ngIf="profileImage" (click)="deleteCollectorImage(profileImage)" [disabled]="busy">{{ tr('Rimuovi') }}</button></div>
         </div>
         <div class="photo-pick">
@@ -514,7 +562,7 @@
           <div><strong>{{ tr('Foto profilo') }}</strong>
             <span class="file-name" *ngIf="newCollectorProfile; else noProfile">{{ fileName(newCollectorProfile) }}</span>
             <ng-template #noProfile><span class="file-name muted">{{ tr('Nessuna foto profilo') }}</span></ng-template></div>
-          <div class="photo-actions"><button type="button" class="secondary small" (click)="pickCollectorProfile()" [disabled]="busy">{{ newCollectorProfile ? tr('Cambia foto profilo…') : tr('Scegli foto profilo…') }}</button>
+          <div class="photo-actions"><button type="button" class="secondary small action-glyph action-glyph--photo" (click)="pickCollectorProfile()" [disabled]="busy">{{ newCollectorProfile ? tr('Cambia foto profilo…') : tr('Scegli foto profilo…') }}</button>
             <button type="button" class="small danger-text" *ngIf="newCollectorProfile" (click)="newCollectorProfile = null">{{ tr('Rimuovi') }}</button></div>
         </div>
         <div class="photo-pick">
@@ -550,7 +598,7 @@
       </div></fieldset>
     <fieldset class="dialog-section"><legend>{{ tr('Note private') }}</legend>
       <label class="full"><textarea [(ngModel)]="collectorDraft.notes" rows="4" [attr.aria-label]="tr('Note private')"></textarea></label></fieldset>
-    <div class="dialog-bottom"><button class="secondary" type="button" (click)="collectorDialog=false">{{ tr('Annulla') }}</button><button class="primary" type="button" [disabled]="busy || !collectorDraft.first_name.trim()" (click)="saveCollector()">{{ tr('Salva contatto') }}</button></div>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="collectorDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !collectorDraft.first_name.trim()" (click)="saveCollector()">{{ tr('Salva contatto') }}</button></div>
   </div>
 </div>
 
@@ -565,7 +613,7 @@
       <label><span>{{ tr('Data vendita *') }}</span><input type="date" [(ngModel)]="saleDraft.sold_at"></label>
       <label class="full"><span>{{ tr('Note') }}</span><textarea [(ngModel)]="saleDraft.notes" rows="3"></textarea></label>
     </div><p class="form-note">{{ tr('La registrazione segnerà l\'opera come venduta. Non genera una fattura fiscale.') }}</p>
-    <div class="dialog-bottom"><button class="secondary" type="button" (click)="saleDialog=false">{{ tr('Annulla') }}</button><button class="primary" type="button" [disabled]="busy || !saleDraft.artwork_id || !saleDraft.collector_id || !saleDraft.amount_eur" (click)="saveSale()">{{ tr('Registra vendita') }}</button></div>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="saleDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !saleDraft.artwork_id || !saleDraft.collector_id || !saleDraft.amount_eur" (click)="saveSale()">{{ tr('Registra vendita') }}</button></div>
   </div>
 </div>
 
@@ -601,7 +649,7 @@
             </ng-template>
           </ng-container>
         </td>
-        <td class="actions"><button class="small danger-text" type="button"
+        <td class="actions"><button class="small danger-text action-glyph action-glyph--delete" type="button"
           [disabled]="busy || receiptAttachmentsLoading || !!receiptAttachments[receipt.id]"
           (click)="deleteSaleReceipt(receipt)">{{ tr('Elimina incasso') }}</button></td>
       </tr></tbody></table>
@@ -620,7 +668,7 @@
         <label><span>{{ tr('Riferimento') }}</span><input maxlength="200" [(ngModel)]="receiptDraft.reference"></label>
         <label class="full"><span>{{ tr('Note') }}</span><textarea maxlength="2000" rows="2" [(ngModel)]="receiptDraft.notes"></textarea></label>
       </div>
-      <div class="dialog-bottom"><button type="button" class="primary" [disabled]="busy || !receiptDraft.amount_eur || !receiptDraft.received_at"
+      <div class="dialog-bottom"><button type="button" class="primary action-glyph action-glyph--confirm" [disabled]="busy || !receiptDraft.amount_eur || !receiptDraft.received_at"
         (click)="saveSaleReceipt()">{{ tr('Registra incasso') }}</button></div>
     </div>
   </div>
@@ -643,7 +691,7 @@
       <label class="full"><span>{{ tr('Intestatario (facoltativo)') }}</span><input [(ngModel)]="certificateDraft.collector_name" maxlength="240"></label>
       <label class="full"><span>{{ tr('Note / informazioni sull\'edizione') }}</span><textarea [(ngModel)]="certificateDraft.notes" rows="3"></textarea></label>
     </div><p class="form-note">{{ tr('Dopo l\'emissione il certificato rimane invariabile. Il documento deve essere verificato e firmato da chi lo emette.') }}</p>
-    <div class="dialog-bottom"><button class="secondary" type="button" (click)="certificateDialog=false">{{ tr('Annulla') }}</button><button class="primary" type="button" [disabled]="busy || !certificateDraft.artwork_id || !certificateDraft.artist_name.trim()" (click)="saveCertificate()">{{ tr('Emetti certificato') }}</button></div>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="certificateDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !certificateDraft.artwork_id || !certificateDraft.artist_name.trim()" (click)="saveCertificate()">{{ tr('Emetti certificato') }}</button></div>
   </div>
 </div>
 
@@ -658,13 +706,14 @@
         <option *ngFor="let cat of expenseCategories" [value]="cat.code">{{ tr(cat.label) }}</option></select></label>
       <label class="full"><span>{{ tr('Descrizione') }}</span><input maxlength="1500" [(ngModel)]="expenseDraft.description" [placeholder]="tr('Materiali o servizio acquistato')"></label>
       <label class="full"><span>{{ tr('Fondo') }}</span><select [(ngModel)]="expenseDraft.fund">
-        <option value="activity">{{ tr('Fondo attività') }}</option><option value="savings">{{ tr('Fondo risparmio') }}</option></select></label>
+        <option [ngValue]="null">{{ tr('Nessun fondo') }}</option>
+        <option *ngFor="let part of expenseFunds" [ngValue]="part.id">{{ partName(part.id, part.name) }}</option></select></label>
       <label class="full"><span>{{ tr('Fornitore') }}</span><input maxlength="400" [(ngModel)]="expenseDraft.supplier"></label>
       <label class="full"><span>{{ tr('Link acquisto') }}</span><input type="url" maxlength="2000" [(ngModel)]="expenseDraft.purchase_url" placeholder="https://..."></label>
       <label class="full"><span>{{ tr('Note') }}</span><textarea rows="3" [(ngModel)]="expenseDraft.notes"></textarea></label>
     </div>
     <div class="dialog-bottom"><button type="button" class="secondary" (click)="expenseDialog=false">{{ tr('Annulla') }}</button>
-      <button type="button" class="primary" (click)="saveExpense()" [disabled]="busy || !expenseDraft.description.trim() || !expenseDraft.amount_eur">{{ tr('Salva spesa') }}</button></div>
+      <button type="button" class="primary action-glyph action-glyph--confirm" (click)="saveExpense()" [disabled]="busy || !expenseDraft.description.trim() || !expenseDraft.amount_eur">{{ tr('Salva spesa') }}</button></div>
   </div>
 </div>
 

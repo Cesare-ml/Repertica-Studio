@@ -14,7 +14,11 @@ Repertica Studio include un server [Model Context Protocol](https://modelcontext
 
 ## Configurazione
 
-In **Impostazioni → Assistenti IA locali (MCP)** l'app mostra la configurazione già pronta, con il percorso corretto dell'eseguibile e dell'archivio, e un pulsante per copiarla. Ha questa forma (esempio Windows):
+**Da Impostazioni, senza terminale.** In **Impostazioni → Assistenti IA locali (MCP)** l'app riconosce Claude Desktop e mostra lo stato del collegamento (non collegato, collegato, da aggiornare). Il pulsante **Collega a Claude Desktop** mostra il file che verrà modificato, chiede conferma, aggiunge soltanto la voce `repertica-studio` e conserva una copia del file originale (`claude_desktop_config.json.repertica-backup`). **Scollega** rimuove solo quella voce. Dopo ogni modifica va riavviato Claude Desktop.
+
+Il collegamento non tocca mai le altre impostazioni o gli altri server MCP del file; un file che non è JSON valido viene lasciato intatto con un messaggio di errore. Se l'app viene spostata, lo stato diventa «da aggiornare» e basta un clic su **Aggiorna il collegamento**. Supporta la posizione classica (`%APPDATA%\Claude`) e quella della versione Microsoft Store di Claude Desktop.
+
+**Altri assistenti.** Nella stessa sezione, **Configurazione manuale per altri assistenti** mostra il JSON pronto con il percorso corretto dell'eseguibile e dell'archivio e un pulsante per copiarlo (esempio Windows):
 
 ```json
 {
@@ -27,9 +31,7 @@ In **Impostazioni → Assistenti IA locali (MCP)** l'app mostra la configurazion
 }
 ```
 
-Incollala nel file dei server MCP del tuo assistente (per esempio `claude_desktop_config.json` di Claude Desktop) e riavvia l'assistente.
-
-Dalla riga di comando: `"Repertica Studio" --mcp [--data-dir <cartella>]`. Senza `--data-dir` si usa la variabile `REPERTICA_DATA_DIR` e, in mancanza, la cartella standard dell'app (`%LOCALAPPDATA%\it.repertica.studio`, `~/Library/Application Support/it.repertica.studio`, `~/.local/share/it.repertica.studio`).
+Dalla riga di comando (uso avanzato): `"Repertica Studio" --mcp [--data-dir <cartella>]`. Senza `--data-dir` si usa la variabile `REPERTICA_DATA_DIR` e, in mancanza, la cartella standard dell'app (`%LOCALAPPDATA%\it.repertica.studio`, `~/Library/Application Support/it.repertica.studio`, `~/.local/share/it.repertica.studio`).
 
 Se l'archivio non esiste o ha uno schema diverso da quello dell'app (apri prima l'app per aggiornarlo), il processo termina con un messaggio su standard error e codice di uscita 1.
 
@@ -54,6 +56,6 @@ Versioni di protocollo supportate: 2025-06-18, 2025-03-26 e 2024-11-05 (JSON-RPC
 
 ## Limiti
 
-- Lo schema supportato è quello corrente (SQLite v6); un archivio più vecchio va prima aperto con l'app.
+- Lo schema supportato è quello corrente (SQLite v10); un archivio più vecchio va prima aperto con l'app.
 - Il server non aggiorna i dati in tempo reale: ogni richiesta legge lo stato corrente dell'archivio.
 - Nessuna autenticazione: chi può avviare il programma sul tuo computer, con il tuo utente, può leggere l'archivio, come già con il file SQLite.

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -330,6 +330,36 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
             CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
             PRAGMA user_version=9;
+            COMMIT;"
+        )?;
+    }
+    if version < 10 {
+        // Scheduled automatic backups: off by default, one configuration row and a log of the
+        // folders this feature created (only those may ever be removed by the retention setting).
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS backup_schedule (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+                frequency TEXT NOT NULL DEFAULT 'DAILY' CHECK(frequency IN ('DAILY','WEEKLY','MONTHLY')),
+                time_of_day TEXT NOT NULL DEFAULT '20:00',
+                weekday INTEGER NOT NULL DEFAULT 0 CHECK(weekday BETWEEN 0 AND 6),
+                day_of_month INTEGER NOT NULL DEFAULT 1 CHECK(day_of_month BETWEEN 1 AND 28),
+                destination TEXT,
+                keep_last INTEGER NOT NULL DEFAULT 0 CHECK(keep_last BETWEEN 0 AND 365),
+                enabled_at TEXT,
+                last_attempt_at TEXT,
+                last_success_at TEXT,
+                last_status TEXT CHECK(last_status IS NULL OR last_status IN ('OK','ERROR')),
+                last_message TEXT,
+                last_directory TEXT
+            );
+            INSERT OR IGNORE INTO backup_schedule(singleton) VALUES(1);
+            CREATE TABLE IF NOT EXISTS auto_backup_log (
+                directory TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            );
+            PRAGMA user_version=10;
             COMMIT;"
         )?;
     }

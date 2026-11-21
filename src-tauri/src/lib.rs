@@ -1,5 +1,6 @@
 mod allocations;
 mod archive_code;
+mod auto_backup;
 mod backup;
 mod collectors;
 mod commands;
@@ -26,6 +27,7 @@ pub fn run() {
             backup::recover_interrupted_restore(&directory).map_err(std::io::Error::other)?;
             let database = db::open(directory)?;
             app.manage(database);
+            auto_backup::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -85,6 +87,9 @@ pub fn run() {
             mcp_client::mcp_client_status,
             mcp_client::mcp_client_configure,
             mcp_client::mcp_client_remove,
+            auto_backup::get_backup_schedule,
+            auto_backup::save_backup_schedule,
+            auto_backup::run_backup_now,
             allocations::get_allocation_plan,
             allocations::save_allocation_plan,
             archive_code::get_archive_code_policy,

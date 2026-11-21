@@ -37,7 +37,7 @@ struct Manifest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupSummary {
-    directory: String,
+    pub(crate) directory: String,
     created_at: String,
     files: usize,
     total_bytes: u64,
@@ -344,6 +344,10 @@ pub fn create_backup_core(db: &Database, destination: &Path) -> Result<BackupSum
         let schema_version = validate_snapshot(&snapshot)?.0;
         let mut files = vec![record(&partial, DB_FILE)?];
         let media_dir = db.directory.join("media");
+        // Refuse an externally linked/replaced live media directory: otherwise
+        // a backup could silently copy unrelated private files from outside
+        // the archive. The restore/inspect path already enforces this check.
+        check_media_directory(&db.directory)?;
         for entry in fs::read_dir(&media_dir).map_err(error)? {
             let entry = entry.map_err(error)?;
             if !entry.file_type().map_err(error)?.is_file() {
@@ -890,6 +894,47 @@ mod tests {
         let db = db::open(tmp.path().join("active")).unwrap();
         assert!(create_backup_core(&db, &db.directory).is_err());
     }
+    #[test]
+    fn missing_live_media_directory_does_not_publish_a_partial_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        let destination = tmp.path().join("removable-drive");
+        fs::create_dir(&destination).unwrap();
+        fs::remove_dir(db.directory.join("media")).unwrap();
+
+        assert!(create_backup_core(&db, &destination).is_err());
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
+        // A failed backup must not touch the live SQLite file.
+        assert!(db.directory.join(DB_FILE).is_file());
+        let count: i64 = db.conn.lock().unwrap().query_row(
+            "SELECT COUNT(*) FROM artworks", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_live_media_directory_cannot_leak_external_files_into_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        // Simulate a replaced media folder pointing to another private archive
+        // (or to arbitrary files outside Repertica Studio).
+        let private_files = tmp.path().join("another-archive");
+        fs::rename(db.directory.join("media"), &private_files).unwrap();
+        fs::write(private_files.join("unrelated-secret.txt"), b"external private data").unwrap();
+        std::os::unix::fs::symlink(&private_files, db.directory.join("media")).unwrap();
+        let destination = tmp.path().join("removable-drive");
+        fs::create_dir(&destination).unwrap();
+
+        let message = create_backup_core(&db, &destination).unwrap_err();
+        assert!(message.contains("directory regolare"), "{message}");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
+        assert_eq!(fs::read(private_files.join("unrelated-secret.txt")).unwrap(),
+            b"external private data");
+        assert!(db.directory.join(DB_FILE).is_file());
+    }
+
     #[test]
     fn interrupted_restore_recovers_old_archive() {
         let tmp = tempfile::tempdir().unwrap();

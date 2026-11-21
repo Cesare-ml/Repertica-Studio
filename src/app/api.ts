@@ -4,7 +4,8 @@ import type {
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup,
-  NewArtworkInput, CodePolicy, McpClientStatus, CollectorImage, NewCollectorInput
+  NewArtworkInput, CodePolicy, McpClientStatus, CollectorImage, NewCollectorInput,
+  AllocationPlan, AllocationPlanInput, BackupScheduleStatus, BackupScheduleInput
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -73,6 +74,11 @@ export const api = {
   deleteExpense: (id: string) => invoke<void>('delete_expense', {id}),
   exportLedgerCsv: (kind: CsvRegisterKind, destination: string) =>
     invoke<string>('export_ledger_csv', {kind, destination}),
+  getBackupSchedule: () => invoke<BackupScheduleStatus>('get_backup_schedule'),
+  saveBackupSchedule: (input: BackupScheduleInput) => invoke<BackupScheduleStatus>('save_backup_schedule', {input}),
+  runBackupNow: () => invoke<BackupScheduleStatus>('run_backup_now'),
+  getAllocationPlan: () => invoke<AllocationPlan>('get_allocation_plan'),
+  saveAllocationPlan: (input: AllocationPlanInput) => invoke<AllocationPlan>('save_allocation_plan', {input}),
   financeOverview: (year: number) => invoke<FinanceOverview>('finance_overview', {year}),
   mcpSetupInfo: () => invoke<McpSetup>('mcp_setup_info'),
   mcpClientStatus: () => invoke<McpClientStatus>('mcp_client_status'),

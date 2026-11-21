@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { locale as osLocale } from '@tauri-apps/plugin-os';
 import { AppLanguage, chooseLanguage, translate } from './i18n';
 import { open, save } from '@tauri-apps/plugin-dialog';
@@ -14,7 +15,7 @@ import type {
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
-  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, CollectorImage
+  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, CollectorImage, AllocationPlan, AllocationPart, BackupScheduleStatus
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
@@ -102,9 +103,12 @@ export class AppComponent implements OnInit {
   };
   settingsDraft: StudioSettings = {...this.settings};
   rateEuro = .16;
-  personalPercent = 33.34;
-  activityPercent = 33.33;
-  savingsPercent = 33.33;
+  schedule: BackupScheduleStatus | null = null;
+  scheduleDraft = { enabled: false, frequency: 'DAILY' as BackupScheduleStatus['frequency'], time_of_day: '20:00',
+    weekday: 0, day_of_month: 1, destination: null as string | null, keep_last: 0 };
+  readonly weekdayIndexes = [0, 1, 2, 3, 4, 5, 6];
+  allocationPlan: AllocationPlan = { enabled: true, parts: [] };
+  allocationDraft = { enabled: true, parts: [] as { id?: string; name: string; percent: number; pays_expenses: boolean }[] };
   defaultTaxPercent = 0;
   estimateCents: number | null = null;
   expenseDialog = false;
@@ -121,7 +125,7 @@ export class AppComponent implements OnInit {
   expenseDraft = {
     id: undefined as string | undefined,expense_date:today(),
     category:'painting-materials',description:'',amount_eur:null as number|null,
-    fund:'activity' as 'activity'|'savings',supplier:null as string|null,
+    fund:null as string|null,supplier:null as string|null,
     purchase_url:null as string|null,notes:null as string|null
   };
 
@@ -187,15 +191,21 @@ export class AppComponent implements OnInit {
       this.settings = stored;
       this.settingsDraft = {...stored};
       this.rateEuro = stored.base_price_cm2_cents / 100;
-      this.personalPercent = stored.personal_bp / 100;
-      this.activityPercent = stored.activity_bp / 100;
-      this.savingsPercent = stored.savings_bp / 100;
       this.defaultTaxPercent = stored.default_tax_bp / 100;
       this.languageChoice = stored.ui_language ?? 'system';
       this.applyLanguage(chooseLanguage(stored.ui_language ?? system ?? navigator.language));
       this.initialized = true;
       this.showGuide = !this.guideDismissed();
       try { this.codePolicy = await api.getArchiveCodePolicy(); } catch { /* keep defaults */ }
+      await this.loadAllocationPlan();
+      await this.loadSchedule();
+      // The timer runs in the native side; it reports each automatic backup here.
+      void listen<BackupScheduleStatus>('auto-backup-finished', event => {
+        this.schedule = event.payload;
+        this.notice = event.payload.last_status === 'OK' ? this.tr('Backup automatico completato') : '';
+        if (event.payload.last_status === 'ERROR') this.errorMessage = event.payload.last_message ?? '';
+        this.change.detectChanges();
+      }).catch(() => undefined);
       await this.refresh();
     } catch (error) {
       this.errorMessage = this.error(error);
@@ -456,6 +466,8 @@ export class AppComponent implements OnInit {
       this.closeGallery();
       this.restoreCandidate = null;
       await this.refresh();
+      await this.loadAllocationPlan();
+      await this.loadSchedule();
       this.notice = 'Archivio ripristinato e verificato. Copia precedente: ' + this.lastRestore.previousArchive;
     } catch (error) {
       this.errorMessage = this.error(error);
@@ -489,15 +501,10 @@ export class AppComponent implements OnInit {
     return value ? this.tr(value.label) : code;
   }
   async saveEconomySettings(): Promise<void> {
-    const p=[this.personalPercent,this.activityPercent,this.savingsPercent].map(v=>Math.round(v*100));
-    if (p.some((v)=>!Number.isFinite(v)||v<0||v>10000) || p.reduce((a,b)=>a+b,0)!==10000) {
-      this.errorMessage = this.tr('Deve essere 100%'); return;
-    }
     const base=Math.round(this.rateEuro*100);
     const tax=Math.round(this.defaultTaxPercent*100);
     const draft: StudioSettings = {...this.settingsDraft,
       base_price_cm2_cents:base,default_tax_bp:tax,
-      personal_bp:p[0],activity_bp:p[1],savings_bp:p[2],
       ui_language:this.languageChoice==='system'?null:this.languageChoice as AppLanguage};
     if (await this.run(async()=>{this.settings=await api.saveSettings(draft);this.settingsDraft={...this.settings};},
       this.tr('Salva impostazioni'))) {
@@ -505,16 +512,124 @@ export class AppComponent implements OnInit {
       await this.loadFinanceYear();
     }
   }
+  weekdayLabel(day: number): string {
+    // 2024-01-01 was a Monday.
+    return new Date(2024, 0, 1 + day).toLocaleDateString(this.language, { weekday: 'long' });
+  }
+  dateTime(value: string): string {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(this.language, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  async loadSchedule(): Promise<void> {
+    try {
+      this.schedule = await api.getBackupSchedule();
+      const s = this.schedule;
+      this.scheduleDraft = { enabled: s.enabled, frequency: s.frequency, time_of_day: s.time_of_day, weekday: s.weekday,
+        day_of_month: s.day_of_month, destination: s.destination, keep_last: s.keep_last };
+    } catch (error) { this.errorMessage = this.error(error); }
+  }
+  async chooseScheduleDestination(): Promise<void> {
+    if (this.busy || !this.initialized) return;
+    try {
+      const selection = await open({ directory: true, multiple: false, title: this.tr('Cartella di destinazione') });
+      if (typeof selection === 'string') this.scheduleDraft.destination = selection;
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
+  }
+  async saveBackupSchedule(): Promise<void> {
+    const d = this.scheduleDraft;
+    await this.run(async () => {
+      this.schedule = await api.saveBackupSchedule({ enabled: d.enabled, frequency: d.frequency, time_of_day: d.time_of_day,
+        weekday: Number(d.weekday), day_of_month: Number(d.day_of_month), destination: d.destination, keep_last: Number(d.keep_last) || 0 });
+    }, this.tr('Backup automatico salvato'));
+  }
+  async runBackupNow(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true; this.errorMessage = ''; this.notice = '';
+    try {
+      this.schedule = await api.runBackupNow();
+      if (this.schedule.last_status === 'OK') this.notice = this.tr('Backup completato');
+      else this.errorMessage = this.schedule.last_message ?? this.tr('Operazione non riuscita');
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    } finally {
+      this.busy = false;
+      this.change.detectChanges();
+    }
+  }
+  async loadAllocationPlan(): Promise<void> {
+    try {
+      this.allocationPlan = await api.getAllocationPlan();
+      this.resetAllocationDraft();
+    } catch (error) { this.errorMessage = this.error(error); }
+  }
+  private resetAllocationDraft(): void {
+    this.allocationDraft = {
+      enabled: this.allocationPlan.enabled,
+      parts: this.allocationPlan.parts.map(p => ({ id: p.id, name: p.name, percent: p.share_bp / 100, pays_expenses: p.pays_expenses }))
+    };
+  }
+  addAllocationPart(): void {
+    if (this.allocationDraft.parts.length >= 12) return;
+    this.allocationDraft.parts = [...this.allocationDraft.parts, { name: '', percent: 0, pays_expenses: false }];
+  }
+  removeAllocationPart(index: number): void {
+    if (this.allocationDraft.parts.length <= 1) return;
+    this.allocationDraft.parts = this.allocationDraft.parts.filter((_, i) => i !== index);
+  }
+  splitAllocationEvenly(): void {
+    const parts = this.allocationDraft.parts;
+    if (!parts.length) return;
+    const base = Math.floor(10000 / parts.length);
+    parts.forEach((p, i) => p.percent = (i === parts.length - 1 ? 10000 - base * (parts.length - 1) : base) / 100);
+  }
+  get allocationTotal(): number {
+    return this.allocationDraft.parts.reduce((sum, p) => sum + Math.round((Number(p.percent) || 0) * 100), 0) / 100;
+  }
   get allocationValid(): boolean {
-    return [this.personalPercent,this.activityPercent,this.savingsPercent].every(v=>Number.isFinite(v)&&v>=0&&v<=100)
-      && [this.personalPercent,this.activityPercent,this.savingsPercent].reduce((a,b)=>a+Math.round(b*100),0)===10000;
+    const parts = this.allocationDraft.parts;
+    const names = parts.map(p => p.name.trim().toLowerCase());
+    return parts.length > 0 && parts.every(p => p.name.trim() && Number.isFinite(Number(p.percent)) && p.percent >= 0 && p.percent <= 100)
+      && new Set(names).size === names.length && Math.round(this.allocationTotal * 100) === 10000;
+  }
+  async saveAllocationPlan(): Promise<void> {
+    if (this.allocationDraft.enabled && !this.allocationValid) { this.errorMessage = this.tr('Deve essere 100%'); return; }
+    const input = {
+      enabled: this.allocationDraft.enabled,
+      parts: this.allocationDraft.parts.map(p => ({ id: p.id, name: p.name.trim(),
+        share_bp: Math.round((Number(p.percent) || 0) * 100), pays_expenses: p.pays_expenses }))
+    };
+    if (await this.run(async () => { this.allocationPlan = await api.saveAllocationPlan(input); },
+      this.tr('Ripartizione salvata'))) {
+      this.resetAllocationDraft();
+      await this.loadFinanceYear();
+    }
+  }
+  private readonly defaultPartNames: Record<string, string> = { personal: 'Personale', activity: 'Attività', savings: 'Risparmio' };
+  /** The three default parts are shown in the interface language until the artist renames them. */
+  partName(id: string, name: string): string {
+    return this.defaultPartNames[id] === name ? this.tr(name) : name;
+  }
+  /** Parts an expense can be charged to; a part that is no longer offered stays selectable on old expenses. */
+  get expenseFunds(): AllocationPart[] {
+    const funds = this.allocationPlan.parts.filter(p => p.pays_expenses);
+    const current = this.expenseDraft.fund;
+    return current && !funds.some(p => p.id === current)
+      ? [...funds, { id: current, name: this.fundLabel(current), share_bp: 0, pays_expenses: true, position: 99, active: false }]
+      : funds;
+  }
+  fundLabel(fund: string | null): string {
+    if (!fund) return '—';
+    const part = this.finances?.parts.find(p => p.part_id === fund) ?? this.allocationPlan.parts.find(p => p.id === fund);
+    const name = part ? ('name' in part ? part.name : '') : '';
+    return name ? this.partName(fund, name) : fund;
   }
   selectLanguage(): void {
     this.applyLanguage(this.languageChoice === 'system' ? this.systemLanguage : chooseLanguage(this.languageChoice));
   }
   newExpense(): void {
     this.expenseDraft={id:undefined,expense_date:today(),category:'painting-materials',description:'',amount_eur:null,
-      fund:'activity',supplier:null,purchase_url:null,notes:null};
+      fund:this.allocationPlan.parts.find(p=>p.pays_expenses)?.id ?? null,supplier:null,purchase_url:null,notes:null};
     this.expenseDialog=true;
   }
   editExpense(e: Expense): void {

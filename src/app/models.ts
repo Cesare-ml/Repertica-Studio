@@ -104,20 +104,29 @@ export interface StudioSettings {
 }
 export interface Expense {
   id:string; expense_date:string; category:string; description:string;
-  amount_cents:number; fund:'activity'|'savings'; supplier:string|null;
+  amount_cents:number; fund:string|null; supplier:string|null;
   purchase_url:string|null; notes:string|null; created_at:string;updated_at:string;
 }
 export type ExpenseInput = Pick<Expense,'expense_date'|'category'|'description'|'amount_cents'|'fund'|'supplier'|'purchase_url'|'notes'> & {id?:string};
+export interface PartAmount { part_id:string; share_cents:number; expense_cents:number; }
 export interface MonthlyFinance {
   month:string; gross_cents:number; taxes_cents:number; shipping_cents:number; net_cents:number;
-  expense_cents:number; margin_cents:number; personal_cents:number; activity_cents:number;
-  savings_cents:number; activity_expenses_cents:number; savings_expenses_cents:number;
+  expense_cents:number; margin_cents:number; parts:PartAmount[];
+}
+export interface PartTotal {
+  part_id:string; name:string; active:boolean; pays_expenses:boolean;
+  share_cents:number; expense_cents:number; balance_cents:number;
 }
 export interface FinanceOverview {
   year:number; months:MonthlyFinance[]; gross_cents:number; net_cents:number;
-  expense_cents:number; margin_cents:number; personal_cents:number;
-  activity_balance_cents:number; savings_balance_cents:number;
+  expense_cents:number; margin_cents:number; allocation_enabled:boolean; parts:PartTotal[];
 }
+export interface AllocationPart {
+  id:string; name:string; share_bp:number; pays_expenses:boolean; position:number; active:boolean;
+}
+export interface AllocationPlan { enabled:boolean; parts:AllocationPart[]; }
+export interface AllocationPartInput { id?:string; name:string; share_bp:number; pays_expenses:boolean; }
+export interface AllocationPlanInput { enabled:boolean; parts:AllocationPartInput[]; }
 
 export type SaleReceiptMethod = 'bank_transfer' | 'cash' | 'card' | 'other';
 export interface SaleReceipt {
@@ -140,5 +149,13 @@ export interface SaleBalance {
   sale_id: string; sale_cents: number; received_cents: number; outstanding_cents: number;
 }
 
+export interface BackupScheduleStatus {
+  enabled: boolean; frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY'; time_of_day: string;
+  weekday: number; day_of_month: number; destination: string | null; keep_last: number;
+  last_success_at: string | null; last_attempt_at: string | null; last_status: 'OK' | 'ERROR' | null;
+  last_message: string | null; last_directory: string | null; next_run_at: string | null;
+}
+export type BackupScheduleInput = Pick<BackupScheduleStatus,
+  'enabled' | 'frequency' | 'time_of_day' | 'weekday' | 'day_of_month' | 'destination' | 'keep_last'>;
 export interface McpClientStatus { configPath: string; appFound: boolean; configured: boolean; upToDate: boolean; }
 export interface McpSetup { command: string; args: string[]; dataDir: string; }

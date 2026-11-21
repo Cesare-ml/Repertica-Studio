@@ -1,16 +1,17 @@
 # Esportazioni CSV locali — registri dell'archivio
 
-L'esportatore Rust `export_ledger_csv` supporta otto valori di `kind`:
+L'esportatore Rust `export_ledger_csv` supporta nove valori di `kind`:
 
 | Tipo | Righe esportate | Contenuti |
 | --- | --- | --- |
 | `artworks` | Tutte le opere | UUID, codice, titolo, anno, tecnica, supporto, dimensioni in cm, descrizione, ubicazione, stato, percorso dell'immagine principale e date |
 | `gallery` | Tutte le fotografie aggiuntive della galleria | UUID foto e opera, codice e titolo attuali, percorso relativo del file, didascalia, ordine di visualizzazione e data; non contiene i byte delle immagini |
-| `collectors` | Tutti i collezionisti | UUID, contatti e note private, date |
+| `collectors` | Tutti i collezionisti | UUID, nome completo, contatti e note private, date; in coda nome, cognome, dati di nascita, profili social, percorso della foto profilo e numero di fotografie |
 | `certificates` | Tutti i certificati | UUID del certificato e opera, seriale, date, emittente, destinatario, note e **snapshot_json originale immutabile** |
-| `sales` | Tutte le vendite | UUID opera/collezionista, importi in centesimi e quote storiche |
+| `sales` | Tutte le vendite | UUID opera/collezionista, importi in centesimi e le tre quote storiche predefinite (personale, attività, risparmio; 0 per le vendite che non le usano: le ripartizioni personalizzate sono nel registro `allocations`) |
+| `allocations` | Una riga per vendita e per parte di ripartizione | UUID vendita/opera, netto in centesimi, UUID e nome della parte, quota in punti base congelata sulla vendita |
 | `balances` | Tutti i saldi delle vendite | UUID vendita/opera/collezionista, data, valuta, lordo, incassato dichiarato e residuo in centesimi (anche vendite senza incassi) |
-| `expenses` | Tutte le spese | UUID, date, causali, fornitori e importi in centesimi |
+| `expenses` | Tutte le spese | UUID, date, causali, fornitori, importi in centesimi, fondo (UUID e, in coda, nome della parte) |
 | `receipts` | Tutti gli incassi registrati manualmente | UUID incasso/vendita/opera/collezionista, data, importo in centesimi, valuta, metodo, riferimento, note e data di registrazione; **se presente**, percorso relativo, nome originale, MIME, dimensione, SHA-256 e data dell'allegato locale dell'incasso |
 
 Tutti i registri sono esportati integralmente, senza dipendere dai filtri dell'interfaccia. L'output è UTF-8 con BOM, separatore `;`, righe CRLF, campi testuali tra virgolette con escape delle virgolette, e difesa contro formule di fogli elettronici. Le dimensioni sono numeri decimali con punto (non valori monetari). I campi vuoti non conservano la distinzione fra stringa vuota e `NULL`.

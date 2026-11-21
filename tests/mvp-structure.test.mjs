@@ -126,3 +126,45 @@ test('first-run guide can be dismissed, reopened and covers backups', () => {
   assert.match(ui, /localStorage/);
   assert.match(html, /Assistenti IA locali \(MCP\)/);
 });
+
+test('new artwork is created in one step with automatic code, photos and optional sale', () => {
+  const lib = get('src-tauri/src/lib.rs');
+  const html = get('src/app/app.component.html');
+  assert.match(lib, /commands::create_artwork_full/);
+  assert.match(lib, /archive_code::next_archive_code/);
+  assert.match(html, /Assegnato automaticamente al salvataggio/);
+  assert.match(html, /Registra una vendita/);
+  assert.doesNotMatch(html, /artworkDraft\.location/, 'location is no longer part of the artwork form');
+  assert.doesNotMatch(html, /Ubicazione/);
+});
+
+test('collectors keep the archive fields, photographs and are covered by backups', () => {
+  const lib = get('src-tauri/src/lib.rs');
+  for (const command of ['create_collector_full', 'add_collector_image_from_path', 'collector_image_data', 'delete_collector_image']) {
+    assert.match(lib, new RegExp('collectors::' + command));
+  }
+  assert.match(get('src-tauri/src/backup.rs'), /SELECT image_path FROM collector_images/);
+  assert.match(get('src-tauri/src/media_audit.rs'), /FROM collector_images/);
+  assert.match(get('src/app/app.component.html'), /collectorDraft\.birth_date/);
+});
+
+test('sales allocation is configurable, can be switched off and is frozen per sale', () => {
+  const db = get('src-tauri/src/db.rs');
+  assert.match(db, /CREATE TABLE IF NOT EXISTS allocation_parts/);
+  assert.match(db, /CREATE TABLE IF NOT EXISTS sale_allocations/);
+  assert.match(get('src-tauri/src/lib.rs'), /allocations::save_allocation_plan/);
+  const html = get('src/app/app.component.html');
+  assert.match(html, /allocationDraft\.enabled/);
+  assert.match(html, /addAllocationPart\(\)/);
+  assert.doesNotMatch(html, /personalPercent|activityPercent|savingsPercent/);
+});
+
+test('scheduled backup is opt-in, local and reports through a native event', () => {
+  const rust = get('src-tauri/src/auto_backup.rs');
+  assert.match(get('src-tauri/src/db.rs'), /enabled INTEGER NOT NULL DEFAULT 0/);
+  assert.match(get('src-tauri/src/lib.rs'), /auto_backup::start/);
+  assert.match(rust, /auto-backup-finished/);
+  assert.doesNotMatch(rust, /TcpStream|reqwest|http/);
+  assert.match(get('src/app/app.component.html'), /Attiva il backup automatico/);
+});
+
