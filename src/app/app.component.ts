@@ -385,7 +385,12 @@ export class AppComponent implements OnInit {
     await this.run(()=>api.deleteExpense(e.id),this.tr('Elimina'));
   }
   async previewPrice():Promise<void> {
-    this.estimateCents=await api.pricePreview(this.artworkDraft.width_cm??0,this.artworkDraft.height_cm??0);
+    try {
+      this.estimateCents=await api.pricePreview(this.artworkDraft.width_cm??0,this.artworkDraft.height_cm??0);
+    } catch (error) {
+      this.errorMessage=this.error(error);
+    }
+    this.change.detectChanges();
   }
   newArtwork(): void { this.estimateCents=null; this.artworkDraft = freshArtwork(); this.artworkDialog = true; }
   editArtwork(a: Artwork): void {
@@ -436,6 +441,11 @@ export class AppComponent implements OnInit {
   async deleteCollector(c: Collector): Promise<void> {
     if (!window.confirm(`Eliminare il contatto "${c.name}"?`)) return;
     await this.run(() => api.deleteCollector(c.id), 'Collezionista eliminato');
+  }
+  recalculateDefaultSaleTax(): void {
+    const amount=this.saleDraft.amount_eur;
+    if (amount===null || !Number.isFinite(amount) || amount<0) return;
+    this.saleDraft.taxes_eur=Math.round(amount*this.defaultTaxPercent)/100;
   }
   newSale(): void {
     this.saleDraft = {

@@ -312,7 +312,7 @@
     <div class="form-grid">
       <label class="full"><span>{{ tr('Opera *') }}</span><select [(ngModel)]="saleDraft.artwork_id"><option *ngFor="let a of sellableArtworks" [value]="a.id">{{ a.code }} — {{ a.title }}</option></select></label>
       <label class="full"><span>{{ tr('Collezionista *') }}</span><select [(ngModel)]="saleDraft.collector_id"><option *ngFor="let c of collectors" [value]="c.id">{{ c.name }}</option></select></label>
-      <label><span>{{ tr('Importo (€) *') }}</span><input type="number" min="0.01" step="0.01" [(ngModel)]="saleDraft.amount_eur"></label>
+      <label><span>{{ tr('Importo (€) *') }}</span><input type="number" min="0.01" step="0.01" [(ngModel)]="saleDraft.amount_eur" (ngModelChange)="recalculateDefaultSaleTax()"></label>
       <label><span>{{ tr('Importo tasse (€)') }}</span><input type="number" min="0" step="0.01" [(ngModel)]="saleDraft.taxes_eur"></label>
       <label><span>{{ tr('Spese spedizione (€)') }}</span><input type="number" min="0" step="0.01" [(ngModel)]="saleDraft.shipping_eur"></label>
       <label><span>{{ tr('Data vendita *') }}</span><input type="date" [(ngModel)]="saleDraft.sold_at"></label>
