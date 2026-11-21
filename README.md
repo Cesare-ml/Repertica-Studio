@@ -8,8 +8,8 @@ Gestionale artistico **gratuito, open source e locale**, realizzato con Angular 
 
 ## Funzionalità MVP
 
-- **Opere**: archivio con codice, titolo, tecnica, anno, misure, stato, ubicazione, descrizione e immagine principale.
-- **Collezionisti**: anagrafica privata e note.
+- **Opere**: archivio con codice, titolo, tecnica, anno, misure, stato, ubicazione, descrizione e immagine principale. Ricerca anche per supporto, descrizione e nome dell'acquirente, filtri per stato e collezionista, ordinamento per titolo o anno.
+- **Collezionisti**: anagrafica privata e note. Dalla lista si possono consultare le opere acquistate e aprirle nell'archivio; dalle opere vendute si può raggiungere il relativo collezionista.
 - **Vendite**: registrazione importi in centesimi, cliente e opera associati; una vendita per opera nella prima versione.
 - **Certificati**: registro immutabile con numero progressivo univoco, fotografia della scheda al momento dell'emissione e stampa/salvataggio PDF tramite dialogo di stampa.
 - **Offline**: SQLite incorporato e fotografie nella cartella privata dell'applicazione.
@@ -26,6 +26,8 @@ Requisiti: Node.js 22+, Rust stabile, prerequisiti di sistema di [Tauri 2](https
 npm install
 npm run tauri:dev
 ```
+
+Esegui `npm run test:unit` per i test locali di struttura e filtri dell'archivio (Node.js 22+).
 
 Per verificare il solo frontend: `npm run build`. `npm start` da browser non può accedere all'archivio nativo e mostra intenzionalmente un messaggio di avvio Tauri.
 
