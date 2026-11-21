@@ -7,7 +7,7 @@
 
 ## Problema concreto e confini
 
-Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale (JPEG/PNG/WebP, massimo **12 MiB**). Il codice del [backup](../../../src-tauri/src/backup.rs) già genera manifest SHA-256 e verifica consistenza dei file **nel backup**, oltre a integrità SQLite. Non risulta un pannello di **diagnostica preventiva dell'archivio attivo**, con elenco di file mancanti, file senza riferimenti e percorso di recupero assistito. Un fotografo o una galleria potrebbero scoprire troppo tardi che alcune immagini locali sono state rimosse accidentalmente.
+Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale e, dopo la [PR #17 integrata in `main`](https://github.com/Cesare-ml/Repertica-Studio/pull/17), fino a 20 fotografie aggiuntive (JPEG/PNG/WebP, massimo **12 MiB** ciascuna). Il codice del [backup](../../../src-tauri/src/backup.rs) già genera manifest SHA-256 e verifica consistenza dei file **nel backup**, oltre a integrità SQLite. Non risulta un pannello di **diagnostica preventiva dell'archivio attivo**, con elenco di file mancanti, file senza riferimenti e percorso di recupero assistito. Un fotografo o una galleria potrebbero scoprire troppo tardi che alcune immagini locali sono state rimosse accidentalmente.
 
 **Destinatari:** artisti con migliaia di opere, gallerie e archivi con media che occupano molto spazio o che migrano computer. **Non** riguarda la veridicità storica o legale dei documenti di provenienza (filone [UX-001, PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14)).
 
@@ -21,7 +21,7 @@ Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale (JPEG/PNG
 
 ## Disegno dati e ipotesi di API, soltanto descrittive
 
-- Nel modello corrente `Artwork.image_path` è un percorso locale relativo, una sola foto per opera; la futura proposta potrebbe introdurre, **solo se approvata**, un `media_id` stabile, `relative_path`, `bytes`, `sha256`, `verified_at` e `origin`. Distinguere hash misurato *ora* da hash attestato al momento dell'acquisizione: il primo **non prova** che la foto sia quella corretta.
+- Nel modello corrente `Artwork.image_path` e `artwork_images.image_path` sono percorsi locali relativi, rispettivamente per foto principale e galleria; la proposta potrebbe introdurre, **solo se approvata**, un `media_id` stabile, `relative_path`, `bytes`, `sha256`, `verified_at` e `origin`. Distinguere hash misurato *ora* da hash attestato al momento dell'acquisizione: il primo **non prova** che la foto sia quella corretta.
 - Per non riscrivere subito lo schema, una **fase pilota** può produrre report effimeri dal confronto tra `image_path` e nomi nella cartella `media/`. Hash storici e associazioni multiple richiedono una migrazione progettata; nessuna inferenza automatica dei dati pregressi.
 - **API concettuali**, non funzioni implementate: `scanActiveMedia(snapshot, budget, cancelToken) -> HealthReport`; `inspectCandidate(path, expectedHash?) -> MatchReport`; `planRelink(artworkId, candidate) -> Plan`; `confirmRelink(plan) -> Result`.
 - `HealthReport` deve conservare ID e codici delle opere, codici errore, checksum disponibili e timestamp, evitando un catalogo permanente di percorsi esterni con dati identificanti.
@@ -34,7 +34,7 @@ Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale (JPEG/PNG
 - Evitare che «ripara» sostituisca un originale: prima copia di sicurezza e validazione a staging, verifica post-copia, rollback se fallisce l'aggiornamento DB. No cancellazione del file sorgente e no riscrittura di certificati immutabili.
 - La diagnostica **non garantisce** la qualità o genuinità artistica dei contenuti; SHA-256 misura solo uguaglianza dei byte rispetto a un hash disponibile e attendibile.
 - Non assumere un generico «file store esterno con collegamenti assoluti»: per ora il backup include la sottocartella `media/` e i link esterni porrebbero rischi seri di portabilità. Eventuali media esterni richiedono un'altra decisione architetturale.
-- Media multipli, ricevute e documenti futuri ([issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13)) possono riutilizzare lo strato tecnico; questa scheda **non** introduce quel dominio funzionale.
+- Le foto aggiuntive della galleria sono già presenti in `main`; ricevute e documenti futuri ([issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13)) possono riutilizzare lo strato tecnico; questa scheda **non** introduce quel dominio funzionale.
 
 ## Alternative, difficoltà e rischi
 
@@ -54,7 +54,7 @@ Nel [MVP](../../MVP.md) ogni opera conserva una foto principale locale (JPEG/PNG
 
 ## Stato delle informazioni
 
-**Certo dal repository:** foto principale singola locale fino a 12 MiB; hash SHA-256 manifest di backup; verifica prima del ripristino; memorizzazione SQLite del percorso immagine. La collocazione media è locale.
+**Certo dal repository (ricontrollato il 2026-11-21):** foto principale e fino a 20 aggiuntive locali fino a 12 MiB ciascuna; hash SHA-256 nel manifest di backup; verifica prima del ripristino; memorizzazione SQLite dei percorsi relativi delle immagini. La collocazione media è locale.
 
 **Ipotesi:** dashboard, schema `media_id`, hash all'acquisizione, report persistenti o effimeri, relink da backup e controlli periodici.
 
