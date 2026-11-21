@@ -73,3 +73,9 @@ button.mail-danger:hover{background:#fff2f0}
 .mail-compose-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;padding-top:6px}
 @media(max-width:1050px){.mail-reader-layout{grid-template-columns:1fr}.mail-list{max-height:280px;border-right:0;border-bottom:1px solid #e8ece8}.mail-empty-reader{min-height:180px}.mail-triple{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:780px){.mail-columns{grid-template-columns:1fr}.mail-sidebar{position:relative;top:0}.mail-folders{display:flex;overflow-x:auto;max-height:none}.mail-folders button{width:auto;white-space:nowrap}.mail-folders h4{display:none}.mail-nav{grid-template-columns:repeat(3,minmax(0,1fr))}.mail-nav button{font-size:11px;gap:4px;padding:9px 7px}.mail-titlebar{flex-wrap:wrap}.mail-double,.mail-triple{grid-template-columns:1fr}.mail-compose,.mail-account-form{padding:16px}.mail-reader{padding:18px}.mail-panel-heading{padding:16px}}
+
+.mail-attachments-editor{display:grid;gap:9px;border:1px dashed #ceddd1;background:#fbfdfa;border-radius:10px;padding:13px}
+.mail-attachments-editor small{font-size:11px;color:#86958a;line-height:1.5}
+.mail-file-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:7px;background:#f0f5ee;padding:6px 8px}
+.mail-file-row span{font-size:12px;overflow-wrap:anywhere}
+.mail-file-row button{padding:4px 10px}
