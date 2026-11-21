@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (dodicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (tredicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -21,6 +21,7 @@ Data ricognizione: **2026-11-21** (dodicesima ricognizione). Stato uniforme: **P
 | [REPS-TECH-013](REPS-TECH-013-copie-fotografiche-condivisibili-privacy-metadati.md) | Copie fotografiche condivisibili con privacy dei metadati e originali intatti | P2 | Proposta — da valutare |
 | [REPS-TECH-014](REPS-TECH-014-bridge-mcp-locale-lettura-permessi.md) | Bridge MCP locale STDIO in lettura con scope minimo, consensi revocabili e confine esplicito con gli host IA esterni (approfondisce issue #3) | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-015](REPS-TECH-015-diagnostica-assistenza-locale-report-privato.md) | Diagnostica per assistenza **solo su richiesta**, codice errore e report tecnico minimo senza dati dell'archivio, senza telemetria (coordinata con issue #12) | P2 | Proposta — da valutare |
+| [REPS-TECH-016](REPS-TECH-016-allegati-documentali-locali-multi-entita.md) | Allegati documentali locali riutilizzabili e verificabili, con collegamenti espliciti a più schede e senza cloud; non sostituisce allegati incasso v6 | P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -134,3 +135,11 @@ Nuova lettura diretta di `main`: [README](../../../README.md), [MVP](../../MVP.m
 - **Confini documentali:** la [issue #12](https://github.com/Cesare-ml/Repertica-Studio/issues/12) riguarda già errori tipizzati e traduzioni; qui non si crea un secondo incarico di localizzazione, ma si descrive il possibile consumo dei codici nel report. TECH-003 verifica i media, TECH-009 i backup, TECH-012 la prevenzione di migrazioni rischiose, TECH-014 il bridge MCP: nessuno è un report generale di supporto. Nessuna proposta UX è ripetuta o modificata.
 - **Limiti/rischi:** un rapporto non dimostra integrità del database, non ripara errori e non può essere generato dall'interfaccia se l'avvio fallisce prima di Angular; un eventuale fallback nativo richiederebbe progettazione separata. In una app offline anche l'utente può scegliere di condividere un report: anteprima e minimizzazione per allowlist sono essenziali. La domanda reale e l'utilità del file rispetto al semplice codice vanno testate prima di approvare.
 - **Stato:** priorità P2 ipotetica, **Proposta — da valutare**, nessun mandato, issue operativa o merge. Sono stati modificati **solo Markdown in questa cartella**, nella [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), da lasciare in bozza.
+
+
+## Tredicesima ricognizione — 21 novembre 2026
+
+- **[REPS-TECH-016](REPS-TECH-016-allegati-documentali-locali-multi-entita.md) — Allegati documentali locali multi-entità:** studiato un possibile livello di **custodia e riferimento tecnico** per PDF/immagini di supporto alle opere, riutilizzabili su più schede con controlli di integrità, apertura prudente, export esplicito e backup autosufficiente. È una proposta trasversale, **non** una nuova gestione della provenienza, dei diritti, delle mostre o delle perizie (filone Gestione e UX [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14)). Priorità soltanto ipotetica P2.
+- **Presente già su `main`:** lo schema SQLite è ora alla **v6**, con **un allegato PDF/JPEG/PNG/WebP per incasso** (`sale_receipt_attachments`), hash SHA-256, copia locale e controlli specifici durante backup/ripristino ([RECEIPT-ATTACHMENTS](../../RECEIPT-ATTACHMENTS.md)). Il nuovo studio **non** duplica o sostituisce la funzione esistente e impone compatibilità senza migrazione indiscriminata. Gli attuali [CSV sono **otto**](../../DATA-PORTABILITY.md), comprendendo ora anche `gallery`; le menzioni precedenti a cinque/sei/sette CSV documentano lo stato storico delle singole ricognizioni.
+- **Confini tecnico-gestionali:** TECH-001 tratta un pacchetto dati aperto, TECH-003 diagnostica dei media, TECH-007 collocazione degli originali, TECH-013 copie fotografiche di condivisione. UX-001/004/010/016/019 definiscono i processi e significati documentali, non il contenitore binario. Nessun file dell'altro filone modificato. **Nessun riconoscimento automatico di autenticità, OCR, firma digitale, cloud, invio o accesso MCP ai documenti.**
+- **Priorità alle verifiche:** domanda effettiva, quantità e dimensioni dei documenti, prova di round-trip e test su Windows/macOS/Linux; collaudo del backup v6 esistente prima di valutare un nuovo layer di file. Tutte le **sedici** schede restano **«Proposta — da valutare»**: nessuna approvazione, incarico, implementazione o merge.
