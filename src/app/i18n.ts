@@ -5,6 +5,7 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  "Posta professionale": "Business email",
   "+ Nuova brochure": "+ New brochure",
   "A tutta pagina": "Full bleed",
   "Aggiungi almeno un’opera prima dell’esportazione": "Add at least one artwork before exporting",
@@ -676,6 +677,7 @@ const EN: Record<string,string> = {
   "Dopo l’installazione l’app si riavvia: salva il lavoro in corso prima di procedere.": "The app restarts after installation: save your work before continuing.",
 };
 const ES:Record<string,string> = {
+  "Posta professionale": "Correo profesional",
   "+ Nuova brochure": "+ Nuevo folleto",
   "A tutta pagina": "A página completa",
   "Aggiungi almeno un’opera prima dell’esportazione": "Añade al menos una obra antes de exportar",
@@ -1188,6 +1190,7 @@ const ES:Record<string,string> = {
   "Dopo l’installazione l’app si riavvia: salva il lavoro in corso prima di procedere.": "La aplicación se reinicia tras la instalación: guarda tu trabajo antes de continuar.",
 };
 const FR:Record<string,string> = {
+  "Posta professionale": "Courrier professionnel",
   "+ Nuova brochure": "+ Nouvelle brochure",
   "A tutta pagina": "Pleine page",
   "Aggiungi almeno un’opera prima dell’esportazione": "Ajoutez au moins une œuvre avant l’export",
@@ -1703,6 +1706,7 @@ const FR:Record<string,string> = {
   "Dopo l’installazione l’app si riavvia: salva il lavoro in corso prima di procedere.": "L’application redémarre après l’installation : enregistrez votre travail avant de continuer.",
 };
 const DE:Record<string,string> = {
+  "Posta professionale": "Geschäftliche E-Mails",
   "+ Nuova brochure": "+ Neue Broschüre",
   "A tutta pagina": "Ganzseitig",
   "Aggiungi almeno un’opera prima dell’esportazione": "Fügen Sie vor dem Export mindestens ein Werk hinzu",
