@@ -11,13 +11,24 @@ use uuid::Uuid;
 #[derive(Debug, Serialize)]
 pub struct GalleryImage {
     id: String, artwork_id: String, image_path: String,
-    caption: Option<String>, created_at: String, sort_order: i64,
+    caption: Option<String>, created_at: String, sort_order: i64, kind: String,
 }
+/// What an additional photograph shows. Stored as a stable code, translated in the interface.
+pub(crate) const PHOTO_KINDS: [&str; 7] = ["DETAIL", "SIGNATURE", "DIGITAL_MOCKUP", "IN_SITU", "OTHER", "FRAMED", "WORK_IN_PROGRESS"];
+/// Missing or empty means "other"; anything unknown is rejected.
+pub(crate) fn normalize_kind(kind: Option<&str>) -> Result<String, String> {
+    match kind.map(str::trim).filter(|k| !k.is_empty()) {
+        None => Ok("OTHER".into()),
+        Some(k) if PHOTO_KINDS.contains(&k) => Ok(k.to_string()),
+        Some(_) => Err("Tipo di fotografia non valido".into()),
+    }
+}
+const GALLERY_COLUMNS: &str = "id,artwork_id,image_path,caption,created_at,sort_order,kind";
 const MAX_GALLERY_PREVIEW_BYTES: u64 = 12 * 1024 * 1024;
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn row(r: &Row<'_>) -> rusqlite::Result<GalleryImage> {
     Ok(GalleryImage { id: r.get(0)?, artwork_id: r.get(1)?, image_path: r.get(2)?,
-        caption: r.get(3)?, created_at: r.get(4)?, sort_order: r.get(5)? })
+        caption: r.get(3)?, created_at: r.get(4)?, sort_order: r.get(5)?, kind: r.get(6)? })
 }
 fn relative_media_path(path: &str) -> bool {
     let mut components = Path::new(path).components();
@@ -45,15 +56,15 @@ fn update_caption_core(db: &Database, image_id: &str, caption: Option<String>) -
     let updated = conn.execute("UPDATE artwork_images SET caption=?2 WHERE id=?1",
         params![image_id, caption]).map_err(err)?;
     if updated == 0 { return Err("Fotografia non trovata".into()); }
-    conn.query_row("SELECT id,artwork_id,image_path,caption,created_at,sort_order FROM artwork_images WHERE id=?1",
+    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
         params![image_id], row).map_err(err)
 }
 fn list_core(db: &Database, artwork_id: &str) -> Result<Vec<GalleryImage>, String> {
     let conn = db.conn.lock().map_err(err)?;
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)", params![artwork_id], |r| r.get(0)).map_err(err)?;
     if !exists { return Err("Opera non trovata".into()); }
-    let mut query = conn.prepare("SELECT id,artwork_id,image_path,caption,created_at,sort_order FROM artwork_images
-        WHERE artwork_id=?1 ORDER BY sort_order,id").map_err(err)?;
+    let mut query = conn.prepare(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images
+        WHERE artwork_id=?1 ORDER BY sort_order,id")).map_err(err)?;
     let result = query.query_map(params![artwork_id], row).map_err(err)?
         .collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(result)
@@ -94,8 +105,19 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
             (SELECT COALESCE(MAX(sort_order),0)+1 FROM artwork_images WHERE artwork_id=?2))", params![id, artwork_id, relative, caption, stamp]) {
         let _ = fs::remove_file(&target); return Err(err(e));
     }
-    conn.query_row("SELECT id,artwork_id,image_path,caption,created_at,sort_order FROM artwork_images WHERE id=?1",
+    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
         params![id], row).map_err(err)
+}
+fn update_kind_core(db: &Database, image_id: &str, kind: &str) -> Result<GalleryImage, String> {
+    let kind = normalize_kind(Some(kind))?;
+    let conn = db.conn.lock().map_err(err)?;
+    let updated = conn.execute("UPDATE artwork_images SET kind=?2 WHERE id=?1", params![image_id, kind]).map_err(err)?;
+    if updated == 0 { return Err("Fotografia non trovata".into()); }
+    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"), params![image_id], row).map_err(err)
+}
+#[tauri::command]
+pub fn update_artwork_gallery_kind(db: State<'_, Database>, image_id: String, kind: String) -> Result<GalleryImage, String> {
+    update_kind_core(&db, &image_id, &kind)
 }
 #[tauri::command]
 pub fn update_artwork_gallery_caption(db: State<'_, Database>, image_id: String, caption: Option<String>) -> Result<GalleryImage, String> {
@@ -137,7 +159,7 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
     if let Some(old_path) = old_primary {
         // The old cover has no caption. Do not retain the promoted photo's
         // potentially misleading caption on a different image.
-        tx.execute("UPDATE artwork_images SET image_path=?2,caption=NULL,media_id=?3 WHERE id=?1",
+        tx.execute("UPDATE artwork_images SET image_path=?2,caption=NULL,kind='OTHER',media_id=?3 WHERE id=?1",
             params![image_id, old_path, old_media]).map_err(err)?;
     } else {
         // No old cover to swap: the gallery reference becomes the primary one.
@@ -414,6 +436,29 @@ mod tests {
             "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
         assert_eq!(untouched, "Keep");
         assert_eq!(primary, "media/primary.jpg");
+    }
+    #[test]
+    fn photo_kind_is_validated_changeable_and_reset_when_a_photo_becomes_the_cover() {
+        assert_eq!(normalize_kind(None).unwrap(), "OTHER");
+        assert_eq!(normalize_kind(Some("  ")).unwrap(), "OTHER");
+        for kind in PHOTO_KINDS { assert_eq!(normalize_kind(Some(kind)).unwrap(), kind); }
+        assert!(normalize_kind(Some("detail")).is_err(), "codes are exact");
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        fs::write(db.directory.join("media/cover.png"), b"c").unwrap();
+        fs::write(db.directory.join("media/side.png"), b"s").unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at) VALUES('a','A','Art','media/cover.png','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at,kind) VALUES('side','a','media/side.png','t','FRAMED')", []).unwrap();
+        }
+        assert_eq!(list_core(&db, "a").unwrap()[0].kind, "FRAMED");
+        assert_eq!(update_kind_core(&db, "side", "WORK_IN_PROGRESS").unwrap().kind, "WORK_IN_PROGRESS");
+        assert!(update_kind_core(&db, "side", "boh").is_err());
+        assert!(update_kind_core(&db, "missing", "DETAIL").is_err());
+        assert_eq!(list_core(&db, "a").unwrap()[0].kind, "WORK_IN_PROGRESS");
+        promote_core(&db, "a", "side").unwrap();
+        assert_eq!(list_core(&db, "a").unwrap()[0].kind, "OTHER", "the former cover is a plain photo");
     }
     #[test]
     fn gallery_is_per_artwork_and_keeps_primary_photo() {

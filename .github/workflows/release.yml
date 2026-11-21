@@ -1,0 +1,90 @@
+# Publishes a signed release: installers plus the `latest.json` feed read by the in-app updater.
+# Start it by pushing a tag such as `v0.2.0` (see docs/RELEASING.md for the one-time key setup).
+# The private signing key lives only in the repository secrets; the public key is a repository variable.
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+concurrency:
+  group: repertica-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  check:
+    name: Check version and keys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: The tag, the app version and the signing setup must agree
+        shell: bash
+        env:
+          PUBLIC_KEY: ${{ vars.REPERTICA_UPDATER_PUBLIC_KEY }}
+          PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          app="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          pkg="$(node -p "require('./package.json').version")"
+          crate="$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')"
+          echo "tag=$tag tauri.conf=$app package.json=$pkg Cargo.toml=$crate"
+          test "$tag" = "$app" && test "$tag" = "$pkg" && test "$tag" = "$crate" || { echo "::error::The tag does not match the version in tauri.conf.json, package.json and Cargo.toml"; exit 1; }
+          test -n "$PUBLIC_KEY" || { echo "::error::Repository variable REPERTICA_UPDATER_PUBLIC_KEY is not set"; exit 1; }
+          test -n "$PRIVATE_KEY" || { echo "::error::Repository secret TAURI_SIGNING_PRIVATE_KEY is not set"; exit 1; }
+  publish:
+    name: ${{ matrix.name }}
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-latest
+            args: ''
+          - name: macOS Apple Silicon
+            runner: macos-15
+            args: '--target aarch64-apple-darwin'
+            target: aarch64-apple-darwin
+          - name: macOS Intel
+            runner: macos-15-intel
+            args: '--target x86_64-apple-darwin'
+            target: x86_64-apple-darwin
+    env:
+      CARGO_INCREMENTAL: '0'
+      # macOS builds are ad-hoc signed (no Apple Developer ID); the update package itself is minisign-signed.
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm install --no-audit --no-fund
+      - run: npm run prepare:icons
+      - name: Build, sign and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          REPERTICA_UPDATER_PUBLIC_KEY: ${{ vars.REPERTICA_UPDATER_PUBLIC_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Repertica Studio ${{ github.ref_name }}'
+          releaseBody: 'Vedi le note di rilascio e il file CHANGELOG per le novità di questa versione.'
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          # The extra config only switches on the signed update packages, which need the private key.
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json

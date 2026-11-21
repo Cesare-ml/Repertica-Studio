@@ -220,3 +220,39 @@ test('the local MCP server can be registered in several assistants, including Co
   assert.match(get('src/app/app.component.html'), /mcpClients/);
 });
 
+
+test('artwork flags and the type of additional photographs are stored, exported and editable', () => {
+  const db = get('src-tauri/src/db.rs');
+  assert.match(db, /SCHEMA_VERSION: i64 = 14/);
+  for (const column of ['signed', 'final_varnish', 'framed']) assert.ok(db.includes(`"${column}"`), column);
+  assert.match(db, /kind IN \('DETAIL','SIGNATURE','DIGITAL_MOCKUP','IN_SITU','OTHER','FRAMED','WORK_IN_PROGRESS'\)/);
+  assert.match(get('src-tauri/src/lib.rs'), /gallery::update_artwork_gallery_kind/);
+  assert.match(get('src-tauri/src/export.rs'), /signed;final_varnish;framed/);
+  const models = get('src/app/models.ts');
+  for (const code of ['DETAIL', 'SIGNATURE', 'DIGITAL_MOCKUP', 'IN_SITU', 'OTHER', 'FRAMED', 'WORK_IN_PROGRESS']) assert.ok(models.includes(`'${code}'`), code);
+  const html = get('src/app/app.component.html');
+  for (const label of ['Opera firmata', 'Vernice finale applicata', 'Incorniciata']) assert.ok(html.includes(`tr('${label}')`), label);
+  assert.match(html, /setNewPhotoKind/);
+  assert.match(html, /setGalleryKind/);
+});
+
+test('updates come from signed GitHub releases, are fixed in the program and need the user\'s consent', () => {
+  const updater = get('src-tauri/src/updater.rs');
+  const production = updater.slice(0, updater.indexOf('#[cfg(test)]'));
+  assert.match(production, /https:\/\/github\.com\/Cesare-ml\/Repertica-Studio\/releases\/latest\/download\/latest\.json/);
+  assert.match(production, /REPERTICA_UPDATER_PUBLIC_KEY/);
+  assert.match(production, /allowed_artifact/);
+  assert.doesNotMatch(production, /pub async fn \w+\([^)]*(url|endpoint|pubkey|key)\s*:/i, 'the feed address and key never come from the interface');
+  const lib = get('src-tauri/src/lib.rs');
+  assert.match(lib, /tauri_plugin_updater::Builder/);
+  for (const command of ['updater::check_for_update', 'updater::install_update']) assert.ok(lib.includes(command), command);
+  const conf = JSON.parse(get('src-tauri/tauri.conf.json'));
+  assert.equal(conf.plugins.updater.pubkey, '', 'the key is injected by the release build, never committed');
+  assert.doesNotMatch(JSON.stringify(conf.bundle), /createUpdaterArtifacts/, 'normal builds need no private key');
+  assert.equal(JSON.parse(get('src-tauri/tauri.release.conf.json')).bundle.createUpdaterArtifacts, true);
+  const workflow = get('.github/workflows/release.yml');
+  for (const name of ['TAURI_SIGNING_PRIVATE_KEY', 'REPERTICA_UPDATER_PUBLIC_KEY', 'includeUpdaterJson: true']) assert.ok(workflow.includes(name), name);
+  const html = get('src/app/app.component.html');
+  assert.match(html, /installUpdate\(\)/);
+  assert.match(html, /tr\('Cerca aggiornamenti'\)/);
+});

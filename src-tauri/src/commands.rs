@@ -31,10 +31,11 @@ fn artwork_row(row: &Row<'_>) -> rusqlite::Result<Artwork> {
         height_cm: row.get(7)?, depth_cm: row.get(8)?, description: row.get(9)?,
         location: row.get(10)?, status: row.get(11)?, image_path: row.get(12)?,
         created_at: row.get(13)?, updated_at: row.get(14)?,
+        signed: row.get(15)?, final_varnish: row.get(16)?, framed: row.get(17)?,
     })
 }
 const ARTWORK_FIELDS: &str =
-    "id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,created_at,updated_at";
+    "id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed";
 fn artwork_by_id(conn: &Connection, id: &str) -> Result<Artwork, String> {
     conn.query_row(
         &format!("SELECT {ARTWORK_FIELDS} FROM artworks WHERE id=?1"),
@@ -52,6 +53,7 @@ struct ArtworkFields {
     code: Option<String>, title: String, year: Option<String>, technique: Option<String>,
     support: Option<String>, width: Option<f64>, height: Option<f64>, depth: Option<f64>,
     description: Option<String>, location: Option<String>, status: String,
+    signed: bool, final_varnish: bool, framed: bool,
 }
 fn normalize_artwork(input: &ArtworkInput) -> Result<ArtworkFields, String> {
     if !["available", "reserved", "sold", "archived"].contains(&input.status.as_str()) {
@@ -67,6 +69,7 @@ fn normalize_artwork(input: &ArtworkInput) -> Result<ArtworkFields, String> {
         description: clean(input.description.clone(), 40_000)?,
         location: clean(input.location.clone(), 300)?,
         status: input.status.clone(),
+        signed: input.signed, final_varnish: input.final_varnish, framed: input.framed,
     })
 }
 fn code_in_use(conn: &Connection, code: &str, except_id: &str) -> Result<bool, String> {
@@ -94,12 +97,12 @@ fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, Stri
     let (title, year, technique, support, description, location) =
         (fields.title, fields.year, fields.technique, fields.support, fields.description, fields.location);
     if existing {
-        tx.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13 WHERE id=?1",
-            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp]).map_err(err)?;
+        tx.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13,signed=?14,final_varnish=?15,framed=?16 WHERE id=?1",
+            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed]).map_err(err)?;
     } else {
-        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13)",
-            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp]).map_err(err)?;
+        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at,signed,final_varnish,framed)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13,?14,?15,?16)",
+            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed]).map_err(err)?;
     }
     let saved = artwork_by_id(&tx, &id)?;
     tx.commit().map_err(err)?;
@@ -142,6 +145,7 @@ fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Art
     };
     let cover = input.cover.as_ref().map(|s| load(s)).transpose()?;
     let gallery = input.gallery.iter().map(load).collect::<Result<Vec<_>, _>>()?;
+    let gallery_kinds = input.gallery.iter().map(|s| crate::gallery::normalize_kind(s.kind.as_deref())).collect::<Result<Vec<_>, _>>()?;
     match &input.sale {
         Some(sale) => {
             if sale.amount_cents <= 0 || sale.amount_cents > 100_000_000_000 { return Err("Importo non valido".into()); }
@@ -181,16 +185,17 @@ fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Art
             cover_ref = Some(crate::media::materialize(&tx, &db.directory, source, loaded.map(|(b, _)| b.as_slice()), loaded.map(|(_, n)| n.as_str()).unwrap_or("immagine"))?);
         }
         let stamp = now();
-        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,image_media_id,created_at,updated_at)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15)",
+        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,image_media_id,created_at,updated_at,signed,final_varnish,framed)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18)",
             params![id, code, fields.title, fields.year, fields.technique, fields.support, fields.width, fields.height,
                 fields.depth, fields.description, fields.location, fields.status,
-                cover_ref.as_ref().map(|r| r.1.clone()), cover_ref.as_ref().map(|r| r.0.clone()), stamp]).map_err(err)?;
+                cover_ref.as_ref().map(|r| r.1.clone()), cover_ref.as_ref().map(|r| r.0.clone()), stamp,
+                fields.signed, fields.final_varnish, fields.framed]).map_err(err)?;
         for (position, source) in input.gallery.iter().enumerate() {
             let loaded = gallery[position].as_ref();
             let (media_id, relative) = crate::media::materialize(&tx, &db.directory, source, loaded.map(|(b, _)| b.as_slice()), loaded.map(|(_, n)| n.as_str()).unwrap_or("immagine"))?;
-            tx.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,media_id) VALUES(?1,?2,?3,NULL,?4,?5,?6)",
-                params![Uuid::new_v4().to_string(), id, relative, stamp, position as i64 + 1, media_id]).map_err(err)?;
+            tx.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,media_id,kind) VALUES(?1,?2,?3,NULL,?4,?5,?6,?7)",
+                params![Uuid::new_v4().to_string(), id, relative, stamp, position as i64 + 1, media_id, gallery_kinds[position]]).map_err(err)?;
         }
         if let Some(sale) = &input.sale {
             let collector_id = match &new_collector {
@@ -571,7 +576,7 @@ mod tests {
             id, code: Some("WORK-STALE-01".into()), title: title.into(), year: None,
             technique: None, support: None, width_cm: None, height_cm: None,
             depth_cm: None, description: None, location: None,
-            status: "available".into(),
+            status: "available".into(), signed: false, final_varnish: false, framed: false,
         }
     }
 
@@ -723,6 +728,41 @@ mod tests {
     }
     fn count(db: &Database, table: &str) -> i64 {
         db.conn.lock().unwrap().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn artwork_flags_and_photo_kinds_are_saved_edited_and_validated() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let plain = create_artwork_full_core(&db, new_artwork("Senza", None)).unwrap();
+        assert!(!plain.signed && !plain.final_varnish && !plain.framed, "flags default to off");
+
+        let mut input = new_artwork("Con", None);
+        input.artwork.signed = true;
+        input.artwork.framed = true;
+        input.gallery = vec![
+            crate::media::PhotoSource { kind: Some("SIGNATURE".into()), ..src(picture(dir.path(), "a.jpg", 1)) },
+            src(picture(dir.path(), "b.jpg", 2)),
+        ];
+        let created = create_artwork_full_core(&db, input).unwrap();
+        assert!(created.signed && created.framed && !created.final_varnish);
+        let kinds: Vec<String> = db.conn.lock().unwrap().prepare("SELECT kind FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order").unwrap()
+            .query_map(params![created.id], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(kinds, ["SIGNATURE", "OTHER"], "a missing kind means 'other'");
+
+        // The flags can be changed afterwards.
+        let mut edit = artwork_edit_input(Some(created.id.clone()), "Con");
+        edit.code = None;
+        edit.final_varnish = true;
+        let saved = save_artwork_core(&db, edit).unwrap();
+        assert!(saved.final_varnish && !saved.signed && !saved.framed);
+
+        // An unknown kind is rejected and leaves nothing behind.
+        let before = (count(&db, "artworks"), media_files(&db));
+        let mut bad = new_artwork("Errata", None);
+        bad.gallery = vec![crate::media::PhotoSource { kind: Some("PAESAGGIO".into()), ..src(picture(dir.path(), "c.jpg", 3)) }];
+        assert!(create_artwork_full_core(&db, bad).unwrap_err().contains("Tipo di fotografia"));
+        assert_eq!(before, (count(&db, "artworks"), media_files(&db)));
     }
 
     #[test]

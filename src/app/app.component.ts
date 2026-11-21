@@ -14,22 +14,25 @@ import { MediaEditorComponent } from './media-editor.component';
 import { emptyPayment, installmentRows, paymentToInput, toCents, type PaymentDraft } from './payments';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
 import type { ArtworkOrder, CollectorFilter } from './archive-filters';
+import { PHOTO_KINDS } from './models';
+import { FIRST_UPDATE_CHECK_DELAY_MS, UPDATE_CHECK_INTERVAL_MS, isQuietStatus, progressPercent, updateMessage } from './updates';
+import { getVersion } from '@tauri-apps/api/app';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
-  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, CollectorImage, AllocationPlan, AllocationPart, BackupScheduleStatus, Installment,
+  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, PhotoKind, UpdateReply, CollectorImage, AllocationPlan, AllocationPart, BackupScheduleStatus, Installment,
   EditOperation, PhotoSource, RawFile, MediaItem, PreviewData
 } from './models';
 
 /** A picture chosen for a new artwork, possibly edited before it is stored. */
-interface PendingPhoto { mediaId: string; label: string; thumb: string; }
+interface PendingPhoto { mediaId: string; label: string; thumb: string; kind: PhotoKind; }
 type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
   code: null, title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
-  location: null, status: 'available'
+  location: null, status: 'available', signed: false, final_varnish: false, framed: false
 });
 const freshCollector = (): CollectorInput => ({
   first_name: '', last_name: null, email: null, phone: null, address: null, notes: null,
@@ -49,7 +52,15 @@ const statusLabels: Record<ArtworkStatus, string> = {
   styleUrls: ['./app.component.css']
 })
 export class AppComponent implements OnInit {
-  readonly appVersion = '0.1.0';
+  appVersion = '0.1.0';
+  update: UpdateReply | null = null;
+  updateChecking = false;
+  updateInstalling = false;
+  updateProgress: number | null = null;
+  updateBannerHidden = false;
+  autoUpdate = true;
+  private readonly autoUpdateKey = 'repertica-auto-update';
+  private updateTimer: ReturnType<typeof setInterval> | null = null;
   readonly sections: { id: Section; label: string }[] = [
     { id: 'overview', label: 'Panoramica' },
     { id: 'artworks', label: 'Opere' },
@@ -161,6 +172,8 @@ export class AppComponent implements OnInit {
   galleryImages: GalleryImage[] = [];
   galleryPreviews: Record<string, string> = {};
   galleryCaption = '';
+  galleryKind: PhotoKind = 'OTHER';
+  readonly photoKinds = PHOTO_KINDS;
   editingGalleryCaptionId: string | null = null;
   editingGalleryCaption = '';
   artworkDialog = false;
@@ -232,11 +245,67 @@ export class AppComponent implements OnInit {
         this.change.detectChanges();
       }).catch(() => undefined);
       await this.refresh();
+      void this.startUpdates();
     } catch (error) {
       this.errorMessage = this.error(error);
       this.loading = false;
     }
   }
+  // ---------------------------------------------------------------- updates
+  private async startUpdates(): Promise<void> {
+    try { this.appVersion = await getVersion(); } catch { /* keep the built-in value */ }
+    try { this.autoUpdate = localStorage.getItem(this.autoUpdateKey) !== 'off'; } catch { /* default: on */ }
+    this.change.detectChanges();
+    if (!this.autoUpdate) return;
+    setTimeout(() => void this.checkUpdates(false), FIRST_UPDATE_CHECK_DELAY_MS);
+    this.updateTimer = setInterval(() => void this.checkUpdates(false), UPDATE_CHECK_INTERVAL_MS);
+  }
+  setAutoUpdate(on: boolean): void {
+    this.autoUpdate = on;
+    try { localStorage.setItem(this.autoUpdateKey, on ? 'on' : 'off'); } catch { /* the choice lasts until the app closes */ }
+    if (this.updateTimer) { clearInterval(this.updateTimer); this.updateTimer = null; }
+    if (on) {
+      void this.checkUpdates(false);
+      this.updateTimer = setInterval(() => void this.checkUpdates(false), UPDATE_CHECK_INTERVAL_MS);
+    }
+  }
+  /** `manual` checks report every outcome; automatic ones stay silent unless something is available. */
+  async checkUpdates(manual: boolean): Promise<void> {
+    if (this.updateChecking || this.updateInstalling) return;
+    this.updateChecking = true;
+    if (manual) { this.update = null; this.updateBannerHidden = false; }
+    this.change.detectChanges();
+    try {
+      const reply = await api.checkForUpdate();
+      if (reply.status === 'available') { this.update = reply; this.updateBannerHidden = false; }
+      else if (manual || !isQuietStatus(reply.status)) this.update = reply;
+    } catch (error) {
+      if (manual) this.errorMessage = this.error(error);
+    } finally {
+      this.updateChecking = false;
+    }
+    this.change.detectChanges();
+  }
+  async installUpdate(skipBackup = false): Promise<void> {
+    const version = this.update?.version;
+    if (!version || this.updateInstalling || this.busy) return;
+    this.updateInstalling = true; this.updateProgress = null; this.errorMessage = '';
+    this.change.detectChanges();
+    try {
+      const reply = await api.installUpdate(version, skipBackup, p => {
+        this.updateProgress = progressPercent(p.downloaded, p.total);
+        this.change.detectChanges();
+      });
+      // A successful install restarts the app, so anything returned here is a result to show.
+      this.update = reply.version ? reply : { ...reply, version };
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    } finally {
+      this.updateInstalling = false;
+    }
+    this.change.detectChanges();
+  }
+  updateText(): string { return this.update ? this.tr(updateMessage(this.update.status)) : ''; }
   navigate(section: Section): void {
     this.section = section;
     this.mediaOpenId = null;
@@ -736,7 +805,7 @@ export class AppComponent implements OnInit {
     let thumb = '';
     try { thumb = large ? (await api.mediaPreview(id, 720)).data_url : await api.mediaThumbnail(id); }
     catch (error) { this.errorMessage = this.error(error); }
-    return { mediaId: id, label, thumb };
+    return { mediaId: id, label, thumb, kind: 'OTHER' };
   }
   private async importToLibrary(paths: string[]): Promise<MediaItem[]> {
     if (!paths.length) return [];
@@ -806,7 +875,7 @@ export class AppComponent implements OnInit {
     const photo = cover ? this.newCover : this.newGallery[index];
     if (!photo) return;
     await this.openPhotoEditor(photo.mediaId, photo.label, async () => {
-      const refreshed = await this.toPending(photo.mediaId, photo.label, cover);
+      const refreshed = { ...(await this.toPending(photo.mediaId, photo.label, cover)), kind: photo.kind };
       if (cover) this.newCover = refreshed;
       else this.newGallery = this.newGallery.map(p => p.mediaId === photo.mediaId ? refreshed : p);
     });
@@ -832,7 +901,7 @@ export class AppComponent implements OnInit {
           if (await this.run(() => api.artworkSetCoverFromMedia(artworkId, item.id), this.tr('Copertina aggiornata'))) {
             delete this.thumbnails[artworkId]; await this.refresh();
           }
-        } else if (await this.run(() => api.artworkAddGalleryFromMedia(artworkId, item.id, this.galleryCaption || null), this.tr('Fotografia aggiunta alla galleria'))) {
+        } else if (await this.run(() => api.artworkAddGalleryFromMedia(artworkId, item.id, this.galleryCaption || null, this.galleryKind), this.tr('Fotografia aggiunta alla galleria'))) {
           this.galleryImages = await api.listArtworkGallery(artworkId);
           this.galleryCaption = '';
         }
@@ -931,7 +1000,8 @@ export class AppComponent implements OnInit {
     this.artworkDraft = {
       id: a.id, code: a.code, title: a.title, year: a.year, technique: a.technique,
       support: a.support, width_cm: a.width_cm, height_cm: a.height_cm,
-      depth_cm: a.depth_cm, description: a.description, location: a.location, status: a.status
+      depth_cm: a.depth_cm, description: a.description, location: a.location, status: a.status,
+      signed: a.signed, final_varnish: a.final_varnish, framed: a.framed
     };
     this.artworkDialog = true;
   }
@@ -967,7 +1037,7 @@ export class AppComponent implements OnInit {
       };
     }
     const { id: _unused, ...record } = this.artworkDraft;
-    const source = (photo: PendingPhoto): PhotoSource => ({ path: null, media_id: photo.mediaId, operations: [] });
+    const source = (photo: PendingPhoto): PhotoSource => ({ path: null, media_id: photo.mediaId, operations: [], kind: photo.kind });
     const input: NewArtworkInput = {
       artwork: { ...record, code: null, status: this.withSale ? 'sold' : record.status },
       cover: this.newCover ? source(this.newCover) : null, gallery: this.newGallery.map(source), raw_path: this.newRawPath, sale
@@ -1011,6 +1081,7 @@ export class AppComponent implements OnInit {
     this.galleryImages = [];
     this.galleryPreviews = {};
     this.galleryCaption = '';
+    this.galleryKind = 'OTHER';
     this.cancelGalleryCaptionEdit();
     try {
       this.galleryImages = await api.listArtworkGallery(artwork.id);
@@ -1025,7 +1096,18 @@ export class AppComponent implements OnInit {
     this.galleryImages = [];
     this.galleryPreviews = {};
     this.galleryCaption = '';
+    this.galleryKind = 'OTHER';
     this.cancelGalleryCaptionEdit();
+  }
+  setNewPhotoKind(index: number, kind: PhotoKind): void {
+    this.newGallery = this.newGallery.map((p, i) => i === index ? { ...p, kind } : p);
+  }
+  async setGalleryKind(image: GalleryImage, kind: PhotoKind): Promise<void> {
+    if (this.busy || image.kind === kind) return;
+    await this.run(async () => {
+      const saved = await api.updateArtworkGalleryKind(image.id, kind);
+      this.galleryImages = this.galleryImages.map(i => i.id === image.id ? saved : i);
+    }, this.tr('Tipo di fotografia aggiornato'));
   }
   startGalleryCaptionEdit(image: GalleryImage): void {
     if (this.busy) return;
@@ -1075,7 +1157,7 @@ export class AppComponent implements OnInit {
       if (!path || this.galleryArtwork?.id !== artwork.id) return;
       const [item] = await this.importToLibrary([path]);
       if (!item) return;
-      if (await this.run(() => api.artworkAddGalleryFromMedia(artwork.id, item.id, this.galleryCaption || null), this.tr('Fotografia aggiunta alla galleria'))) {
+      if (await this.run(() => api.artworkAddGalleryFromMedia(artwork.id, item.id, this.galleryCaption || null, this.galleryKind), this.tr('Fotografia aggiunta alla galleria'))) {
         this.sessionImports.delete(item.id);
         this.galleryImages = await api.listArtworkGallery(artwork.id);
         this.galleryCaption = '';

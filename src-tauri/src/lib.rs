@@ -19,12 +19,15 @@ mod util;
 pub mod mcp;
 mod mcp_client;
 mod receipt_attachments;
+mod updater;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_updater::Builder::new().pubkey(updater::PUBLIC_KEY).build())
+        .manage(updater::UpdateState::default())
         .setup(|app| {
             use tauri::Manager;
             let directory = app.path().app_local_data_dir()?;
@@ -61,6 +64,9 @@ pub fn run() {
             gallery::add_artwork_gallery_image,
             gallery::add_artwork_gallery_image_from_path,
             gallery::update_artwork_gallery_caption,
+            gallery::update_artwork_gallery_kind,
+            updater::check_for_update,
+            updater::install_update,
             gallery::promote_artwork_gallery_image,
             gallery::move_artwork_gallery_image,
             gallery::artwork_gallery_image_data,

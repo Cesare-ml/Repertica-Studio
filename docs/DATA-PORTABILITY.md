@@ -5,7 +5,7 @@ L'esportatore Rust `export_ledger_csv` supporta dieci valori di `kind`:
 | Tipo | Righe esportate | Contenuti |
 | --- | --- | --- |
 | `artworks` | Tutte le opere | UUID, codice, titolo, anno, tecnica, supporto, dimensioni in cm, descrizione, ubicazione, stato, percorso dell'immagine principale e date |
-| `gallery` | Tutte le fotografie aggiuntive della galleria | UUID foto e opera, codice e titolo attuali, percorso relativo del file, didascalia, ordine di visualizzazione e data; non contiene i byte delle immagini |
+| `gallery` | Tutte le fotografie aggiuntive della galleria | UUID foto e opera, codice e titolo attuali, percorso relativo del file, didascalia, ordine di visualizzazione, data e tipo (`kind`: `DETAIL`, `SIGNATURE`, `DIGITAL_MOCKUP`, `IN_SITU`, `OTHER`, `FRAMED`, `WORK_IN_PROGRESS`); non contiene i byte delle immagini |
 | `collectors` | Tutti i collezionisti | UUID, nome completo, contatti e note private, date; in coda nome, cognome, dati di nascita, profili social, percorso della foto profilo e numero di fotografie |
 | `certificates` | Tutti i certificati | UUID del certificato e opera, seriale, date, emittente, destinatario, note e **snapshot_json originale immutabile** |
 | `sales` | Tutte le vendite | UUID opera/collezionista, importi in centesimi e le tre quote storiche predefinite (personale, attività, risparmio; 0 per le vendite che non le usano: le ripartizioni personalizzate sono nel registro `allocations`) |

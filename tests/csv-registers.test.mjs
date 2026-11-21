@@ -72,7 +72,7 @@ test('sale balances export includes exact cents and does not infer receipt recor
 test('gallery metadata export preserves image UUIDs, artwork relation, captions and order', () => {
   const backend = read('src-tauri/src/export.rs');
   const html = read('src/app/app.component.html');
-  assert.match(backend, /"image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at"/);
+  assert.match(backend, /"image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at;kind"/);
   assert.match(backend, /FROM artwork_images i JOIN artworks a ON a.id=i.artwork_id/);
   assert.match(backend, /ORDER BY a.code COLLATE NOCASE,a.id,i.sort_order,i.created_at,i.id/);
   assert.match(html, /exportLedger\('gallery'\)/);

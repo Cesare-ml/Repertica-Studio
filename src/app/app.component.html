@@ -19,6 +19,15 @@
     <div class="alerts" role="status" aria-live="polite">
       <div class="alert error" *ngIf="errorMessage">{{ errorMessage }} <button type="button" (click)="errorMessage = ''" [attr.aria-label]="tr('Chiudi errore')">×</button></div>
       <div class="alert success" *ngIf="notice">{{ notice }} <button type="button" (click)="notice = ''" [attr.aria-label]="tr('Chiudi avviso')">×</button></div>
+      <div class="alert update" *ngIf="update?.status === 'available' && !updateBannerHidden || updateInstalling">
+        <span>{{ tr('Nuova versione disponibile:') }} <strong>{{ update?.version }}</strong>
+          <progress *ngIf="updateInstalling" max="100" [value]="updateProgress ?? 0" [attr.aria-label]="tr('Avanzamento del download')"></progress>
+          <span *ngIf="updateInstalling">{{ updateProgress === null ? tr('Download in corso…') : updateProgress + '%' }}</span></span>
+        <span class="update-actions">
+          <button type="button" class="small primary" (click)="installUpdate()" [disabled]="updateInstalling || busy">{{ tr('Scarica e installa') }}</button>
+          <button type="button" class="small" (click)="navigate('settings')" [disabled]="updateInstalling">{{ tr('Dettagli') }}</button>
+          <button type="button" (click)="updateBannerHidden = true" *ngIf="!updateInstalling" [attr.aria-label]="tr('Nascondi')">×</button></span>
+      </div>
     </div>
 
     <section *ngIf="section === 'overview'" class="page">
@@ -289,6 +298,21 @@
             <p *ngIf="audit.truncated">{{ tr('Sono visualizzati soltanto i primi 100 problemi.') }}</p>
           </div>
         </div>
+        <div class="backup-block update-block">
+          <h3>{{ tr('Aggiornamenti') }}</h3>
+          <p>{{ tr('Versione installata:') }} <strong>v{{ appVersion }}</strong></p>
+          <label class="inline-check"><input type="checkbox" [ngModel]="autoUpdate" (ngModelChange)="setAutoUpdate($event)"> {{ tr('Cerca automaticamente gli aggiornamenti') }}</label>
+          <p class="hint">{{ tr('Gli aggiornamenti arrivano dalle release ufficiali su GitHub, sono firmati e vengono installati solo dopo la tua conferma. Prima dell’installazione viene eseguito un backup se il backup automatico è attivo.') }}</p>
+          <div class="update-actions">
+            <button type="button" class="secondary" (click)="checkUpdates(true)" [disabled]="updateChecking || updateInstalling">{{ updateChecking ? tr('Controllo in corso…') : tr('Cerca aggiornamenti') }}</button>
+            <button type="button" class="primary" *ngIf="update?.status === 'available'" (click)="installUpdate()" [disabled]="updateInstalling || busy">{{ tr('Scarica e installa') }}</button>
+            <button type="button" class="secondary" *ngIf="update?.status === 'backup_failed'" (click)="installUpdate(true)" [disabled]="updateInstalling || busy">{{ tr('Installa senza backup') }}</button>
+          </div>
+          <progress *ngIf="updateInstalling" max="100" [value]="updateProgress ?? 0" [attr.aria-label]="tr('Avanzamento del download')"></progress>
+          <p *ngIf="update" role="status" aria-live="polite"><strong *ngIf="update.version">v{{ update.version }} — </strong>{{ updateText() }}</p>
+          <pre class="update-notes" *ngIf="update?.status === 'available' && update?.notes">{{ update?.notes }}</pre>
+          <p class="hint" *ngIf="update?.status === 'available'">{{ tr('Dopo l’installazione l’app si riavvia: salva il lavoro in corso prima di procedere.') }}</p>
+        </div>
         <div class="backup-block">
           <h3>{{ tr('Guida di primo avvio') }}</h3><p>{{ tr('Mostra di nuovo i suggerimenti di benvenuto nella Panoramica.') }}</p>
           <button type="button" class="secondary" (click)="reopenGuide()">{{ tr('Mostra la guida') }}</button>
@@ -485,11 +509,15 @@
               <button type="button" class="secondary small action-glyph action-glyph--photo" (click)="pickGalleryPhotos()" [disabled]="busy || newGallery.length >= 20">{{ tr('Aggiungi fotografie…') }}</button>
               <button type="button" class="secondary small" (click)="openLibraryPicker('new-gallery')" [disabled]="busy || newGallery.length >= 20">{{ tr('Dalla libreria') }}</button></span></div>
           <div class="gallery-tiles" *ngIf="newGallery.length; else noGalleryYet">
-            <div class="tile" *ngFor="let photo of newGallery; let i = index">
-              <img *ngIf="photo.thumb" [src]="photo.thumb" [alt]="photo.label">
-              <span class="tile-actions">
-                <button type="button" (click)="editNewPhoto(false, i)" [attr.aria-label]="tr('Ritaglia e correggi')" [title]="tr('Ritaglia e correggi')">✎</button>
-                <button type="button" (click)="removeNewGalleryPhoto(i)" [attr.aria-label]="tr('Rimuovi')" [title]="tr('Rimuovi')">×</button></span>
+            <div class="tile-wrap" *ngFor="let photo of newGallery; let i = index">
+              <div class="tile">
+                <img *ngIf="photo.thumb" [src]="photo.thumb" [alt]="photo.label">
+                <span class="tile-actions">
+                  <button type="button" (click)="editNewPhoto(false, i)" [attr.aria-label]="tr('Ritaglia e correggi')" [title]="tr('Ritaglia e correggi')">✎</button>
+                  <button type="button" (click)="removeNewGalleryPhoto(i)" [attr.aria-label]="tr('Rimuovi')" [title]="tr('Rimuovi')">×</button></span>
+              </div>
+              <select class="kind-select" [ngModel]="photo.kind" (ngModelChange)="setNewPhotoKind(i, $event)" [attr.aria-label]="tr('Tipo di fotografia')" [title]="tr('Tipo di fotografia')">
+                <option *ngFor="let k of photoKinds" [value]="k.code">{{ tr(k.label) }}</option></select>
             </div>
           </div>
           <ng-template #noGalleryYet><p class="side-empty">{{ tr('Nessuna fotografia aggiuntiva.') }}</p></ng-template>
@@ -541,6 +569,11 @@
       <label><span>{{ tr('Altezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.height_cm"></label>
       <label><span>{{ tr('Larghezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.width_cm"></label>
       <label><span>{{ tr('Profondità (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.depth_cm"></label>
+      <div class="full artwork-flags" role="group" [attr.aria-label]="tr('Caratteristiche dell’opera')">
+        <label class="inline-check"><input type="checkbox" [(ngModel)]="artworkDraft.signed"> {{ tr('Opera firmata') }}</label>
+        <label class="inline-check"><input type="checkbox" [(ngModel)]="artworkDraft.final_varnish"> {{ tr('Vernice finale applicata') }}</label>
+        <label class="inline-check"><input type="checkbox" [(ngModel)]="artworkDraft.framed"> {{ tr('Incorniciata') }}</label>
+      </div>
       <label class="full"><span>{{ tr('Descrizione / note sull\'opera') }}</span><textarea rows="4" [(ngModel)]="artworkDraft.description"></textarea></label>
     </div>
     <div class="price-preview"><button type="button" class="secondary" (click)="previewPrice()" [disabled]="!artworkDraft.width_cm || !artworkDraft.height_cm">{{ tr('Calcola stima') }}</button>
@@ -588,6 +621,8 @@
     <div class="alert success" role="status" *ngIf="notice">{{ notice }}</div>
     <p class="form-note">{{ tr('Puoi scegliere una fotografia aggiuntiva come nuova copertina.') }}</p>
     <div class="gallery-upload">
+      <label class="settings-input"><span>{{ tr('Tipo di fotografia') }}</span>
+        <select [(ngModel)]="galleryKind"><option *ngFor="let k of photoKinds" [value]="k.code">{{ tr(k.label) }}</option></select></label>
       <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span><input maxlength="300" [(ngModel)]="galleryCaption"></label>
       <button class="secondary action-glyph action-glyph--photo" type="button" [disabled]="busy || galleryImages.length >= 20" (click)="addGalleryPhoto()">{{ tr('Aggiungi fotografia') }}</button>
       <button class="secondary" type="button" [disabled]="busy || galleryImages.length >= 20" (click)="openLibraryPicker('existing-gallery', galleryArtwork.id)">{{ tr('Dalla libreria') }}</button>
@@ -604,6 +639,9 @@
             <button class="small secondary" type="button" [disabled]="busy" (click)="cancelGalleryCaptionEdit()">{{ tr('Annulla') }}</button>
           </div>
         </div>
+        <label class="settings-input gallery-kind"><span>{{ tr('Tipo di fotografia') }}</span>
+          <select [ngModel]="img.kind" (ngModelChange)="setGalleryKind(img, $event)" [disabled]="busy">
+            <option *ngFor="let k of photoKinds" [value]="k.code">{{ tr(k.label) }}</option></select></label>
         <ng-template #readGalleryCaption>
           <p>{{ img.caption || tr('Senza didascalia') }}</p>
           <button class="small secondary action-glyph action-glyph--edit" type="button" [disabled]="busy" (click)="startGalleryCaptionEdit(img)">{{ tr('Modifica') }}</button>

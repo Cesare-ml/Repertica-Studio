@@ -7,6 +7,11 @@ pub struct Artwork {
     pub width_cm: Option<f64>, pub height_cm: Option<f64>, pub depth_cm: Option<f64>,
     pub description: Option<String>, pub location: Option<String>, pub status: String,
     pub image_path: Option<String>, pub created_at: String, pub updated_at: String,
+    /// The artist's signature is on the work.
+    pub signed: bool,
+    /// A final protective varnish has been applied.
+    pub final_varnish: bool,
+    pub framed: bool,
 }
 #[derive(Debug, Deserialize)]
 pub struct ArtworkInput {
@@ -17,6 +22,9 @@ pub struct ArtworkInput {
     pub year: Option<String>, pub technique: Option<String>, pub support: Option<String>,
     pub width_cm: Option<f64>, pub height_cm: Option<f64>, pub depth_cm: Option<f64>,
     pub description: Option<String>, pub location: Option<String>, pub status: String,
+    #[serde(default)] pub signed: bool,
+    #[serde(default)] pub final_varnish: bool,
+    #[serde(default)] pub framed: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct Sale {

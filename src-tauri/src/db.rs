@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -467,6 +467,24 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;");
         conn.execute_batch(&script)?;
     }
+    if version < 14 {
+        // Artwork flags (signed / final varnish / framed) and the type of each additional photograph.
+        let has_column = |table: &str, column: &str| -> Result<bool, rusqlite::Error> {
+            conn.query_row(&format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name='{column}'"), [], |r| r.get::<_, i64>(0)).map(|n| n > 0)
+        };
+        let mut script = String::from("BEGIN IMMEDIATE;");
+        for column in ["signed", "final_varnish", "framed"] {
+            if !has_column("artworks", column)? {
+                script.push_str(&format!("ALTER TABLE artworks ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0 CHECK({column} IN (0,1));"));
+            }
+        }
+        if !has_column("artwork_images", "kind")? {
+            script.push_str("ALTER TABLE artwork_images ADD COLUMN kind TEXT NOT NULL DEFAULT 'OTHER'
+                CHECK(kind IN ('DETAIL','SIGNATURE','DIGITAL_MOCKUP','IN_SITU','OTHER','FRAMED','WORK_IN_PROGRESS'));");
+        }
+        script.push_str("PRAGMA user_version=14; COMMIT;");
+        conn.execute_batch(&script)?;
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -494,6 +512,30 @@ mod tests {
         let c = db.conn.lock().unwrap();
         let n: i64 = c.query_row("SELECT count(*) FROM collectors",[],|r| r.get(0)).unwrap();
         assert_eq!(n, 1);
+    }
+    #[test]
+    fn v14_migration_adds_flags_and_photo_kind_keeping_existing_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(dir.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES('a','A-1','Opera','t','t')", []).unwrap();
+            c.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at) VALUES('g','a','media/g.jpg','t')", []).unwrap();
+            c.execute_batch("ALTER TABLE artworks DROP COLUMN signed; ALTER TABLE artworks DROP COLUMN final_varnish;
+                ALTER TABLE artworks DROP COLUMN framed; ALTER TABLE artwork_images DROP COLUMN kind;").unwrap();
+            c.pragma_update(None, "user_version", 13).unwrap();
+        }
+        drop(db);
+        let db = open(dir.path().into()).unwrap();
+        let c = db.conn.lock().unwrap();
+        let flags: (bool, bool, bool) = c.query_row("SELECT signed,final_varnish,framed FROM artworks WHERE id='a'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(flags, (false, false, false));
+        let kind: String = c.query_row("SELECT kind FROM artwork_images WHERE id='g'", [], |r| r.get(0)).unwrap();
+        assert_eq!(kind, "OTHER");
+        assert!(c.execute("UPDATE artwork_images SET kind='ALTRO' WHERE id='g'", []).is_err(), "unknown kinds are refused by the database");
+        assert!(c.execute("UPDATE artworks SET signed=2 WHERE id='a'", []).is_err());
+        let version: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
     }
     #[test]
     fn foreign_keys_restrict_orphaned_sales() {

@@ -28,14 +28,14 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
     // carries its date; no historic record is silently omitted.
     let (header, query) = match kind {
         "artworks" => (
-            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at",
+            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at;signed;final_varnish;framed",
             "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,
-                    description,location,status,image_path,created_at,updated_at
+                    description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed
              FROM artworks ORDER BY code COLLATE NOCASE,id"
         ),
         "gallery" => (
-            "image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at",
-            "SELECT i.id,i.artwork_id,a.code,a.title,i.image_path,i.caption,i.sort_order,i.created_at
+            "image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at;kind",
+            "SELECT i.id,i.artwork_id,a.code,a.title,i.image_path,i.caption,i.sort_order,i.created_at,i.kind
              FROM artwork_images i JOIN artworks a ON a.id=i.artwork_id
              ORDER BY a.code COLLATE NOCASE,a.id,i.sort_order,i.created_at,i.id"
         ),
@@ -334,10 +334,10 @@ seconda riga','t','t')", []).unwrap();
         "#).unwrap();
         let csv = render_csv(&conn, "gallery").unwrap();
         assert!(csv.starts_with(
-            "\u{feff}image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at\r\n"
+            "\u{feff}image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at;kind\r\n"
         ));
-        let first = "\"first\";\"a\";\"A-1\";\"Opera\";\"media/first.png\";\"'=SUM(1;2)\";1;\"t\"";
-        let second = "\"second\";\"a\";\"A-1\";\"Opera\";\"media/second.jpg\";\"Seconda\";2;\"t\"";
+        let first = "\"first\";\"a\";\"A-1\";\"Opera\";\"media/first.png\";\"'=SUM(1;2)\";1;\"t\";\"OTHER\"";
+        let second = "\"second\";\"a\";\"A-1\";\"Opera\";\"media/second.jpg\";\"Seconda\";2;\"t\";\"OTHER\"";
         assert!(csv.contains(first), "{csv}");
         assert!(csv.contains(second), "{csv}");
         assert!(csv.find(first) < csv.find(second));

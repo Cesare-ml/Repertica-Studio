@@ -20,7 +20,7 @@ Gestionale artistico **gratuito, open source e locale**, realizzato con Angular 
 - **Backup automatico** (facoltativo): giornaliero, settimanale o mensile all'ora scelta, con verifica e conservazione opzionale delle ultime N copie.
 - **Offline**: SQLite incorporato e fotografie nella cartella privata dell'applicazione.
 - **Backup e ripristino**: selezione di qualsiasi cartella accessibile (anche disco esterno/NAS), backup SQLite e media con manifest SHA-256, verifica e ripristino con conservazione dell'archivio precedente.
-- **Aggiornamenti firmati**: architettura predisposta; da abilitare solo quando verrà configurata una chiave di firma e pubblicate release compatibili.
+- **Aggiornamenti automatici**: l'app riconosce da sola le nuove release su GitHub, avvisa, scarica, verifica la firma, installa e si riavvia dopo la tua conferma (con backup prima, se attivo). Attivi nelle build di release firmate; vedi [docs/RELEASING.md](docs/RELEASING.md).
 
 Non include **Sites**, login, sincronizzazione cloud, fatturazione fiscale, aste o invio dati a terzi.
 
@@ -73,7 +73,7 @@ Il workflow [macOS builds (Intel + Apple Silicon)](.github/workflows/build-macos
 2. Al termine, apri l'esecuzione e scarica gli artifact `repertica-macos-Apple-Silicon-...` e/o `repertica-macos-Intel-...`.
 3. Ogni artifact include il `.dmg` e il file SHA-256 per verificarlo.
 
-Il workflow esegue anche compilazioni sul branch `main` quando il codice dell'app cambia. I DMG sono **build di prova con firma ad hoc**, non notarizzate da Apple. macOS Gatekeeper potrebbe impedire l'apertura o mostrare avvisi: non presentarle come release pubbliche verificate. Nessuna release GitHub o aggiornamento automatico viene pubblicato da questa Action. Per una distribuzione ufficiale senza avvisi occorreranno Developer ID, notarizzazione e test su dispositivi reali.
+Il workflow esegue anche compilazioni sul branch `main` quando il codice dell'app cambia. I DMG sono **build di prova con firma ad hoc**, non notarizzate da Apple. macOS Gatekeeper potrebbe impedire l'apertura o mostrare avvisi: non presentarle come release pubbliche verificate. Nessuna release GitHub o aggiornamento automatico viene pubblicato da questa Action: le release ufficiali firmate escono dal workflow `Release` (tag `v*`). Per una distribuzione ufficiale senza avvisi occorreranno Developer ID, notarizzazione e test su dispositivi reali.
 
 ## Economia dello studio e lingue (in sviluppo)
 

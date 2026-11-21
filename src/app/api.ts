@@ -1,14 +1,14 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup,
-  NewArtworkInput, CodePolicy, McpClientStatus, CollectorImage, NewCollectorInput,
+  NewArtworkInput, PhotoKind, CodePolicy, McpClientStatus, CollectorImage, NewCollectorInput,
   AllocationPlan, AllocationPlanInput, BackupScheduleStatus, BackupScheduleInput,
   Installment, InstallmentLineInput, PlanLine,
   EditOperation, RawFile, MediaTag, MediaDetail, MediaPage, MediaCollection, MediaMetadataInput, PreviewData, ImportResult,
-  DuplicateGroup, SimilarPair, MediaExportOptions
+  DuplicateGroup, SimilarPair, MediaExportOptions, UpdateReply, DownloadProgress
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -27,6 +27,14 @@ export const api = {
   listArtworkGallery: (artworkId: string) => invoke<GalleryImage[]>('list_artwork_gallery', { artworkId }),
   addArtworkGalleryImageFromPath: (artworkId: string, sourcePath: string, caption: string | null) =>
     invoke<GalleryImage>('add_artwork_gallery_image_from_path', { artworkId, sourcePath, caption }),
+  checkForUpdate: () => invoke<UpdateReply>('check_for_update'),
+  installUpdate: (version: string, skipBackup: boolean, onProgress: (progress: DownloadProgress) => void) => {
+    const progress = new Channel<DownloadProgress>();
+    progress.onmessage = onProgress;
+    return invoke<UpdateReply>('install_update', { version, skipBackup, progress });
+  },
+  updateArtworkGalleryKind: (imageId: string, kind: PhotoKind) =>
+    invoke<GalleryImage>('update_artwork_gallery_kind', { imageId, kind }),
   updateArtworkGalleryCaption: (imageId: string, caption: string | null) =>
     invoke<GalleryImage>('update_artwork_gallery_caption', { imageId, caption }),
   promoteArtworkGalleryImage: (artworkId: string, imageId: string) =>
@@ -111,8 +119,8 @@ export const api = {
   mediaExactDuplicates: () => invoke<DuplicateGroup[]>('media_exact_duplicates'),
   mediaSimilar: () => invoke<SimilarPair[]>('media_similar'),
   artworkSetCoverFromMedia: (artworkId: string, mediaId: string) => invoke<void>('artwork_set_cover_from_media', { artworkId, mediaId }),
-  artworkAddGalleryFromMedia: (artworkId: string, mediaId: string, caption: string | null) =>
-    invoke<void>('artwork_add_gallery_from_media', { artworkId, mediaId, caption }),
+  artworkAddGalleryFromMedia: (artworkId: string, mediaId: string, caption: string | null, kind: PhotoKind = 'OTHER') =>
+    invoke<void>('artwork_add_gallery_from_media', { artworkId, mediaId, caption, kind }),
   listSaleInstallments: () => invoke<Installment[]>('list_sale_installments'),
   saveSaleInstallments: (saleId: string, items: InstallmentLineInput[]) =>
     invoke<void>('save_sale_installments', { saleId, items }),

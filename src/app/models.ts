@@ -16,10 +16,14 @@ export interface Artwork {
   image_path: string | null;
   created_at: string;
   updated_at: string;
+  /** The artist's signature is on the work. */
+  signed: boolean;
+  final_varnish: boolean;
+  framed: boolean;
 }
 export type ArtworkInput = Pick<Artwork,
   'title' | 'year' | 'technique' | 'support' | 'width_cm' |
-  'height_cm' | 'depth_cm' | 'description' | 'location' | 'status'
+  'height_cm' | 'depth_cm' | 'description' | 'location' | 'status' | 'signed' | 'final_varnish' | 'framed'
 > & { id?: string; code?: string | null };
 /** For a new artwork the archive code is assigned by the application. */
 export type NewArtworkRecord = ArtworkInput;
@@ -35,7 +39,7 @@ export type EditOperation =
   | { type: 'flip'; horizontal: boolean; vertical: boolean }
   | { type: 'adjust'; exposure: number; contrast: number; saturation: number };
 /** A picture of a new artwork: a file (optionally edited first) or an item of the library. */
-export interface PhotoSource { path?: string | null; media_id?: string | null; operations: EditOperation[]; }
+export interface PhotoSource { path?: string | null; media_id?: string | null; operations: EditOperation[]; kind?: PhotoKind; }
 export interface NewArtworkInput {
   artwork: NewArtworkRecord; cover: PhotoSource | null; gallery: PhotoSource[]; raw_path: string | null; sale: NewSaleInput | null;
 }
@@ -70,9 +74,21 @@ export interface CodePolicy {
   prefix: string; scope: 'GLOBAL' | 'YEARLY'; padding: number; separator: '-' | '.' | '_';
 }
 
+/** What an additional photograph shows (stable codes stored in the archive). */
+export type PhotoKind = 'DETAIL' | 'SIGNATURE' | 'DIGITAL_MOCKUP' | 'IN_SITU' | 'OTHER' | 'FRAMED' | 'WORK_IN_PROGRESS';
+/** Labels are Italian interface strings (translated with `tr`). */
+export const PHOTO_KINDS: { code: PhotoKind; label: string }[] = [
+  { code: 'DETAIL', label: 'Dettaglio' },
+  { code: 'SIGNATURE', label: 'Firma' },
+  { code: 'DIGITAL_MOCKUP', label: 'Mockup digitale' },
+  { code: 'IN_SITU', label: 'Opera ambientata' },
+  { code: 'FRAMED', label: 'Opera incorniciata' },
+  { code: 'WORK_IN_PROGRESS', label: 'Work in progress' },
+  { code: 'OTHER', label: 'Altro' },
+];
 export interface GalleryImage {
   id: string; artwork_id: string; image_path: string;
-  caption: string | null; created_at: string; sort_order: number;
+  caption: string | null; created_at: string; sort_order: number; kind: PhotoKind;
 }
 
 export type MediaProblem = 'unsafe_path' | 'missing' | 'unreadable' | 'not_regular' | 'invalid_size' | 'invalid_header' | 'invalid_snapshot';
@@ -210,3 +226,10 @@ export interface McpClientStatus {
   id: string; name: string; configPath: string; appFound: boolean; configured: boolean; upToDate: boolean; error: string | null;
 }
 export interface McpSetup { command: string; args: string[]; dataDir: string; }
+
+export interface UpdateReply {
+  status: 'available' | 'current' | 'not_configured' | 'check_failed' | 'invalid_release' | 'busy' | 'stale'
+    | 'backup_failed' | 'download_failed' | 'signature_invalid' | 'install_failed' | 'installing';
+  currentVersion: string; version: string | null; notes: string | null; date: string | null;
+}
+export interface DownloadProgress { downloaded: number; total: number | null; }

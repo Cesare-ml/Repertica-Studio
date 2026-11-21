@@ -101,6 +101,8 @@ pub struct PhotoSource {
     #[serde(default)] pub path: Option<String>,
     #[serde(default)] pub media_id: Option<String>,
     #[serde(default)] pub operations: Vec<Operation>,
+    /// Gallery photographs only: what the picture shows (see `gallery::PHOTO_KINDS`).
+    #[serde(default)] pub kind: Option<String>,
 }
 
 // ------------------------------------------------------------------ catalogue helpers
@@ -664,7 +666,8 @@ pub fn artwork_cover_from_media(db: &Database, artwork_id: &str, media_id: &str)
     Ok(())
 }
 
-pub fn artwork_gallery_from_media(db: &Database, artwork_id: &str, media_id: &str, caption: Option<String>) -> Result<(), String> {
+pub fn artwork_gallery_from_media(db: &Database, artwork_id: &str, media_id: &str, caption: Option<String>, kind: Option<String>) -> Result<(), String> {
+    let kind = crate::gallery::normalize_kind(kind.as_deref())?;
     sync_references(db)?;
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
@@ -678,9 +681,9 @@ pub fn artwork_gallery_from_media(db: &Database, artwork_id: &str, media_id: &st
         params![item.image_path], |r| r.get(0)).map_err(err)?;
     if in_use { return Err("Questa immagine è già usata in una galleria".into()); }
     let caption = clean_text(caption, 300)?;
-    tx.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,media_id)
-        VALUES(?1,?2,?3,?4,?5,(SELECT COALESCE(MAX(sort_order),0)+1 FROM artwork_images WHERE artwork_id=?2),?6)",
-        params![Uuid::new_v4().to_string(), artwork_id, item.image_path, caption, now(), media_id]).map_err(err)?;
+    tx.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,media_id,kind)
+        VALUES(?1,?2,?3,?4,?5,(SELECT COALESCE(MAX(sort_order),0)+1 FROM artwork_images WHERE artwork_id=?2),?6,?7)",
+        params![Uuid::new_v4().to_string(), artwork_id, item.image_path, caption, now(), media_id, kind]).map_err(err)?;
     tx.commit().map_err(err)
 }
 
@@ -774,8 +777,8 @@ pub async fn media_similar(app: tauri::AppHandle) -> Result<Vec<SimilarPair>, St
 #[tauri::command]
 pub fn artwork_set_cover_from_media(db: State<'_, Database>, artwork_id: String, media_id: String) -> Result<(), String> { artwork_cover_from_media(&db, &artwork_id, &media_id) }
 #[tauri::command]
-pub fn artwork_add_gallery_from_media(db: State<'_, Database>, artwork_id: String, media_id: String, caption: Option<String>) -> Result<(), String> {
-    artwork_gallery_from_media(&db, &artwork_id, &media_id, caption)
+pub fn artwork_add_gallery_from_media(db: State<'_, Database>, artwork_id: String, media_id: String, caption: Option<String>, kind: Option<String>) -> Result<(), String> {
+    artwork_gallery_from_media(&db, &artwork_id, &media_id, caption, kind)
 }
 
 #[cfg(test)]
@@ -1030,9 +1033,9 @@ mod tests {
         let second = dir.path().join("galleria.jpg");
         fs::write(&second, jpeg(20, 20, [1, 200, 1])).unwrap();
         let gallery_id = import_core(&db, &[second.to_string_lossy().into()]).unwrap().imported[0].id.clone();
-        artwork_gallery_from_media(&db, "a", &gallery_id, Some(" Dettaglio ".into())).unwrap();
-        assert!(artwork_gallery_from_media(&db, "a", &gallery_id, None).unwrap_err().contains("già usata"));
-        assert!(artwork_gallery_from_media(&db, "inesistente", &new_id, None).is_err());
+        artwork_gallery_from_media(&db, "a", &gallery_id, Some(" Dettaglio ".into()), Some("DETAIL".into())).unwrap();
+        assert!(artwork_gallery_from_media(&db, "a", &gallery_id, None, None).unwrap_err().contains("già usata"));
+        assert!(artwork_gallery_from_media(&db, "inesistente", &new_id, None, None).is_err());
         let caption: String = db.conn.lock().unwrap().query_row("SELECT caption FROM artwork_images", [], |r| r.get(0)).unwrap();
         assert_eq!(caption, "Dettaglio");
     }

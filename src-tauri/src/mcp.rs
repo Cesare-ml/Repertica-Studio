@@ -220,7 +220,7 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
     let c = &archive.conn;
     let found = c.query_row(
         "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,status,
-                image_path IS NOT NULL,created_at,updated_at
+                image_path IS NOT NULL,created_at,updated_at,signed,final_varnish,framed
          FROM artworks WHERE id=?1 OR code=?1 COLLATE NOCASE",
         params![key],
         |r| {
@@ -230,10 +230,11 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
                 [r.get::<_, Option<f64>>(6)?, r.get::<_, Option<f64>>(7)?, r.get::<_, Option<f64>>(8)?],
                 r.get::<_, Option<String>>(9)?, r.get::<_, String>(10)?,
                 r.get::<_, bool>(11)?, r.get::<_, String>(12)?, r.get::<_, String>(13)?,
+                [r.get::<_, bool>(14)?, r.get::<_, bool>(15)?, r.get::<_, bool>(16)?],
             ))
         },
     );
-    let (id, code, title, year, technique, support, size, description, status, has_cover, created, updated) =
+    let (id, code, title, year, technique, support, size, description, status, has_cover, created, updated, flags) =
         match found {
             Ok(v) => v,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Err("Opera non trovata".into()),
@@ -267,6 +268,7 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
         "id": id, "code": code, "title": title, "year": year, "technique": technique, "support": support,
         "height_cm": size[1], "width_cm": size[0], "depth_cm": size[2],
         "description": excerpt(&description, 8000), "status": status,
+        "signed": flags[0], "final_varnish_applied": flags[1], "framed": flags[2],
         "has_cover_photo": has_cover, "gallery_photo_count": gallery,
         "sale": sale, "certificates": certificates, "created_at": created, "updated_at": updated
     }))

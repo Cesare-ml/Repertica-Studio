@@ -23,7 +23,7 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 - La migrazione da PostgreSQL del Gestionale Opere non è ancora automatizzata.
 - Backup e ripristino locali ora disponibili in impostazioni, con snapshot SQLite e media, verifica SHA-256, integrità SQLite e copia di sicurezza prima del ripristino. La suite Rust (oltre 80 test, backup e ripristino compresi) è stata eseguita con successo su Windows 11 il 2026-11-21 e ora gira anche nella CI `windows-latest`; in precedenza 13 test di backup fallivano su Windows perché `manifest.json` restava aperto durante la rinomina della cartella. Mancano ancora test di accettazione dell'app installata su Windows/macOS e su dischi esterni/NAS reali; restano da sviluppare versionamento di immagini, gestione multivaluta, IVA, transazioni multi-opera e fatture.
 - Server MCP locale **in sola lettura** via STDIO (`Repertica Studio --mcp`), senza porte di rete e senza dati di contatto o fotografie: vedi [MCP.md](MCP.md). Resta da collaudare con assistenti reali (per esempio Claude Desktop) sui tre sistemi operativi.
-- Gli aggiornamenti firmati via GitHub Releases non vengono abilitati prima di release, generazione chiavi e test su tutte le piattaforme.
+- Gli aggiornamenti automatici sono implementati ma attivi solo nelle build di release con la chiave di firma del progetto (vedi [RELEASING.md](RELEASING.md)); il ciclo completo scarica → installa → riavvia va ancora provato con una release firmata reale.
 - Non usare ancora come archivio di produzione unico.
 
 ## Criteri minimi di collaudo
@@ -41,7 +41,7 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 1. Collaudo integrato su Windows/macOS/Linux, test su USB/NAS reali (il disco pieno è ora riconosciuto e segnalato con un messaggio chiaro, ma non è stato provato su un'unità realmente piena) (formato a cartelle versionate con manifest, non ZIP).
 2. Importazione opzionale e assistita dal Gestionale Opere, solo da export esplicito e con dati dell'utente.
 3. Migliorare certificati PDF, stampa e firma, ordinamento/gestione avanzata della galleria e ricerche avanzate.
-4. Aggiornamenti Tauri firmati via GitHub Release, solo dopo test end-to-end.
+4. Prova end-to-end degli aggiornamenti firmati con una release reale (chiavi e workflow sono pronti).
 5. Accessibilità, localizzazione completa e test UI desktop.
 
 ## Backup e ripristino (incremento 0.1.x)
@@ -116,3 +116,8 @@ Da collaudare su desktop reale: creazione di un'opera con più fotografie grandi
 - La sezione fotografie ha una copertina grande (anteprima completa, senza tagli), miniature per la galleria con modifica e rimozione, e il file RAW.
 - **Assistenti IA:** il collegamento con un clic ora vale per Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI e Visual Studio Code (vedi [MCP.md](MCP.md)).
 
+## Caratteristiche dell'opera, tipo di fotografia e aggiornamenti (schema v14)
+
+- **Caratteristiche:** tre caselle sulla scheda dell'opera, sia in creazione sia in modifica: **Opera firmata**, **Vernice finale applicata**, **Incorniciata**. Sono salvate come interi 0/1 con vincolo, partono da «no» per le opere esistenti, compaiono nel registro CSV `artworks`, nello snapshot dei certificati emessi dopo l'aggiornamento e nello strumento MCP `get_artwork`.
+- **Tipo di fotografia:** ogni fotografia aggiuntiva ha un tipo scelto tra Dettaglio, Firma, Mockup digitale, Opera ambientata, Opera incorniciata, Work in progress e Altro (predefinito). Si sceglie al momento dell'inserimento (nella finestra «Nuova opera» su ogni miniatura, nella galleria prima di aggiungere) e si cambia in qualsiasi momento dalla galleria. Il tipo è memorizzato come codice stabile (vincolato dal database, esportato nel registro `gallery`); se una fotografia diventa copertina, la vecchia copertina entra in galleria come «Altro».
+- **Aggiornamenti automatici:** controllo all'avvio e ogni 6 ore (disattivabile), avviso, download con avanzamento, verifica della firma, backup preventivo se il backup automatico è attivo, installazione e riavvio, sempre dopo conferma. Dettagli e configurazione delle chiavi in [RELEASING.md](RELEASING.md).
