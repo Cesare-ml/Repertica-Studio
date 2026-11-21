@@ -186,10 +186,39 @@ fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
     if value.files.len() > 1_000_000 { return Err("Troppi file nel backup".into()); }
     Ok(value)
 }
+// A manifest must describe every media file, including unreferenced historical
+// assets. Otherwise a restore would silently discard files present in the
+// selected archive. Reject directory links before hashing any media entry:
+// checking only the final file would follow a symlinked parent directory.
+fn check_media_directory(root: &Path) -> Result<(), String> {
+    let media = root.join("media");
+    let kind = fs::symlink_metadata(&media).map_err(error)?.file_type();
+    if !kind.is_dir() || kind.is_symlink() {
+        return Err("La cartella media del backup non è una directory regolare".into());
+    }
+    Ok(())
+}
+fn check_unlisted_media(root: &Path, recorded: &HashSet<String>) -> Result<(), String> {
+    for entry in fs::read_dir(root.join("media")).map_err(error)? {
+        let entry = entry.map_err(error)?;
+        let file_name = entry.file_name();
+        let name = file_name.to_str().ok_or("Nome file media non valido nel backup")?;
+        let kind = entry.file_type().map_err(error)?;
+        if !safe_filename(name) || !kind.is_file() || kind.is_symlink() {
+            return Err(format!("Elemento media non regolare nel backup: {}", entry.path().display()));
+        }
+        let relative = format!("media/{name}");
+        if !recorded.contains(&relative) {
+            return Err(format!("File media non presente nel manifest del backup: {relative}"));
+        }
+    }
+    Ok(())
+}
 pub fn inspect_backup_core(folder: &Path) -> Result<BackupSummary, String> {
     let directory = fs::canonicalize(folder).map_err(error)?;
     if !directory.is_dir() { return Err("Seleziona la cartella di un backup Repertica".into()); }
     let manifest = manifest_from_dir(&directory)?;
+    check_media_directory(&directory)?;
     let mut seen = HashSet::new();
     let mut total = 0_u64;
     for entry in &manifest.files {
@@ -203,6 +232,7 @@ pub fn inspect_backup_core(folder: &Path) -> Result<BackupSummary, String> {
         total = total.checked_add(entry.bytes).ok_or("Dimensione del backup non valida")?;
     }
     if !seen.contains(DB_FILE) { return Err("Database assente nel backup".into()); }
+    check_unlisted_media(&directory, &seen)?;
     let (schema, counts, references) = validate_snapshot(&directory.join(DB_FILE))?;
     if schema != manifest.schema_version { return Err("Inconsistent backup schema version".into()); }
     for ref_path in references {
@@ -616,6 +646,45 @@ mod tests {
         assert!(restore_backup_core(&db, Path::new(&backup.directory)).is_err());
         assert!(db.directory.join(DB_FILE).is_file());
     }
+    #[test]
+    fn unlisted_media_is_rejected_before_restore_and_live_archive_stays_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let external = tmp.path().join("external");
+        fs::create_dir(&external).unwrap();
+        let backup = create_backup_core(&db, &external).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+        // An orphan file is not referenced by SQLite, so checking only the
+        // database and manifest hashes would previously miss this data loss.
+        fs::write(folder.join("media/orphan.bin"), b"do not silently lose me").unwrap();
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("media/orphan.bin"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        assert_eq!(fs::read(db.directory.join("media/example.png")).unwrap(), vec![1,2,3,4]);
+        assert!(!db.directory.join("media/orphan.bin").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_backup_media_directory_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let external = tmp.path().join("external");
+        fs::create_dir(&external).unwrap();
+        let backup = create_backup_core(&db, &external).unwrap();
+        let folder = Path::new(&backup.directory);
+        let actual_media = tmp.path().join("outside-media");
+        fs::rename(folder.join("media"), &actual_media).unwrap();
+        std::os::unix::fs::symlink(&actual_media, folder.join("media")).unwrap();
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("directory regolare"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        assert!(db.directory.join("media/example.png").is_file());
+    }
+
     #[test]
     fn incomplete_or_outside_media_paths_are_rejected() {
         assert!(!valid_record_path("../secret"));
