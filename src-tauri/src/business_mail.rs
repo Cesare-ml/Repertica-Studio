@@ -467,13 +467,12 @@ pub async fn mail_send(db:State<'_,Database>,input:MailSendInput)->Result<MailSe
         let mailbox:Mailbox=if account.display_name.trim().is_empty(){account.email.parse()}
             else{format!("{} <{}>",account.display_name.replace(['<','>'], ""),account.email).parse()}
             .map_err(|_|"Mittente non valido".to_string())?;
-        let mut builder=Message::builder().from(mailbox).subject(&input.subject)
-            .header(ContentType::TEXT_PLAIN);
+        let mut builder=Message::builder().from(mailbox).subject(&input.subject);
         for address in to {builder=builder.to(address.parse().map_err(|_|"Destinatario non valido".to_string())?);}
         for address in cc {builder=builder.cc(address.parse().map_err(|_|"Destinatario CC non valido".to_string())?);}
         for address in bcc {builder=builder.bcc(address.parse().map_err(|_|"Destinatario CCN non valido".to_string())?);}
         let message=if attachments.is_empty(){
-            builder.body(input.body)
+            builder.header(ContentType::TEXT_PLAIN).body(input.body)
         }else{
             let mut multipart=MultiPart::mixed().singlepart(SinglePart::plain(input.body));
             for (name,bytes,content_type) in attachments {
