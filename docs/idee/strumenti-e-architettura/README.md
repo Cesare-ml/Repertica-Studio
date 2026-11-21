@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (sesta ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (settima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -15,6 +15,7 @@ Data ricognizione: **2026-11-21** (sesta ricognizione). Stato uniforme: **Propos
 | [REPS-TECH-007](REPS-TECH-007-archivio-media-esterno-rilocalizzabile.md) | Archivio degli originali fotografici in cartella esterna opzionale, con migrazione verificata e backup sempre autosufficiente | P2 | Proposta — da valutare |
 | [REPS-TECH-008](REPS-TECH-008-viste-salvate-filtri-ricerca-locale.md) | Viste nominative, filtri combinati e ricerca strutturata nell'archivio attivo (non federazione) | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-009](REPS-TECH-009-catalogo-verifiche-conservazione-backup.md) | Catalogo, verifica nel tempo e conservazione prudente delle copie di backup complete | P2 | Proposta — da valutare |
+| [REPS-TECH-010](REPS-TECH-010-storico-revisioni-metadati.md) | Cronologia locale delle revisioni dei metadati delle opere e recupero selettivo, senza alterare certificati o vendite | P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -67,10 +68,18 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 - **Convalide e dipendenze:** raccogliere volumi realistici, filesystem e frequenza di backup; effettuare prima i collaudi nativi e su supporti esterni previsti dalla issue #7; verificare su Windows/macOS/Linux che la scansione non segua symlink e che non si cancellino file estranei. Priorità proposta P2, non confermata.
 - **Coordinamento:** confrontate le tredici schede UX-001…013 della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) e tutte le precedenti schede TECH-001…008. Nessun file dell'altro filone è stato modificato. Stato invariato: **Proposta — da valutare**; nessuna approvazione, commit software o merge.
 
+## Settima ricognizione — 21 novembre 2026
+
+- **[REPS-TECH-010](REPS-TECH-010-storico-revisioni-metadati.md) — Cronologia locale delle revisioni:** si propone la consultazione dei precedenti valori **editoriali** delle schede d'opera e, soltanto in una fase successiva, un recupero **selettivo e confermato** dei campi, con tracciamento atomico delle modifiche. Nel `main` attuale (schema SQLite **v5**), `save_artwork` e `save_collector` sovrascrivono i valori aggiornando `updated_at`, senza mantenere una cronologia delle versioni; il backup opera invece a livello **dell'intero archivio**.
+- **Confine funzionale:** non duplica TECH-009 (inventario e verifica backup), TECH-001 (interscambio), TECH-003 (integrità dei file), TECH-008 (filtri). Non è la provenienza/movimentazione fisica UX-001, il rapporto di condizione UX-004 o la rettifica commerciale UX-013 della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). I certificati già emessi restano **immutabili**; cambiare un campo non prova l'avvenuto spostamento o l'autore umano della modifica.
+- **Salvaguardie chiave:** prima fase riservata ai **metadati delle opere**, senza copiatura automatica di recapiti dei collezionisti o byte delle fotografie. Non sostituisce backup e non promette di recuperare record o file eliminati. Ripristinare un campo significa **nuova revisione con confronto preventivo**, mai cancellazione della storia; evitare sovrascritture concorrenti e violazioni del vincolo sulle opere vendute.
+- **Convalide necessarie:** raccogliere esempi reali di errori di catalogazione; misurare costi/volumi e valutare retention/privacy; test transazionali, migrazioni da archivi senza cronologia e backup/restore nativi. Priorità **P2 soltanto suggerita**.
+- **Coordinamento e perimetro:** esaminate le 14 proposte UX-001…014, tutte le precedenti TECH-001…009, le issue aperte e `main` del 21/11/2026. Modificati solo file Markdown di questa cartella; nessuna modifica alla cartella UX, al codice, ai workflow, alle dipendenze o alle configurazioni. **Proposta — da valutare**, senza assegnazione, approvazione o merge.
+
 ## Regole per le prossime ricognizioni
 
 1. Consultare `main`, issue e PR aperte; confrontare le schede di entrambi i filoni prima di aggiungerne altre. Se un problema è già risolto, aggiornare la scheda indicando il cambiamento, non produrre un doppione.
-2. Assegnare ID successivi `REPS-TECH-009`, `010`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
+2. Assegnare ID successivi `REPS-TECH-011`, `012`, ecc., **mai rinumerare** schede citate altrove. Mantenere titolo, data, stato, requisiti verificati/ipotesi/decisioni e collegamenti ai limiti correnti.
 3. Valutare sempre dati personali, assenza di lock-in, formati aperti, multilingua (lingua OS, fallback inglese), funzionamento offline-first, assenza di account o abbonamenti e scelta libera della cartella.
 4. Modificare **solo Markdown dentro questa cartella**, usando un branch e una PR esclusivamente documentali. Non toccare `docs/idee/gestione-e-ux/`; niente merge automatici, modifiche al codice, issue operative o assegnazioni implicite.
 5. Se emergono trade-off inconciliabili, registrarli come domanda al proprietario: non decidere in sua vece.
