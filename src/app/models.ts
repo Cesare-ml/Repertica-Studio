@@ -34,7 +34,7 @@ export interface Sale {
   artwork_title: string; collector_name: string; created_at: string;
 }
 export interface SaleInput {
-  artwork_id: string; collector_id: string; amount_cents: number; sold_at: string; notes: string | null;
+  artwork_id: string; collector_id: string; amount_cents: number; sold_at: string; notes: string | null; tax_cents: number; shipping_cents: number;
 }
 export interface Certificate {
   id: string; artwork_id: string; serial: string; issued_at: string;
@@ -54,3 +54,30 @@ export interface BackupSummary {
   schemaVersion: number; verified: boolean;
 }
 export interface RestoreSummary { restored: BackupSummary; previousArchive: string }
+
+export interface StudioSettings {
+  artist_coefficient: number;
+  base_price_cm2_cents: number;
+  personal_bp: number;
+  activity_bp: number;
+  savings_bp: number;
+  treasury_start_date: string | null;
+  default_tax_bp: number;
+  ui_language: 'it' | 'en' | 'es' | 'fr' | 'de' | null;
+}
+export interface Expense {
+  id:string; expense_date:string; category:string; description:string;
+  amount_cents:number; fund:'activity'|'savings'; supplier:string|null;
+  purchase_url:string|null; notes:string|null; created_at:string;updated_at:string;
+}
+export type ExpenseInput = Pick<Expense,'expense_date'|'category'|'description'|'amount_cents'|'fund'|'supplier'|'purchase_url'|'notes'> & {id?:string};
+export interface MonthlyFinance {
+  month:string; gross_cents:number; taxes_cents:number; shipping_cents:number; net_cents:number;
+  expense_cents:number; margin_cents:number; personal_cents:number; activity_cents:number;
+  savings_cents:number; activity_expenses_cents:number; savings_expenses_cents:number;
+}
+export interface FinanceOverview {
+  year:number; months:MonthlyFinance[]; gross_cents:number; net_cents:number;
+  expense_cents:number; margin_cents:number; personal_cents:number;
+  activity_balance_cents:number; savings_balance_cents:number;
+}

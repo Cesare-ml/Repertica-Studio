@@ -92,6 +92,7 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
                 savings_bp INTEGER NOT NULL DEFAULT 3333 CHECK(savings_bp BETWEEN 0 AND 10000),
                 treasury_start_date TEXT,
                 default_tax_bp INTEGER NOT NULL DEFAULT 0 CHECK(default_tax_bp BETWEEN 0 AND 10000),
+                ui_language TEXT CHECK(ui_language IS NULL OR ui_language IN ('it','en','es','fr','de')),
                 CHECK(personal_bp + activity_bp + savings_bp = 10000)
             );
             INSERT INTO studio_settings(singleton) VALUES(1);
