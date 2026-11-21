@@ -413,7 +413,7 @@ mod tests {
         let order:Vec<(String,i64,String)> = stmt.query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))
             .unwrap().map(Result::unwrap).collect();
         assert_eq!(order,vec![("back".into(),1,"back".into()),("detail".into(),2,"detail".into())]);
-        assert_eq!(fs::read(db.directory.join("media/detail.png")).unwrap(),b"detail");
+        assert_eq!(fs::read(db.directory.join("media/detail.png")).unwrap(),b"detail".to_vec());
     }
     #[test]
     fn gallery_media_is_backed_up_and_verified_by_reference() {
