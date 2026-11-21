@@ -9,7 +9,8 @@ test('brochure documents persist locally with additive schema and native command
   const rust = read('src-tauri/src/brochures.rs');
   const lib = read('src-tauri/src/lib.rs');
   const api = read('src/app/api.ts');
-  assert.match(db, /SCHEMA_VERSION: i64 = 15/);
+  assert.match(db, /SCHEMA_VERSION: i64 = \d+/);
+  assert.match(db, /if version < 15/);
   assert.match(db, /CREATE TABLE IF NOT EXISTS brochures/);
   assert.match(db, /payload_json TEXT NOT NULL/);
   for (const command of ['list_brochures', 'save_brochure', 'delete_brochure', 'export_brochure_pdf']) {
