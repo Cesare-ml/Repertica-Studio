@@ -1,0 +1,46 @@
+# Economy and localization (v0.2 development increment)
+
+## Financial vocabulary and source
+
+Based on the **local** domains of `Gestionale-Opere` (treasury, `uscite_finanziarie`, `categorie_uscite`, artist coefficient).
+
+- **Artist coefficient** is an area-pricing multiplier, not the traditional Italian `(width+height)*coefficient*10` formula. Suggested price = width × height × price per cm² × multiplier.
+- **Gross sales** are registered sales, **not bank receipts**.
+- **Net sales** = gross minus recorded tax and shipping amounts.
+- **Margin** = net sales minus recorded expenses; not a certified tax/accounting profit.
+- **Allocation** divides each sale's net amount among personal, activity and savings by percentages that sum to exactly 100%.
+- Allocations use basis points and integer cents; the savings share absorbs any rounding remainder so the shares always sum to the net amount.
+- Allocation percentages are copied into `sale_finances` when a sale is entered. Later changes in settings affect **new** sales, not historic ones.
+- Expenses are assigned to activity or savings, with date, category (e.g. painting supplies, shipping, equipment, marketing), description, supplier and optional purchase link.
+- Monthly statistics group sales by their recorded sale date and expenses by their expense date; they do **not** claim money has been collected or paid. Future versions can separate receivables and actual cash movements.
+- `treasury_start_date` optionally filters summary calculations; it does not delete past data.
+
+## SQLite migration
+
+Schema 1 → 2 is additive and creates `studio_settings`, `sale_finances`, `expenses`.
+Existing sales receive historic default shares 33.34% / 33.33% / 33.33% and zero recorded taxes/shipping because those fields were not previously available. No inferred historic tax or shipping.
+An existing v1 database is automatically migrated on startup; `PRAGMA user_version` is updated transactionally.
+The backup manifest supports schema v1 and v2; v1 backups can be restored and migrated at startup.
+
+## Localization
+
+- Tauri OS locale plugin reads the system locale, with `navigator.language` as fallback.
+- Supported selections: English, Italian, Spanish, French, German.
+- Unknown or unsupported locale resolves to English. In a supported locale, untranslated strings fall back to English.
+- Language override in Settings persists in local SQLite (null = system), no network.
+- UI dictionaries are deliberately in source control. New frontend text needs an English translation.
+- Technical SQLite/Rust errors should eventually become stable error codes to be localized by clients; the current MVP still contains some Italian legacy errors.
+
+## Scope
+
+Offline-only. No Sites, SaaS, AI API, server billing, external account, invoicing, tax filing, banking or receipt reconciling. Data stays in the local SQLite archive and is included in backup snapshots.
+
+## Test acceptance criteria
+
+1. Existing v1 archive migrates safely; rollback on error, v1 backups accepted.
+2. Invalid share allocations are rejected; accepted values add to exactly 100%.
+3. Sales capture allocations; later settings changes do not rewrite old sale snapshots.
+4. 12 monthly rows, correct gross/net/expense/margin and no automatic receipt claims.
+5. Expenses can be entered, edited, removed and appear in reports.
+6. OS language uses correct language or English fallback; override survives restart.
+7. Build Angular, Rust tests, macOS DMGs; verify native visual behavior.
