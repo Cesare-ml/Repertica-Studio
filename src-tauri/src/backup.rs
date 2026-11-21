@@ -121,14 +121,19 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     ).map_err(error)?;
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
-    if !(1..=2).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    if !(1..=3).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
     let mut counts = [0_i64; 4];
     for (i, table) in ["artworks", "collectors", "sales", "certificates"].iter().enumerate() {
         counts[i] = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).map_err(error)?;
     }
     let mut statement = conn.prepare("SELECT image_path FROM artworks WHERE image_path IS NOT NULL").map_err(error)?;
-    let references = statement.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
+    let mut references = statement.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
         .collect::<Result<Vec<_>, _>>().map_err(error)?;
+    if schema >= 3 {
+        let mut gallery = conn.prepare("SELECT image_path FROM artwork_images").map_err(error)?;
+        references.extend(gallery.query_map([], |r| r.get::<_, String>(0)).map_err(error)?
+            .collect::<Result<Vec<_>, _>>().map_err(error)?);
+    }
     Ok((schema, counts, references))
 }
 fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
@@ -138,7 +143,7 @@ fn manifest_from_dir(dir: &Path) -> Result<Manifest, String> {
         return Err("Manifest del backup troppo grande".into());
     }
     let value: Manifest = serde_json::from_slice(&fs::read(&manifest_path).map_err(error)?).map_err(error)?;
-    if value.format != FORMAT || value.format_version != FORMAT_VERSION || !(1..=2).contains(&value.schema_version) {
+    if value.format != FORMAT || value.format_version != FORMAT_VERSION || !(1..=3).contains(&value.schema_version) {
         return Err("Questo backup non è compatibile con Repertica Studio".into());
     }
     if value.files.len() > 1_000_000 { return Err("Troppi file nel backup".into()); }
