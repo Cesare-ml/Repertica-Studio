@@ -154,10 +154,45 @@ fn data_core(db: &Database, receipt_id: &str) -> Result<String, String> {
     }
     Ok(format!("data:{};base64,{}", attachment.mime_type, STANDARD.encode(bytes)))
 }
-// Removal occurs only for files stored with the generated receipt-UUID path.
+// Imported or manually edited archives can point an artwork, collector, RAW,
+// catalogue revision or historical certificate at a receipt-named file.
+// Removing the receipt must never destroy media still used elsewhere. An unreadable
+// certificate snapshot is conservatively treated as a possible reference.
+fn referenced_elsewhere(
+    conn: &rusqlite::Connection, relative: &str, receipt_id: &str,
+) -> Result<bool, String> {
+    let linked: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sale_receipt_attachments
+            WHERE media_path=?1 AND receipt_id<>?2)
+          OR EXISTS(SELECT 1 FROM artworks WHERE image_path=?1)
+          OR EXISTS(SELECT 1 FROM artwork_images WHERE image_path=?1)
+          OR EXISTS(SELECT 1 FROM collector_images WHERE image_path=?1)
+          OR EXISTS(SELECT 1 FROM media_revisions WHERE image_path=?1)
+          OR EXISTS(SELECT 1 FROM artwork_raw_files WHERE media_path=?1)",
+        params![relative, receipt_id], |r| r.get(0),
+    ).map_err(err)?;
+    if linked { return Ok(true); }
+
+    let mut statement = conn.prepare("SELECT snapshot_json FROM certificates").map_err(err)?;
+    let snapshots = statement.query_map([], |r| r.get::<_, String>(0)).map_err(err)?;
+    for snapshot in snapshots {
+        let value: serde_json::Value = match serde_json::from_str(&snapshot.map_err(err)?) {
+            Ok(value) => value,
+            Err(_) => return Ok(true),
+        };
+        let Some(fields) = value.as_object() else { return Ok(true); };
+        match fields.get("image_path") {
+            Some(serde_json::Value::String(path)) if path == relative => return Ok(true),
+            Some(serde_json::Value::String(_)) | Some(serde_json::Value::Null) | None => {}
+            Some(_) => return Ok(true),
+        }
+    }
+    Ok(false)
+}
+
 // An I/O failure after the database commit is reported explicitly: the orphan
 // remains in media/ and is retained by full backups, never silently discarded.
-pub(crate) fn cleanup_unlinked(db: &Database, relative: &str) -> Result<(), String> {
+fn cleanup_unlinked(db: &Database, relative: &str) -> Result<(), String> {
     if !safe_media_path(relative) { return Err("Percorso allegato non sicuro: file conservato".into()); }
     media_directory(db)?;
     let path = db.directory.join(relative);
@@ -174,8 +209,13 @@ fn detach_core(db: &Database, receipt_id: &str) -> Result<(), String> {
         params![receipt_id], |r| r.get(0),
     ).optional().map_err(err)?.ok_or("Allegato non trovato")?;
     if !safe_media_path(&relative) { return Err("Percorso allegato non sicuro".into()); }
+    // Check the directory and all other references BEFORE modifying SQLite.
+    // If the media directory was replaced or a query fails, retain the link.
+    media_directory(db)?;
+    let still_used = referenced_elsewhere(&conn, &relative, receipt_id)?;
     conn.execute("DELETE FROM sale_receipt_attachments WHERE receipt_id=?1", params![receipt_id])
         .map_err(err)?;
+    if still_used { return Ok(()); }
     cleanup_unlinked(db, &relative)
 }
 #[tauri::command]
@@ -294,6 +334,71 @@ mod tests {
             assert!(attach_core(&db, "r", &alias).is_err());
         }
     }
+    #[test]
+    fn detaching_a_reused_receipt_file_preserves_artwork_and_collector_media() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("evidence.pdf");
+        fs::write(&source, b"%PDF-1.7\nevidence").unwrap();
+        let attachment = attach_core(&db, "r", &source).unwrap();
+        let stored = db.directory.join(&attachment.media_path);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE artworks SET image_path=?1 WHERE id='a'",
+                params![&attachment.media_path]).unwrap();
+            conn.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at)
+                 VALUES('shared','c','PHOTO',?1,'t')",
+                params![&attachment.media_path]).unwrap();
+        }
+        detach_core(&db, "r").unwrap();
+        assert!(get_core(&db, "r").unwrap().is_none());
+        assert!(stored.exists(), "a reused file must survive detaching one receipt");
+        assert_eq!(fs::read(stored).unwrap(), b"%PDF-1.7\nevidence");
+    }
+
+    #[test]
+    fn malformed_certificate_history_never_authorizes_receipt_file_deletion() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("proof.pdf");
+        fs::write(&source, b"%PDF-1.7\nevidence").unwrap();
+        let attachment = attach_core(&db, "r", &source).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                 VALUES('cert','a','CERT-1','2026-11-21','Artist','{','t')", []
+            ).unwrap();
+        }
+        detach_core(&db, "r").unwrap();
+        assert!(get_core(&db, "r").unwrap().is_none());
+        assert!(db.directory.join(attachment.media_path).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_replaced_media_directory_cannot_unlink_a_receipt_in_sqlite() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("proof.pdf");
+        fs::write(&source, b"%PDF-1.7\nevidence").unwrap();
+        let attachment = attach_core(&db, "r", &source).unwrap();
+        let media = db.directory.join("media");
+        let original = db.directory.join("media-saved");
+        fs::rename(&media, &original).unwrap();
+        let external = tmp.path().join("external");
+        fs::create_dir(&external).unwrap();
+        std::os::unix::fs::symlink(&external, &media).unwrap();
+        assert!(detach_core(&db, "r").is_err());
+        assert!(get_core(&db, "r").unwrap().is_some(), "SQL link must survive unsafe media");
+        let filename = Path::new(&attachment.media_path).file_name().unwrap();
+        assert!(original.join(filename).exists());
+        assert_eq!(fs::read_dir(&external).unwrap().count(), 0);
+    }
+
     #[test]
     fn backup_rejects_missing_receipt_file_even_with_matching_manifest() {
         let tmp = tempfile::tempdir().unwrap();
