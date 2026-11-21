@@ -223,7 +223,8 @@ test('the local MCP server can be registered in several assistants, including Co
 
 test('artwork flags and the type of additional photographs are stored, exported and editable', () => {
   const db = get('src-tauri/src/db.rs');
-  assert.match(db, /SCHEMA_VERSION: i64 = 14/);
+  assert.match(db, /SCHEMA_VERSION: i64 = \d+/);
+  assert.match(db, /if version < 14/);
   for (const column of ['signed', 'final_varnish', 'framed']) assert.ok(db.includes(`"${column}"`), column);
   assert.match(db, /kind IN \('DETAIL','SIGNATURE','DIGITAL_MOCKUP','IN_SITU','OTHER','FRAMED','WORK_IN_PROGRESS'\)/);
   assert.match(get('src-tauri/src/lib.rs'), /gallery::update_artwork_gallery_kind/);
