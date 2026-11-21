@@ -27,3 +27,9 @@ Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** co
 ## Collaudo
 
 `cargo test --manifest-path src-tauri/Cargo.toml` include test per UUID, campi storici dei certificati, quote di escaping, importi e dimensioni, creazione senza sovrascrittura e divieto di scrivere nell'archivio interno. Eseguire una prova desktop reale su Windows/macOS/Linux con file grandi e cartelle rimovibili prima di una release stabile.
+
+## Fotografie storiche dei certificati nei backup
+
+Il certificato conserva uno snapshot immutabile della scheda al momento dell'emissione. Quando l'immagine principale viene sostituita, il file originale può non comparire più né nella scheda attuale né nella galleria: rimane però necessario per il certificato storico. La verifica del backup controlla ora anche i percorsi `image_path` presenti negli snapshot JSON **validi** dei certificati. Un backup che ometta una di queste immagini viene rifiutato **prima** di sostituire l'archivio attivo, anche se SQLite e tutti gli hash dei file ancora elencati nel manifest risultano corretti.
+
+I file storici sono copiati nel backup insieme agli altri media. Gli snapshot storici malformati, che possono esistere in vecchi archivi, vengono conservati senza tentare di dedurne percorsi: non è possibile certificare automaticamente le loro immagini. Il controllo non recupera fotografie già eliminate; per quelle occorre una copia precedente. Il ripristino richiede sempre collaudo desktop reale da dischi esterni e NAS.
