@@ -35,7 +35,7 @@ fn row(r: &Row<'_>) -> rusqlite::Result<ReceiptAttachment> {
         size_bytes: r.get(4)?, sha256: r.get(5)?, created_at: r.get(6)?,
     })
 }
-fn mime(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+pub(crate) fn mime(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
     if bytes.starts_with(b"%PDF-") { Some(("pdf", "application/pdf")) }
     else if bytes.starts_with(&[0xff,0xd8,0xff]) { Some(("jpg", "image/jpeg")) }
     else if bytes.starts_with(&[137,80,78,71,13,10,26,10]) { Some(("png", "image/png")) }
@@ -43,7 +43,7 @@ fn mime(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
         Some(("webp", "image/webp"))
     } else { None }
 }
-fn safe_media_path(relative: &str) -> bool {
+pub(crate) fn safe_media_path(relative: &str) -> bool {
     let mut parts = Path::new(relative).components();
     if !matches!(parts.next(), Some(Component::Normal(dir)) if dir == "media") {
         return false;
