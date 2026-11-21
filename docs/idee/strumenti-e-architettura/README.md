@@ -11,6 +11,7 @@ Data ricognizione: **2026-11-21**. Stato uniforme: **Proposta — da valutare**.
 | [REPS-TECH-003](REPS-TECH-003-diagnostica-integrita-media.md) | Diagnostica dei media e recupero assistito negli archivi grandi | P2 | Proposta — da valutare |
 | [REPS-TECH-004](REPS-TECH-004-ricerca-federata-archivi-locali.md) | Consultazione federata di più archivi locali senza fusione | P2 | Proposta — da valutare |
 | [REPS-TECH-005](REPS-TECH-005-anteprime-media-grandi-archivi.md) | Anteprime derivate e cancellabili per raccolte fotografiche numerose | P2 | Proposta — da valutare |
+| [REPS-TECH-006](REPS-TECH-006-backup-cifrati-portabili.md) | Backup cifrati facoltativi, con recupero su altri dispositivi e formato versionato | P1–P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -33,6 +34,13 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 - **Aggiornamento `main`:** esportazione CSV di opere, collezionisti e certificati aggiunta dopo la precedente ricognizione (PR #18 integrata), oltre a vendite e spese; nessuno dei cinque CSV è un formato di reimportazione o backup completo.
 - **Coordinamento:** [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) contiene UX-001…UX-005; nessun file dell'altro filone viene modificato o considerato approvato.
 - **Prudenza:** entrambe le nuove proposte sono P2 ipotetiche; richiedono convalida dei casi d'uso, benchmark o interviste prima di ogni decisione.
+
+## Terza ricognizione — 21 novembre 2026
+
+- **REPS-TECH-006:** i backup attuali sono completi, verificati e ripristinabili ma **in chiaro**. La nuova scheda valuta backup **facoltativamente cifrati**, con segreto portabile tra dispositivi, contenitore autenticato, verifica integrale e ripristino isolato prima della sostituzione dell'archivio.
+- **Confini:** non modifica né sostituisce il backup ordinario; non propone la cifratura del database attivo; non duplica la portabilità semantica TECH-001, l'integrità dei media TECH-003, la ricerca federata TECH-004 o la proposta di dossier UX-007 della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14).
+- **Rischi e decisioni:** se la frase segreta va perduta, la copia cifrata potrebbe essere irrecuperabile; la soluzione richiede analisi del rischio, confronto con BitLocker/FileVault/LUKS e revisione crittografica indipendente **prima** di qualunque approvazione.
+- **Stato:** *Proposta — da valutare*. Nessuna modifica software, approvazione, incarico agli sviluppatori o merge.
 
 ## Regole per le prossime ricognizioni
 
