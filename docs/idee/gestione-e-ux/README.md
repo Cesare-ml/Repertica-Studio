@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (nona ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (decima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -22,6 +22,7 @@ Aggiornato: **2026-11-21** (nona ricognizione). Stato delle proposte: **Proposta
 | [REPS-UX-014](REPS-UX-014-rubrica-relazioni-professionali.md) | Rubrica soggetti professionali, ruoli multipli e storico contatti trasversale | P1–P2 | Proposta — da valutare |
 | [REPS-UX-015](REPS-UX-015-ricognizioni-inventariali-discrepanze.md) | Ricognizioni inventariali e discrepanze di presenza fisica delle opere | P1–P2 | Proposta — da valutare |
 | [REPS-UX-016](REPS-UX-016-valutazioni-coperture-assicurative-scadenze.md) | Valutazioni documentate e riferimenti a coperture assicurative dichiarate, con scadenze da verificare | P2 | Proposta — da valutare |
+| [REPS-UX-017](REPS-UX-017-vendita-multiopera-ripartizione-importi.md) | Vendite con più opere, riepilogo unitario e ripartizione esplicita degli importi | P1–P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -118,3 +119,13 @@ Riletti il `main` (README, MVP, ECONOMY-I18N, DATA-PORTABILITY, `src-tauri/src/m
 ## Sequenza di valutazione suggerita (non autorizzazione)
 
 Discutere per prime le esigenze davvero ricorrenti: **movimenti e custodia** (001), **trattative e prenotazioni** (002), **costi analitici** (003). Valutare separatamente l'interesse per **rilievi conservativi** (004), **edizioni e multipli** (005) e **incarichi su richiesta** (006), processi potenzialmente specialistici. Esaminare **dossier di presentazione** (007) quando è chiaro quali dati gli utenti desiderano condividere e quali debbano rimanere privati. Infine valutare **scorte e consumi materiali** (008) soltanto se acquisti e giacenze ricorrenti sono una necessità reale, e **progetti espositivi** (009) soltanto se l'organizzazione di mostre è abbastanza frequente da giustificare un modulo dedicato. Considerare **diritti e crediti di riproduzione** (010) solo dopo una verifica dei casi di pubblicazione più comuni, e **cicli creativi/relazioni fra opere uniche** (011) solo se i semplici filtri testuali sono insufficienti. Infine esaminare **conto vendita/intermediari** (012) se una quota significativa degli utenti opera tramite gallerie; la **tracciabilità di resi e annullamenti** (013) merita valutazione anticipata se si prevedono vendite reali con acconti, dato il rischio di perdere la storia delle rettifiche. La **rubrica trasversale dei contatti professionali** (014) è da valutare solo se i casi reali di curatori, fornitori e gallerie dimostrano i limiti dell'anagrafica collezionisti attuale; evitare un CRM pesante senza evidenze. La **ricognizione inventariale** (015) dovrebbe prima essere provata con professionisti che controllano materialmente opere, per accertare se semplici filtri e note siano insufficienti. La **gestione documentale di valori e coperture** (016) va esaminata soltanto se prestiti, trasporti e richieste assicurative risultano frequenti, evitando di trasformare il gestionale in un comparatore di polizze. La sequenza e le priorità sono opinioni progettuali, **non un piano approvato**.
+
+
+## Decima ricognizione — 21 novembre 2026
+
+Confrontati nuovamente `main` ([README](../../../README.md), [MVP](../../MVP.md), [economia e lingue](../../ECONOMY-I18N.md), [incassi](../../SALE-RECEIPTS.md), `src/app/models.ts`, `src-tauri/src/db.rs` e `src-tauri/src/commands.rs`), le sedici schede gestionali e l'[indice delle dodici proposte tecniche nella PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). È stata approfondita **una** lacuna professionale già menzionata in `docs/MVP.md` come possibile evoluzione, senza considerarla approvata.
+
+- **[REPS-UX-017](REPS-UX-017-vendita-multiopera-ripartizione-importi.md) — Vendite con più opere:** un accordo commerciale può comprendere più opere e un prezzo complessivo. La proposta esamina registrazione atomica, sconti ripartiti con arrotondamenti esatti, riepilogo per cliente, saldi degli incassi manualmente dichiarati e protezione delle quote finanziarie storiche. Il totale di gruppo non deve mai aggiungersi di nuovo ai ricavi delle singole vendite.
+- **Evitati i doppioni:** UX-002 riguarda trattative precedenti alla vendita; UX-003 attribuisce costi; UX-012 documenta conto vendita; UX-013 rimane il riferimento unico per eventuali resi/storni; [issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) riguarda i registri finanziari. TECH-001 (portabilità) e TECH-008 (filtri) sono soltanto punti di interoperabilità potenziali, non documenti modificati. Il riepilogo non costituisce una fattura o una prova di incasso.
+- **Da validare:** frequenza reale delle vendite multiopera, bisogno di sconti collettivi, trattamento di arrotondamenti e incassi comuni, eventuali resi parziali. La vendita singola deve restare il percorso più semplice. Priorità P1–P2 **solo ipotetica**.
+- **Perimetro:** aggiunti soltanto questa scheda e l'indice Markdown sotto `docs/idee/gestione-e-ux/`. Nessun codice, test, workflow, configurazione, issue di implementazione o documento dell'altro filone modificato. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta in bozza, senza merge. **Stato: Proposta — da valutare**.
