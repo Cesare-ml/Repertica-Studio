@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension, Row};
 use serde::Serialize;
-use std::{fs, path::{Component, Path}};
+use std::{fs, io::Read, path::{Component, Path}};
 use tauri::State;
 use uuid::Uuid;
 
@@ -13,6 +13,7 @@ pub struct GalleryImage {
     id: String, artwork_id: String, image_path: String,
     caption: Option<String>, created_at: String, sort_order: i64,
 }
+const MAX_GALLERY_PREVIEW_BYTES: u64 = 12 * 1024 * 1024;
 fn err(e: impl std::fmt::Display) -> String { e.to_string() }
 fn row(r: &Row<'_>) -> rusqlite::Result<GalleryImage> {
     Ok(GalleryImage { id: r.get(0)?, artwork_id: r.get(1)?, image_path: r.get(2)?,
@@ -174,8 +175,9 @@ pub fn move_artwork_gallery_image(
 ) -> Result<(), String> {
     move_core(&db, &artwork_id, &image_id, &direction)
 }
-#[tauri::command]
-pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
+// Preview bytes enter the Tauri IPC response as base64. Even if a media file
+// was replaced on disk after import, never allocate an unbounded buffer for it.
+fn gallery_image_data_core(db: &Database, image_id: &str) -> Result<String, String> {
     let conn = db.conn.lock().map_err(err)?;
     let relative: String = conn.query_row("SELECT image_path FROM artwork_images WHERE id=?1",
         params![image_id], |r| r.get(0)).optional().map_err(err)?
@@ -184,9 +186,25 @@ pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> 
     let path = db.directory.join(relative);
     let typ = fs::symlink_metadata(&path).map_err(err)?.file_type();
     if !typ.is_file() || typ.is_symlink() { return Err("File media non valido".into()); }
-    let bytes = fs::read(path).map_err(err)?;
+    let file = fs::File::open(&path).map_err(err)?;
+    let length = file.metadata().map_err(err)?.len();
+    if length == 0 || length > MAX_GALLERY_PREVIEW_BYTES {
+        return Err("Fotografia vuota o troppo grande (massimo 12 MiB)".into());
+    }
+    // Metadata is only an early rejection; cap the actual read as well in case
+    // the file grows between the size check and the read.
+    let mut bytes = Vec::new();
+    file.take(MAX_GALLERY_PREVIEW_BYTES + 1)
+        .read_to_end(&mut bytes).map_err(err)?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_GALLERY_PREVIEW_BYTES {
+        return Err("Fotografia vuota o troppo grande (massimo 12 MiB)".into());
+    }
     let (_, media_type) = mime(&bytes).ok_or("Formato file non valido")?;
     Ok(format!("data:{media_type};base64,{}", STANDARD.encode(bytes)))
+}
+#[tauri::command]
+pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
+    gallery_image_data_core(&db, &image_id)
 }
 fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result<(), String> {
     let conn = db.conn.lock().map_err(err)?;
@@ -288,6 +306,63 @@ mod tests {
         }
         delete_gallery_image_core(&db, "extra").unwrap();
         assert!(!db.directory.join(relative).exists());
+    }
+
+    #[test]
+    fn gallery_preview_bounds_reads_and_does_not_modify_media_or_references() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        let file = db.directory.join("media/photo.jpg");
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','A','Title','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('photo','art','media/photo.jpg','t')", []).unwrap();
+        }
+        let valid = [0xff, 0xd8, 0xff, 0x01];
+        fs::write(&file, valid).unwrap();
+        assert_eq!(gallery_image_data_core(&db, "photo").unwrap(),
+            format!("data:image/jpeg;base64,{}", STANDARD.encode(valid)));
+
+        // A sparse file imitates external replacement without allocating 12 MiB.
+        fs::File::create(&file).unwrap()
+            .set_len(MAX_GALLERY_PREVIEW_BYTES + 1).unwrap();
+        assert!(gallery_image_data_core(&db, "photo").unwrap_err().contains("12 MiB"));
+        fs::write(&file, []).unwrap();
+        assert!(gallery_image_data_core(&db, "photo").is_err());
+        fs::write(&file, b"not a jpeg").unwrap();
+        assert!(gallery_image_data_core(&db, "photo").unwrap_err().contains("Formato"));
+        fs::remove_file(&file).unwrap();
+        assert!(gallery_image_data_core(&db, "photo").is_err());
+        assert!(gallery_image_data_core(&db, "unknown").is_err());
+
+        // A failed preview must never delete the DB reference or edit a photo.
+        let conn = db.conn.lock().unwrap();
+        let reference: String = conn.query_row(
+            "SELECT image_path FROM artwork_images WHERE id='photo'",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(reference, "media/photo.jpg");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gallery_preview_refuses_symlinks() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        let external = tmp.path().join("outside.jpg");
+        fs::write(&external, [0xff, 0xd8, 0xff]).unwrap();
+        symlink(&external, db.directory.join("media/link.jpg")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','A','Title','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('link','art','media/link.jpg','t')", []).unwrap();
+        }
+        assert!(gallery_image_data_core(&db, "link").unwrap_err().contains("non valido"));
+        assert!(external.is_file());
     }
 
     #[test]
