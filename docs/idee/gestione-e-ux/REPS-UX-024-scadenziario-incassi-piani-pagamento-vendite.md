@@ -7,6 +7,12 @@
 - **Priorità ipotetica:** P1–P2 per vendite con acconti, saldi differiti e rate; P3 per chi vende solo con pagamento contestuale. Da convalidare.
 - **Perimetro:** soltanto studio e documentazione; nessuna approvazione, issue operativa o assegnazione allo sviluppo.
 
+## Aggiornamento di ricognizione su `main` (2026-11-21) — evitare implementazioni duplicate
+
+**La descrizione originale più sotto è una fotografia della situazione precedente, non dello stato attuale di `main`.** Il branch principale ora documenta e contiene già il nucleo del piano rateale (SQLite **v11**): modalità pagamento `INSTALLMENTS`, **2–60 rate** con scadenze, piano modificabile, ripartizione automatica degli incassi registrati in ordine di scadenza e stati pagata/parziale/scaduta/da incassare. Sono presenti il registro CSV `installments`, `src-tauri/src/installments.rs`, `src/app/payment-plan.component.ts` e comandi Tauri di gestione. La fonte è [docs/MVP.md](../../MVP.md) e il codice di `main`, verificati il 21/11/2026.
+
+Di conseguenza **non riproporre come nuova funzione** la creazione delle rate, la scadenza, i saldi o il calcolo degli stati: questi elementi risultano già sviluppati. Rimane eventualmente una **domanda separata da validare**: servono una cronologia esplicita delle *revisioni degli accordi* con fonte e causale, oppure funziona già adeguatamente il piano modificabile esistente? Prima di considerare altro, verificarne l'UX reale e i test su desktop e interpellare utenti. **La presente scheda mantiene lo stato «Proposta — da valutare» per le sole ipotesi ancora aperte; non costituisce un'approvazione retroattiva del progetto ideativo né un incarico.**
+
 ## 1. Problema riscontrato e destinatari
 
 Un artista vende un'opera oggi per 3.000 EUR, concordando 1.000 EUR subito e due rate da 1.000 EUR alle date successive. Il gestionale deve distinguere **quanto è stato venduto**, **quanto è previsto di incassare e quando**, **quanto l'utente dichiara già incassato** e **quanto rimane scoperto**. Senza date e condizioni concordate, un saldo residuo unico non basta a distinguere il credito non ancora esigibile da quello da verificare perché la scadenza è trascorsa.
