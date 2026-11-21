@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { isTauri } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
+import type { ArtworkOrder } from './archive-filters';
 import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary
@@ -48,6 +50,12 @@ export class AppComponent implements OnInit {
   errorMessage = '';
   notice = '';
   search = '';
+  artworkStatusFilter: ArtworkStatus | 'all' = 'all';
+  artworkCollectorFilter = 'all';
+  artworkOrder: ArtworkOrder = 'recent';
+  expandedCollectorId: string | null = null;
+  salesByCollector: Record<string, Sale[]> = {};
+  salesByArtwork: Record<string, Sale> = {};
   artworks: Artwork[] = [];
   collectors: Collector[] = [];
   sales: Sale[] = [];
@@ -86,19 +94,40 @@ export class AppComponent implements OnInit {
     this.search = '';
     this.errorMessage = '';
     this.notice = '';
+    if (section === 'artworks') {
+      this.artworkStatusFilter = 'all';
+      this.artworkCollectorFilter = 'all';
+      this.artworkOrder = 'recent';
+    }
+    if (section === 'collectors') this.expandedCollectorId = null;
   }
   get currentTitle(): string {
     return this.sections.find(item => item.id === this.section)?.label ?? 'Repertica Studio';
   }
   get visibleArtworks(): Artwork[] {
-    const q = this.search.trim().toLocaleLowerCase('it');
-    return q ? this.artworks.filter(a => [a.title,a.code,a.year,a.technique,a.location]
-      .some(v => (v ?? '').toLocaleLowerCase('it').includes(q))) : this.artworks;
+    return filterArtworks(this.artworks, {
+      query: this.search,
+      status: this.artworkStatusFilter,
+      collectorId: this.artworkCollectorFilter,
+      order: this.artworkOrder
+    }, { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork });
   }
   get visibleCollectors(): Collector[] {
-    const q = this.search.trim().toLocaleLowerCase('it');
-    return q ? this.collectors.filter(c => [c.name,c.email,c.phone]
-      .some(v => (v ?? '').toLocaleLowerCase('it').includes(q))) : this.collectors;
+    return filterCollectors(this.collectors, this.search,
+      { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork });
+  }
+  showCollectorArtworks(collectorId: string): void {
+    this.navigate('artworks');
+    this.artworkCollectorFilter = collectorId;
+  }
+  openCollectorFromArtwork(artworkId: string): void {
+    const sale = this.salesByArtwork[artworkId];
+    if (!sale) return;
+    this.navigate('collectors');
+    this.expandedCollectorId = sale.collector_id;
+  }
+  toggleCollectorAcquisitions(collectorId: string): void {
+    this.expandedCollectorId = this.expandedCollectorId === collectorId ? null : collectorId;
   }
   get sellableArtworks(): Artwork[] { return this.artworks.filter(a => ['available','reserved'].includes(a.status)); }
   get money(): string { return this.euros(this.overview.revenue_cents); }
@@ -120,6 +149,17 @@ export class AppComponent implements OnInit {
         api.listArtworks(), api.listCollectors(), api.listSales(), api.listCertificates(),
         api.overview(), api.dataDirectory()
       ]);
+      // Build indexes once per refresh instead of scanning the full sales register for every row.
+      const indexes = buildSaleIndexes(this.sales);
+      this.salesByCollector = indexes.byCollector;
+      this.salesByArtwork = indexes.byArtwork;
+      if (this.artworkCollectorFilter !== 'all' &&
+          !this.collectors.some(c => c.id === this.artworkCollectorFilter)) {
+        this.artworkCollectorFilter = 'all';
+      }
+      if (this.expandedCollectorId && !this.collectors.some(c => c.id === this.expandedCollectorId)) {
+        this.expandedCollectorId = null;
+      }
       this.errorMessage = '';
       const wanted = this.artworks.filter(a => a.image_path && !this.thumbnails[a.id]).slice(0, 35);
       await Promise.all(wanted.map(async a => {

@@ -1,0 +1,83 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { buildSaleIndexes, filterArtworks, filterCollectors } from '../src/app/archive-filters.ts';
+
+const artwork = (id, overrides = {}) => ({
+  id, code: id, title: id, status: 'available', year: null, technique: null,
+  support: null, location: null, description: null, ...overrides
+});
+const collector = (id, overrides = {}) => ({
+  id, name: id, email: null, phone: null, address: null, notes: null, ...overrides
+});
+const sale = (artworkId, collectorId, title, collectorName) => ({
+  artwork_id: artworkId, collector_id: collectorId, artwork_title: title,
+  collector_name: collectorName
+});
+const options = (overrides = {}) => ({
+  query: '', status: 'all', collectorId: 'all', order: 'recent', ...overrides
+});
+
+test('filter artworks by status and actual recorded collector relationship', () => {
+  const artworks = [
+    artwork('a', { title: 'Alba', status: 'sold' }),
+    artwork('b', { title: 'Bosco', status: 'sold' }),
+    artwork('c', { title: 'Cielo' })
+  ];
+  const indexes = buildSaleIndexes([
+    sale('a', 'buyer-1', 'Alba', 'Anna Rossi'),
+    sale('b', 'buyer-2', 'Bosco', 'Bruno')
+  ]);
+  assert.deepEqual(filterArtworks(artworks, options({ status: 'sold', collectorId: 'buyer-1' }), indexes)
+    .map(a => a.id), ['a']);
+  assert.deepEqual(filterArtworks(artworks, options({ collectorId: 'missing' }), indexes), []);
+  assert.deepEqual(filterArtworks(artworks, options({ status: 'available' }), indexes)
+    .map(a => a.id), ['c']);
+});
+
+test('text search includes metadata and related collector, case-insensitively', () => {
+  const artworks = [
+    artwork('a', { title: 'Ritratto', technique: 'Olio su tela' }),
+    artwork('b', { title: 'Paesaggio', support: 'Carta', location: 'MILANO', status: 'sold' })
+  ];
+  const indexes = buildSaleIndexes([sale('b', 'c-1', 'Paesaggio', 'Elena Verdi')]);
+  for (const term of ['carta', 'miLANo', 'ELENA']) {
+    assert.deepEqual(filterArtworks(artworks, options({ query: term }), indexes)
+      .map(a => a.id), ['b']);
+  }
+  assert.deepEqual(filterArtworks(artworks, options({ query: 'OLIO' }), indexes)
+    .map(a => a.id), ['a']);
+});
+
+test('title/year sorting is stable for missing years and does not mutate source array', () => {
+  const artworks = [
+    artwork('a', { title: 'Studio 10', year: null }),
+    artwork('b', { title: 'Studio 2', year: '2017' }),
+    artwork('c', { title: 'Paesaggio', year: '2024' }),
+    artwork('d', { title: 'Antico', year: 'circa 1900' })
+  ];
+  const indexes = buildSaleIndexes([]);
+  assert.deepEqual(filterArtworks(artworks, options({ order: 'title' }), indexes).map(a => a.id),
+    ['d', 'c', 'b', 'a']);
+  assert.deepEqual(filterArtworks(artworks, options({ order: 'year' }), indexes).map(a => a.id),
+    ['c', 'b', 'd', 'a']);
+  assert.deepEqual(artworks.map(a => a.id), ['a', 'b', 'c', 'd']);
+});
+
+test('collector search includes contact fields and acquired artwork title', () => {
+  const contacts = [
+    collector('a', { name: 'Anna', notes: 'Cliente storico' }),
+    collector('b', { name: 'Luca', address: 'Roma' })
+  ];
+  const indexes = buildSaleIndexes([sale('work-1', 'a', 'Luce marina', 'Anna')]);
+  assert.deepEqual(filterCollectors(contacts, 'marina', indexes).map(c => c.id), ['a']);
+  assert.deepEqual(filterCollectors(contacts, 'ROMA', indexes).map(c => c.id), ['b']);
+  assert.deepEqual(filterCollectors(contacts, 'storico', indexes).map(c => c.id), ['a']);
+  assert.equal(filterCollectors(contacts, '', indexes), contacts);
+});
+
+test('untrusted ids cannot pollute the index prototype', () => {
+  const indexes = buildSaleIndexes([sale('artwork', '__proto__', 'Test', 'Buyer')]);
+  assert.equal(Object.getPrototypeOf(indexes.byCollector), null);
+  assert.equal(indexes.byCollector['__proto__'][0].artwork_id, 'artwork');
+  assert.equal(Object.prototype.polluted, undefined);
+});
