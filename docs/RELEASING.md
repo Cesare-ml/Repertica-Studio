@@ -38,10 +38,10 @@ I dati dell'archivio non vengono toccati dall'installazione. Se la nuova version
    git push origin v0.2.0
    ```
 
-3. Il workflow **Release** controlla che tag e versioni coincidano e che chiavi e variabili esistano, poi compila Windows e macOS (Apple Silicon e Intel), firma i pacchetti di aggiornamento e pubblica la release con gli installatori e `latest.json`.
+3. Il workflow **Release** controlla che tag e versioni coincidano e che chiavi e variabili esistano, poi compila per Windows, firma il pacchetto di aggiornamento e pubblica la release con l'installatore e `latest.json`.
 4. Le installazioni esistenti trovano la nuova versione al controllo successivo.
 
-Note: la release deve essere pubblicata (non bozza né pre-release) perché l'indirizzo `releases/latest/download/latest.json` la veda. Le build macOS sono firmate ad-hoc (senza Apple Developer ID): il pacchetto di aggiornamento è comunque firmato con la chiave del progetto, ma macOS può chiedere conferma al primo avvio.
+Note: la release deve essere pubblicata (non bozza né pre-release) perché l'indirizzo `releases/latest/download/latest.json` la veda. Per ora le release sono solo per Windows: l'installatore non è firmato con un certificato di code signing, quindi Windows SmartScreen può mostrare un avviso al primo avvio («Altre informazioni → Esegui comunque»). Il pacchetto di aggiornamento è invece firmato con la chiave del progetto e verificato dall'app. macOS resta fuori finché non ci sono Developer ID e notarizzazione.
 
 ## Cosa non è stato verificato
 

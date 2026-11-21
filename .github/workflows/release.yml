@@ -1,4 +1,4 @@
-# Publishes a signed release: installers plus the `latest.json` feed read by the in-app updater.
+# Publishes a signed Windows release: installer plus the `latest.json` feed read by the in-app updater.
 # Start it by pushing a tag such as `v0.2.0` (see docs/RELEASING.md for the one-time key setup).
 # The private signing key lives only in the repository secrets; the public key is a repository variable.
 name: Release
@@ -45,18 +45,8 @@ jobs:
           - name: Windows
             runner: windows-latest
             args: ''
-          - name: macOS Apple Silicon
-            runner: macos-15
-            args: '--target aarch64-apple-darwin'
-            target: aarch64-apple-darwin
-          - name: macOS Intel
-            runner: macos-15-intel
-            args: '--target x86_64-apple-darwin'
-            target: x86_64-apple-darwin
     env:
       CARGO_INCREMENTAL: '0'
-      # macOS builds are ad-hoc signed (no Apple Developer ID); the update package itself is minisign-signed.
-      APPLE_SIGNING_IDENTITY: '-'
     steps:
       - uses: actions/checkout@v4
         with:
