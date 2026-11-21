@@ -25,6 +25,16 @@ fn relative_media_path(path: &str) -> bool {
         && matches!(components.next(), Some(Component::Normal(_)))
         && components.next().is_none() && !path.contains('\\')
 }
+// Never let an externally replaced media/ symlink redirect reads, imports,
+// promotions or deletions outside the private application directory.
+fn require_regular_media_dir(db: &Database) -> Result<(), String> {
+    let file_type = fs::symlink_metadata(db.directory.join("media")).map_err(err)?.file_type();
+    if !file_type.is_dir() || file_type.is_symlink() {
+        return Err("La cartella media non è una directory locale regolare".into());
+    }
+    Ok(())
+}
+
 fn mime(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
     if bytes.starts_with(&[0xff, 0xd8, 0xff]) { Some(("jpg", "image/jpeg")) }
     else if bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]) { Some(("png", "image/png")) }
@@ -77,6 +87,7 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
     if bytes.is_empty() || bytes.len() > crate::commands::MAX_IMAGE_BYTES { return Err("Immagine vuota o troppo grande".into()); }
     let (ext, _) = mime(bytes).ok_or("Sono consentite solo immagini JPEG, PNG o WebP")?;
     let caption = normalize_caption(caption)?;
+    require_regular_media_dir(db)?;
     let conn = db.conn.lock().map_err(err)?;
     let count: i64 = conn.query_row("SELECT count(*) FROM artwork_images WHERE artwork_id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
     if count >= 20 { return Err("Massimo 20 fotografie aggiuntive per opera".into()); }
@@ -106,6 +117,7 @@ pub fn update_artwork_gallery_caption(db: State<'_, Database>, image_id: String,
  * it becomes the gallery image in the same transaction. Certificates may contain
  * historical media paths, so both original files must remain untouched. */
 fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), String> {
+    require_regular_media_dir(db)?;
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
     let new_primary: String = tx.query_row(
@@ -186,6 +198,7 @@ pub fn move_artwork_gallery_image(
 // Preview bytes enter the Tauri IPC response as base64. Even if a media file
 // was replaced on disk after import, never allocate an unbounded buffer for it.
 fn gallery_image_data_core(db: &Database, image_id: &str) -> Result<String, String> {
+    require_regular_media_dir(db)?;
     let conn = db.conn.lock().map_err(err)?;
     let relative: String = conn.query_row("SELECT image_path FROM artwork_images WHERE id=?1",
         params![image_id], |r| r.get(0)).optional().map_err(err)?
@@ -214,16 +227,48 @@ fn gallery_image_data_core(db: &Database, image_id: &str) -> Result<String, Stri
 pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
     gallery_image_data_core(&db, &image_id)
 }
+// Deleting a gallery row must not remove bytes still referenced by another
+// artwork's cover or by ANY historical certificate, even for another artwork.
+// Corrupt snapshots are deliberately treated as a reason to keep the file.
+fn gallery_media_has_other_references(
+    conn: &rusqlite::Connection, image_id: &str, relative: &str,
+) -> Result<bool, String> {
+    let active: bool = conn.query_row(
+        "SELECT EXISTS(
+             SELECT id FROM artworks WHERE image_path=?1
+             UNION ALL
+             SELECT id FROM artwork_images WHERE image_path=?1 AND id<>?2
+         )",
+        params![relative, image_id], |row| row.get(0),
+    ).map_err(err)?;
+    if active { return Ok(true); }
+
+    let mut stmt = conn.prepare("SELECT snapshot_json FROM certificates").map_err(err)?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
+    for row in rows {
+        let snapshot = row.map_err(err)?;
+        match serde_json::from_str::<serde_json::Value>(&snapshot) {
+            Ok(serde_json::Value::Object(fields)) => match fields.get("image_path") {
+                Some(serde_json::Value::String(path)) if path == relative => return Ok(true),
+                None | Some(serde_json::Value::Null) | Some(serde_json::Value::String(_)) => {},
+                _ => return Ok(true),
+            },
+            _ => return Ok(true),
+        }
+    }
+    Ok(false)
+}
+
 fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result<(), String> {
+    require_regular_media_dir(db)?;
     let conn = db.conn.lock().map_err(err)?;
-    let (artwork_id, relative): (String, String) = conn.query_row(
-        "SELECT artwork_id,image_path FROM artwork_images WHERE id=?1",
-        params![image_id], |r| Ok((r.get(0)?, r.get(1)?)),
+    let relative: String = conn.query_row(
+        "SELECT image_path FROM artwork_images WHERE id=?1",
+        params![image_id], |r| r.get(0),
     ).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
     if !relative_media_path(&relative) { return Err("Percorso media non valido".into()); }
-    // A previous cover can be in the gallery after promotion. Keep the bytes
-    // if any immutable certificate snapshot still refers to that historic cover.
-    let preserve = crate::commands::image_used_by_certificate(&conn, &artwork_id, &relative)?;
+    // Preserve bytes also referenced elsewhere; do not scope this to one artwork.
+    let preserve = gallery_media_has_other_references(&conn, image_id, &relative)?;
     conn.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
     if !preserve {
         // A failed unlink leaves an unreferenced file, never a broken DB link.
@@ -314,6 +359,81 @@ mod tests {
         }
         delete_gallery_image_core(&db, "extra").unwrap();
         assert!(!db.directory.join(relative).exists());
+    }
+
+
+    #[test]
+    fn gallery_deletion_keeps_shared_covers_and_other_artworks_historical_photos() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','First','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+                VALUES('b','B','Second','media/shared.jpg','t','t')", []).unwrap();
+            for (id, path) in [
+                ("shared", "media/shared.jpg"),
+                ("historic", "media/historic.jpg"),
+                ("unshared", "media/unshared.jpg"),
+            ] {
+                conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                    VALUES(?1,'a',?2,'t')", params![id, path]).unwrap();
+                fs::write(db.directory.join(path), [0xff, 0xd8, 0xff, 0x01]).unwrap();
+            }
+            // Historical photo of B is deliberately not referenced by a cover
+            // or gallery row belonging to B.
+            conn.execute("INSERT INTO certificates(
+                id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('cert-b','b','RS-B','2026-11-21','Artist',?1,'t')",
+                params![r#"{"image_path":"media/historic.jpg"}"#]).unwrap();
+        }
+        for id in ["shared", "historic", "unshared"] {
+            delete_gallery_image_core(&db, id).unwrap();
+        }
+        assert!(db.directory.join("media/shared.jpg").exists());
+        assert!(db.directory.join("media/historic.jpg").exists());
+        assert!(!db.directory.join("media/unshared.jpg").exists());
+        let conn = db.conn.lock().unwrap();
+        let rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM artwork_images WHERE artwork_id='a'",
+            [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(rows, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn swapped_media_directory_symlink_cannot_redirect_gallery_operations() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+                VALUES('a','A','First','media/cover.jpg','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('extra','a','media/extra.jpg','t')", []).unwrap();
+        }
+        let outside = tmp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("cover.jpg"), [0xff, 0xd8, 0xff]).unwrap();
+        fs::write(outside.join("extra.jpg"), [0xff, 0xd8, 0xff]).unwrap();
+        fs::remove_dir(db.directory.join("media")).unwrap();
+        symlink(&outside, db.directory.join("media")).unwrap();
+
+        assert!(gallery_image_data_core(&db, "extra").is_err());
+        assert!(promote_core(&db, "a", "extra").is_err());
+        assert!(add_gallery_bytes(&db, "a", &[0xff, 0xd8, 0xff], None).is_err());
+        assert!(delete_gallery_image_core(&db, "extra").is_err());
+        assert!(outside.join("cover.jpg").is_file());
+        assert!(outside.join("extra.jpg").is_file());
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 2);
+        let conn = db.conn.lock().unwrap();
+        let row_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM artwork_images WHERE id='extra'", [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(row_count, 1);
     }
 
     #[test]
