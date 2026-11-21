@@ -274,6 +274,24 @@ fn check_media_directory(root: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+// SQLite may read a sidecar alongside the database. None of these files is
+// part of our manifest or restored by staging; accepting one could make an
+// inspection describe different rows from the database actually restored.
+// Even a broken symlink must count as an untracked sidecar.
+fn reject_sqlite_sidecars(root: &Path) -> Result<(), String> {
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let path = root.join(format!("{DB_FILE}{suffix}"));
+        match fs::symlink_metadata(&path) {
+            Ok(_) => return Err(format!(
+                "Il backup contiene un file SQLite ausiliario non verificato: {}",
+                crate::util::display_path(&path)
+            )),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(error(e)),
+        }
+    }
+    Ok(())
+}
 fn check_unlisted_media(root: &Path, recorded: &HashSet<String>) -> Result<(), String> {
     for entry in fs::read_dir(root.join("media")).map_err(error)? {
         let entry = entry.map_err(error)?;
@@ -294,6 +312,9 @@ pub fn inspect_backup_core(folder: &Path) -> Result<BackupSummary, String> {
     let directory = fs::canonicalize(folder).map_err(error)?;
     if !directory.is_dir() { return Err("Seleziona la cartella di un backup Repertica".into()); }
     let manifest = manifest_from_dir(&directory)?;
+    // A valid hash of repertica.sqlite is not sufficient if SQLite can also
+    // see unmanifested WAL/journal pages from the selected backup directory.
+    reject_sqlite_sidecars(&directory)?;
     check_media_directory(&directory)?;
     let mut seen = HashSet::new();
     let mut total = 0_u64;
@@ -898,6 +919,45 @@ mod tests {
         assert!(message.contains("directory regolare"), "{message}");
         assert!(restore_backup_core(&db, folder).is_err());
         assert!(db.directory.join("media/example.png").is_file());
+    }
+
+    #[test]
+    fn untracked_sqlite_sidecars_are_rejected_without_replacing_live_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let destination = tmp.path().join("external-drive");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let sidecar = folder.join(format!("{DB_FILE}{suffix}"));
+            fs::write(&sidecar, b"untracked SQLite state").unwrap();
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("SQLite ausiliario"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+            assert!(db.directory.join(DB_FILE).is_file());
+            assert_eq!(fs::read(db.directory.join("media/example.png")).unwrap(), [1, 2, 3, 4]);
+            fs::remove_file(sidecar).unwrap();
+        }
+        assert!(inspect_backup_core(folder).unwrap().verified);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_sqlite_wal_symlink_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        let sidecar = folder.join(format!("{DB_FILE}-wal"));
+        std::os::unix::fs::symlink(tmp.path().join("not-present"), sidecar).unwrap();
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("SQLite ausiliario"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
     }
 
     #[test]
