@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (ventunesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (ventiduesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -30,6 +30,15 @@ Data ricognizione: **2026-11-21** (ventunesima ricognizione). Stato uniforme: **
 | [REPS-TECH-022](REPS-TECH-022-preflight-spazio-operazioni-locali.md) | Preflight prudente della capacità e dei volumi prima di backup/ripristino, senza promettere spazio garantito né eliminare copie esistenti | P2 | Proposta — da valutare |
 | [REPS-TECH-023](REPS-TECH-023-certificati-pdf-a-conservazione-verificabile.md) | Certificati da snapshot immutabili in PDF/A **validato realmente e offline**, distinguendo conservazione documentale, accessibilità e autenticità dell'opera | P2 | Proposta — da valutare |
 | [REPS-TECH-024](REPS-TECH-024-metadati-fotografici-iptc-xmp-interoperabili.md) | Lettura e interscambio selettivo dei metadati fotografici IPTC/XMP, con conflitti espliciti, originali intatti e nessun trasferimento implicito di diritti | P2 | Proposta — da valutare |
+| [REPS-TECH-025](REPS-TECH-025-esportazioni-tabellari-minimizzate-condivisione.md) | Copie tabellari con sole colonne e righe deliberatamente condivisibili, anteprima e protezioni conservative, senza alterare CSV integrali o backup | P2 | Proposta — da valutare |
+
+## Ventiduesima ricognizione — 21 novembre 2026 — REPS-TECH-025
+
+- **[REPS-TECH-025 — Esportazioni tabellari minimizzate per collaborazione senza divulgazione involontaria](REPS-TECH-025-esportazioni-tabellari-minimizzate-condivisione.md):** nuova scheda solo documentale per preparare una **copia CSV distinta dai registri completi**, con lista consentita di campi, selezione esplicita, anteprima delle colonne effettive e file locale salvato nella cartella scelta. Prima fase suggerita: solo tabella essenziale delle opere; non viene promessa anonimizzazione di titoli, codici e testi liberi. **P2 ipotetica**, da convalidare su scambi reali con gallerie e curatori.
+- **Riscontri su `main`:** [DATA-PORTABILITY](../../DATA-PORTABILITY.md) elenca **12 CSV integrali** indipendenti dai filtri della UI; `collectors` include contatti e note, `artworks` include ubicazione e percorso della copertina, `certificates` gli snapshot storici, altri registri nomi e cifre commerciali. [`export.rs`](../../../src-tauri/src/export.rs) conserva query e intestazioni predefinite senza profili di visibilità per destinatari. **Non è stato osservato un incidente di privacy:** i CSV sono deliberatamente esportazioni complete e già accompagnati da avvertenze.
+- **Distinzione anti-doppione:** TECH-001 mantiene il pacchetto di portabilità completo, TECH-018 studia la robustezza dei CSV esistenti, TECH-019 riguarda l'import di cataloghi, TECH-013 la privacy di fotografie, TECH-008 filtri/viste interne. **UX-007** nella [PR Gestione e UX #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) riguarda il dossier impaginato, non un dataset tabellare minimizzato. Nessun documento UX modificato.
+- **Principi vincolanti:** non ridurre o modificare i **12 registri CSV completi** e il backup verificato; esportazione facoltativa e offline, niente cloud/account/invio automatico, nessun log o profilo persistente con contatti, lingua di sistema e fallback inglese. Il primo obiettivo è minimizzare i campi esportati, **non certificare anonimato o conformità legale**.
+- **Esito:** il catalogo conta **25 proposte**, tutte «Proposta — da valutare». Solo questa scheda Markdown e l'indice della cartella tecnica sono cambiati nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), mantenuta in bozza senza merge, approvazioni, implementazioni o issue operative.
 
 ## Ventunesima ricognizione — 21 novembre 2026 — REPS-TECH-024
 
