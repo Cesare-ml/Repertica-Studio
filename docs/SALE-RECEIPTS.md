@@ -35,3 +35,19 @@ banche né documenti fiscali. Nessun collegamento online.
 
 Verifiche previste: `cargo test --manifest-path src-tauri/Cargo.toml`
 e `npm run build`. Collaudo desktop reale ancora necessario.
+
+## Integrità dei backup degli incassi (controllo aggiuntivo)
+
+Prima di pubblicare un backup e durante la verifica che precede il ripristino,
+il backend controlla **anche** che la somma degli incassi registrati per ogni
+vendita non superi l'importo lordo della vendita. Il controllo opera sullo
+snapshot SQLite in sola lettura: non corregge né modifica registrazioni.
+Funziona dal formato schema SQLite v4 in poi; gli archivi precedenti non
+contenevano il registro degli incassi.
+
+Il solo hash SHA-256 dei file, `PRAGMA integrity_check` e
+`foreign_key_check` non bastano a individuare una violazione di questo
+vincolo *tra più righe* qualora i trigger di SQLite fossero stati disattivati
+prima della creazione o modifica di una copia esterna. Il controllo aggiuntivo
+rifiuta l'archivio in tali condizioni **prima di toccare l'archivio attivo**.
+Non è una validazione bancaria, fiscale né una firma crittografica dei dati.
