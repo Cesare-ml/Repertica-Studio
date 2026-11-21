@@ -3,7 +3,7 @@ import type {
   Artwork, ArtworkInput, Collector, CollectorInput, Sale, SaleInput,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
-  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview
+  SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, MediaAudit
 } from './models';
 import type { CsvRegisterKind } from './csv-registers';
 
@@ -26,6 +26,7 @@ export const api = {
     invoke<void>('move_artwork_gallery_image', { artworkId, imageId, direction }),
   artworkGalleryImageData: (imageId: string) => invoke<string>('artwork_gallery_image_data', { imageId }),
   deleteArtworkGalleryImage: (imageId: string) => invoke<void>('delete_artwork_gallery_image', { imageId }),
+  auditArtworkMedia: () => invoke<MediaAudit>('audit_artwork_media'),
   listCollectors: () => invoke<Collector[]>('list_collectors'),
   saveCollector: (input: CollectorInput) => invoke<Collector>('save_collector', { input }),
   deleteCollector: (id: string) => invoke<void>('delete_collector', { id }),

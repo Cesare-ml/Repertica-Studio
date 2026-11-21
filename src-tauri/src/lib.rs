@@ -4,6 +4,7 @@ mod db;
 mod export;
 mod finance;
 mod gallery;
+mod media_audit;
 mod models;
 mod receipts;
 
@@ -43,6 +44,7 @@ pub fn run() {
             gallery::move_artwork_gallery_image,
             gallery::artwork_gallery_image_data,
             gallery::delete_artwork_gallery_image,
+            media_audit::audit_artwork_media,
             backup::create_backup,
             backup::inspect_backup,
             backup::restore_backup,

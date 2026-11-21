@@ -69,3 +69,12 @@ Non è ancora disponibile la gestione di più archivi **simultaneamente** nella 
 - Lo schema v5 aggiunge `sort_order` alle immagini della galleria: la migrazione conserva l'ordine storico (data e UUID) per ciascuna opera. Con i comandi **Sposta prima / Sposta dopo** si riordina senza modificare file, identificativi, didascalie, date o certificati. Il backup SQLite+media continua a verificare gli hash e supporta i database v1–v5, senza alterare il formato manifest. Le versioni vecchie dell'app non possono aprire database v5.
 - I certificati già emessi restano snapshot immutabili e non acquisiscono automaticamente nuove fotografie.
 - Da collaudare su desktop reale: caricamenti multipli di immagini grandi, eliminazione/restore, consumo memoria e compatibilità Windows/macOS/Linux.
+
+## Diagnostica locale fotografie (lettura soltanto)
+
+- In **Impostazioni → Diagnostica fotografie dell’archivio**, il controllo esamina i riferimenti alle immagini principali e alle fotografie di galleria attualmente presenti in SQLite.
+- Verifica percorsi relativi sicuri dentro `media/`, file mancanti, elementi non regolari o collegamenti simbolici, dimensioni ammesse e intestazioni JPEG/PNG/WebP. Un risultato «leggibile» non equivale alla decodifica integrale del file.
+- La verifica mantiene il mutex dell'archivio, non corregge record, non elimina immagini e non considera automaticamente eliminabili i media senza riferimenti: potrebbero essere necessari a documenti storici.
+- I problemi sono contati integralmente; l'interfaccia mostra al massimo i primi **100** e indica se il report è troncato. Non espone file a server.
+- **Limite importante:** non esistono hash storici registrati per ogni fotografia dell'archivio attivo, quindi questo controllo non può garantire che i byte non siano cambiati. Il backup completo dispone invece di un manifest SHA-256 e della relativa verifica.
+- Se il controllo segnala un problema, non cancellare immagini o sovrascrivere backup: recuperare i file da una copia verificata e collaudare il ripristino separatamente.
