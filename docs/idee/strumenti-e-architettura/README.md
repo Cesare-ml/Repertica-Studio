@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (diciottesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (diciannovesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -27,6 +27,14 @@ Data ricognizione: **2026-11-21** (diciottesima ricognizione). Stato uniforme: *
 | [REPS-TECH-019](REPS-TECH-019-importazione-guidata-cataloghi-tabellari.md) | Importazione guidata da **CSV/TSV esterni non standard** con mappatura colonne, preflight di tutte le righe e conferma non distruttiva; distinta dal formato Repertica e dalla migrazione Gestionale Opere | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-020](REPS-TECH-020-accessibilita-flussi-critici-tastiera-screen-reader.md) | Accessibilità verificabile dei dialoghi e delle operazioni critiche: focus, tastiera, screen reader, annunci, conferme, zoom e prove native, senza modificare logica e dati | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-021](REPS-TECH-021-gestione-colore-icc-derivati-fotografici.md) | Gestione colore ICC e interpretazione dei derivati fotografici nel Media Center: indagine su profili, preview, revisione ed export senza alterare originali | P2 | Proposta — da valutare |
+| [REPS-TECH-022](REPS-TECH-022-preflight-spazio-operazioni-locali.md) | Preflight prudente della capacità e dei volumi prima di backup/ripristino, senza promettere spazio garantito né eliminare copie esistenti | P2 | Proposta — da valutare |
+
+## Diciannovesima ricognizione — 21 novembre 2026 — REPS-TECH-022
+
+- **[REPS-TECH-022 — Preflight dello spazio e dei volumi per operazioni locali](REPS-TECH-022-preflight-spazio-operazioni-locali.md):** proposta di valutare prima della scrittura lo spazio richiesto per backup e ripristino su SSD, USB e NAS montati. Da [`backup.rs`](../../../src-tauri/src/backup.rs) emerge che il backup usa una cartella `.partial` sulla destinazione scelta; il ripristino copia invece i file in staging **sul volume dell'archivio attivo**, conservando l'archivio precedente. Una stima deve quindi distinguere volumi e non conteggiare due volte la rinomina del rollback.
+- **Fatto vs ipotesi:** in `main` i backup sono già verificati SHA-256 e gli errori di disco pieno sono riconosciuti e gestiti (vedi [MVP](../../MVP.md)); la stessa documentazione dichiara assente il **controllo preventivo dello spazio libero**. Non sono stati osservati incidenti reali: utilità, precisione delle stime e priorità **P2 ipotetica** richiedono prove su archivi e filesystem reali. Su NAS o volumi con quote lo spazio potrebbe essere «non verificabile», mai garantito.
+- **Confini anti-doppione:** TECH-009 cataloga backup già creati e valuta la conservazione; TECH-012 progetta checkpoint pre-migrazione; TECH-018 riguarda la robustezza dei CSV; TECH-003 verifica i media; TECH-006/007 studiano formato o posizione dei file. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), con **26 proposte Gestione e UX**, non è modificata. Qui non si cancellano backup, non si cambia il restore, non si introducono nuove automazioni o dipendenze.
+- **Esito:** una nuova scheda e questo indice, entrambi Markdown esclusivamente in `docs/idee/strumenti-e-architettura/`. **22 proposte**, tutte «Proposta — da valutare»; nessuna approvazione, assegnazione, issue operativa, sviluppo o merge. Revisione personale nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
 
 ## Diciottesima ricognizione — 21 novembre 2026 — REPS-TECH-021
 
