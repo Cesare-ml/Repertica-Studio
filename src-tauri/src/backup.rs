@@ -383,6 +383,33 @@ mod tests {
         assert_eq!(fs::read(db.directory.join("media/example.png")).unwrap(), vec![1,2,3,4]);
     }
     #[test]
+    fn gallery_media_is_backed_up_and_verified_by_reference() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at)
+                VALUES('photo2','a','media/secondary.png','Back side','now')",[]).unwrap();
+        }
+        fs::write(db.directory.join("media/secondary.png"), b"example secondary image").unwrap();
+        let destination = tmp.path().join("disk");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        assert_eq!(backup.schema_version, 3);
+        assert_eq!(backup.files, 3);
+        assert!(backup.verified);
+
+        // A manifest containing the DB but omitting a secondary photo cannot pass verification.
+        let folder = Path::new(&backup.directory);
+        let manifest_path = folder.join(MANIFEST_FILE);
+        let mut manifest: Manifest = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest.files.retain(|record| record.path != "media/secondary.png");
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+        assert!(inspect_backup_core(folder).is_err());
+        assert!(restore_backup_core(&db, folder).is_err());
+    }
+    #[test]
     fn corrupted_media_is_rejected_before_restore() {
         let tmp = tempfile::tempdir().unwrap();
         let db = db::open(tmp.path().join("active")).unwrap();
