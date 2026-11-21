@@ -321,7 +321,7 @@
       <button class="close" type="button" (click)="closeGallery()" [attr.aria-label]="tr('Chiudi')">×</button></div>
     <div class="alert error" role="alert" *ngIf="errorMessage">{{ errorMessage }}</div>
     <div class="alert success" role="status" *ngIf="notice">{{ notice }}</div>
-    <p class="form-note">{{ tr('La foto principale resta nell’archivio. Qui puoi aggiungere fino a 20 fotografie complementari, tutte conservate localmente e nei backup.') }}</p>
+    <p class="form-note">{{ tr('La foto principale e le fotografie aggiuntive restano nel tuo archivio locale e nei backup. Puoi scegliere una foto aggiuntiva come nuova copertina.') }}</p>
     <div class="gallery-upload">
       <label class="settings-input"><span>{{ tr('Didascalia facoltativa') }}</span><input maxlength="300" [(ngModel)]="galleryCaption"></label>
       <label class="secondary upload-btn" [class.disabled]="busy || galleryImages.length >= 20">{{ tr('Aggiungi fotografia') }}
@@ -343,6 +343,7 @@
           <p>{{ img.caption || tr('Senza didascalia') }}</p>
           <button class="small secondary" type="button" [disabled]="busy" (click)="startGalleryCaptionEdit(img)">{{ tr('Modifica') }}</button>
         </ng-template>
+        <button class="small secondary" type="button" [disabled]="busy" (click)="makeGalleryPrimary(img)">{{ tr('Imposta come principale') }}</button>
         <button class="small danger-text" type="button" [disabled]="busy" (click)="removeGalleryPhoto(img)">{{ tr('Elimina') }}</button>
       </div>
     </div>
