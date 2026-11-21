@@ -133,9 +133,13 @@
           <button class="primary" type="button" (click)="newSale()" [disabled]="!initialized || !sellableArtworks.length || !collectors.length">{{ tr('+ Registra vendita') }}</button>
         </div></div>
       <p class="hint" *ngIf="!sellableArtworks.length || !collectors.length">{{ tr('Per registrare una vendita occorrono almeno un\'opera disponibile e un collezionista.') }}</p>
-      <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Data') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+      <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Data') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Incassato') }}</th><th>{{ tr('Da incassare') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
         <tbody><tr *ngFor="let s of sales"><td><strong>{{ s.artwork_title }}</strong></td><td>{{ s.collector_name }}</td><td>{{ date(s.sold_at) }}</td>
-          <td class="money">{{ euros(s.amount_cents) }}</td><td class="actions"><button class="small danger-text" type="button" (click)="deleteSale(s)">{{ tr('Annulla vendita') }}</button></td></tr></tbody></table>
+          <td class="money">{{ euros(s.amount_cents) }}</td>
+          <td class="money">{{ euros(balanceForSale(s).received_cents) }}</td>
+          <td class="money">{{ euros(balanceForSale(s).outstanding_cents) }}</td>
+          <td class="actions"><button class="small" type="button" (click)="openSaleReceipts(s)">{{ tr('Gestisci incassi') }}</button>
+            <button class="small danger-text" type="button" (click)="deleteSale(s)">{{ tr('Annulla vendita') }}</button></td></tr></tbody></table>
         <div class="empty-state" *ngIf="!sales.length">{{ tr('Nessuna vendita ancora registrata.') }}</div></div>
     </section>
 
@@ -371,6 +375,40 @@
       <label class="full"><span>{{ tr('Note') }}</span><textarea [(ngModel)]="saleDraft.notes" rows="3"></textarea></label>
     </div><p class="form-note">{{ tr('La registrazione segnerà l\'opera come venduta. Non genera una fattura fiscale.') }}</p>
     <div class="dialog-bottom"><button class="secondary" type="button" (click)="saleDialog=false">{{ tr('Annulla') }}</button><button class="primary" type="button" [disabled]="busy || !saleDraft.artwork_id || !saleDraft.collector_id || !saleDraft.amount_eur" (click)="saveSale()">{{ tr('Registra vendita') }}</button></div>
+  </div>
+</div>
+
+<div class="overlay" *ngIf="selectedReceiptSale as sale" role="dialog" aria-modal="true" aria-labelledby="receipts-title">
+  <div class="dialog"><div class="dialog-top"><h2 id="receipts-title">{{ tr('Incassi registrati') }} — {{ sale.artwork_title }}</h2>
+    <button type="button" class="close" (click)="selectedReceiptSale=null" [attr.aria-label]="tr('Chiudi')">×</button></div>
+    <p class="form-note">{{ tr('Gli incassi sono registrati manualmente e non verificati dalla banca.') }}</p>
+    <p>{{ tr('Incassato') }}: <strong>{{ euros(balanceForSale(sale).received_cents) }}</strong> ·
+      {{ tr('Da incassare') }}: <strong>{{ euros(balanceForSale(sale).outstanding_cents) }}</strong></p>
+    <div class="table-scroll" *ngIf="saleReceipts(sale.id).length">
+      <table><thead><tr><th>{{ tr('Data') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Metodo') }}</th><th>{{ tr('Riferimento') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+      <tbody><tr *ngFor="let receipt of saleReceipts(sale.id)">
+        <td>{{ date(receipt.received_at) }}</td><td class="money">{{ euros(receipt.amount_cents) }}</td>
+        <td>{{ tr(receipt.method === 'bank_transfer' ? 'Bonifico' : receipt.method === 'cash' ? 'Contanti' : receipt.method === 'card' ? 'Carta' : 'Altro') }}</td>
+        <td>{{ receipt.reference || '—' }}</td>
+        <td class="actions"><button class="small danger-text" type="button" [disabled]="busy" (click)="deleteSaleReceipt(receipt)">{{ tr('Elimina incasso') }}</button></td>
+      </tr></tbody></table>
+    </div>
+    <p *ngIf="!saleReceipts(sale.id).length" class="hint">{{ tr('Nessun incasso registrato.') }}</p>
+    <div *ngIf="balanceForSale(sale).outstanding_cents > 0">
+      <h3>{{ tr('Nuovo incasso') }}</h3>
+      <div class="form-grid">
+        <label><span>{{ tr('Importo incassato (€)') }}</span><input type="number" min="0.01" step="0.01"
+          [max]="balanceForSale(sale).outstanding_cents/100" [(ngModel)]="receiptDraft.amount_eur"></label>
+        <label><span>{{ tr('Data incasso') }}</span><input type="date" [(ngModel)]="receiptDraft.received_at"></label>
+        <label><span>{{ tr('Metodo') }}</span><select [(ngModel)]="receiptDraft.method">
+          <option value="bank_transfer">{{ tr('Bonifico') }}</option><option value="cash">{{ tr('Contanti') }}</option>
+          <option value="card">{{ tr('Carta') }}</option><option value="other">{{ tr('Altro') }}</option></select></label>
+        <label><span>{{ tr('Riferimento') }}</span><input maxlength="200" [(ngModel)]="receiptDraft.reference"></label>
+        <label class="full"><span>{{ tr('Note') }}</span><textarea maxlength="2000" rows="2" [(ngModel)]="receiptDraft.notes"></textarea></label>
+      </div>
+      <div class="dialog-bottom"><button type="button" class="primary" [disabled]="busy || !receiptDraft.amount_eur || !receiptDraft.received_at"
+        (click)="saveSaleReceipt()">{{ tr('Registra incasso') }}</button></div>
+    </div>
   </div>
 </div>
 
