@@ -84,7 +84,7 @@
 
           <article *ngFor="let item of b.items; let i = index" class="selected-artwork">
             <div class="selected-head">
-              <div class="selected-num">{{ i + 1 | number:'2.0' }}</div>
+              <div class="selected-num">{{ i + 1 | number:'2.0-0' }}</div>
               <div class="selected-photo"><img *ngIf="previews[item.artwork_id]" [src]="previews[item.artwork_id]" alt=""></div>
               <div class="selected-title">
                 <strong>{{ artwork(item.artwork_id)?.title || tr('Opera non trovata') }}</strong>
