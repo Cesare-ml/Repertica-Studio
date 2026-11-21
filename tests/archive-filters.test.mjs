@@ -112,3 +112,36 @@ test('collector search combines acquired-work titles, name and address with acce
   assert.deepEqual(filterCollectors(people, 'élodie firenze', indexes).map(c => c.id), ['c1']);
   assert.equal(filterCollectors(people, '   ', indexes), people);
 });
+
+test('quoted artwork phrases match within one field and combine with independent terms', () => {
+  const works = [
+    artwork('a', { title: 'Città marina', technique: 'Olio su tela', status: 'sold' }),
+    artwork('b', { title: 'Città di mare', description: 'marina', technique: 'Olio su tela' }),
+    artwork('c', { title: 'Ritratto', technique: 'Olio', support: 'su tela' })
+  ];
+  const indexes = buildSaleIndexes([sale('a', 'buyer-1', 'Città marina', 'Élodie Rossi')]);
+  const found = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+  assert.deepEqual(found('citta marina'), ['a', 'b']);
+  assert.deepEqual(found('"CITTA MARINA"'), ['a']);
+  assert.deepEqual(found('"citta   marina"'), ['a']);
+  assert.deepEqual(found('"olio su tela" ÉLODIE'), ['a']);
+  assert.deepEqual(found('"citta marina" "olio su tela"'), ['a']);
+  assert.deepEqual(found('"olio su tela"'), ['a', 'b']);
+  assert.deepEqual(found('"olio su tela" ritratto'), []);
+  assert.deepEqual(found('"citta marina'), ['a']); // unfinished quote is still useful
+  assert.deepEqual(found('""'), ['a', 'b', 'c']);
+});
+
+test('quoted collector searches can find acquired works but cannot span unrelated fields', () => {
+  const people = [
+    collector('c1', { name: 'Élodie Rossi', address: 'Firenze' }),
+    collector('c2', { name: 'Anna Luce', notes: 'marina' })
+  ];
+  const indexes = buildSaleIndexes([sale('a', 'c1', 'Luce marina', 'Élodie Rossi')]);
+  const found = query => filterCollectors(people, query, indexes).map(c => c.id);
+  assert.deepEqual(found('luce marina'), ['c1', 'c2']);
+  assert.deepEqual(found('"luce marina"'), ['c1']);
+  assert.deepEqual(found('"LUCE MARINA" éLoDiE'), ['c1']);
+  assert.deepEqual(found('"luce firenze"'), []);
+  assert.deepEqual(found('luce firenze'), ['c1']);
+});

@@ -8,7 +8,7 @@ Gestionale artistico **gratuito, open source e locale**, realizzato con Angular 
 
 ## Funzionalità MVP
 
-- **Opere**: archivio con codice, titolo, tecnica, anno, misure, stato, ubicazione, descrizione, immagine principale e galleria di fino a 20 fotografie aggiuntive con didascalie e ordinamento manuale persistente. Ricerca locale anche per supporto, descrizione e nome dell'acquirente, senza distinzione tra maiuscole e accenti; più parole possono corrispondere a campi diversi, ma devono essere tutte presenti. Filtri per stato e collezionista, ordinamento per titolo o anno.
+- **Opere**: archivio con codice, titolo, tecnica, anno, misure, stato, ubicazione, descrizione, immagine principale e galleria di fino a 20 fotografie aggiuntive con didascalie e ordinamento manuale persistente. Ricerca locale anche per supporto, descrizione e nome dell'acquirente, senza distinzione tra maiuscole e accenti; più parole possono corrispondere a campi diversi, ma devono essere tutte presenti. Racchiudi una frase tra virgolette doppie (es. `"olio su tela"`) per cercare le parole consecutive nello stesso campo; le frasi possono essere combinate con altre parole, anche riferite al collezionista. Filtri per stato e collezionista, ordinamento per titolo o anno.
 - **Collezionisti**: anagrafica privata e note. Dalla lista si possono consultare le opere acquistate e aprirle nell'archivio; dalle opere vendute si può raggiungere il relativo collezionista.
 - **Vendite**: registrazione importi in centesimi, cliente e opera associati; una vendita per opera nella prima versione.
 - **Certificati**: registro immutabile con numero progressivo univoco, fotografia della scheda al momento dell'emissione e stampa/salvataggio PDF tramite dialogo di stampa.
