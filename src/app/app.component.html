@@ -426,15 +426,38 @@
     <p>{{ tr('Incassato') }}: <strong>{{ euros(balanceForSale(sale).received_cents) }}</strong> ·
       {{ tr('Da incassare') }}: <strong>{{ euros(balanceForSale(sale).outstanding_cents) }}</strong></p>
     <div class="table-scroll" *ngIf="saleReceipts(sale.id).length">
-      <table><thead><tr><th>{{ tr('Data') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Metodo') }}</th><th>{{ tr('Riferimento') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+      <table><thead><tr><th>{{ tr('Data') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Metodo') }}</th><th>{{ tr('Riferimento') }}</th><th>{{ tr('Documento') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
       <tbody><tr *ngFor="let receipt of saleReceipts(sale.id)">
         <td>{{ date(receipt.received_at) }}</td><td class="money">{{ euros(receipt.amount_cents) }}</td>
         <td>{{ tr(receipt.method === 'bank_transfer' ? 'Bonifico' : receipt.method === 'cash' ? 'Contanti' : receipt.method === 'card' ? 'Carta' : 'Altro') }}</td>
         <td>{{ receipt.reference || '—' }}</td>
-        <td class="actions"><button class="small danger-text" type="button" [disabled]="busy" (click)="deleteSaleReceipt(receipt)">{{ tr('Elimina incasso') }}</button></td>
+        <td class="receipt-document">
+          <span *ngIf="receiptAttachmentsLoading">{{ tr('Caricamento allegati…') }}</span>
+          <ng-container *ngIf="!receiptAttachmentsLoading">
+            <ng-container *ngIf="receiptAttachments[receipt.id] as file; else receiptNoFile">
+              <span class="receipt-filename" [title]="file.original_name">{{ file.original_name }}</span>
+              <div class="receipt-document-actions">
+                <button *ngIf="file.mime_type !== 'application/pdf'" class="small secondary" type="button"
+                  [disabled]="busy" (click)="viewReceiptImage(receipt, file)">{{ tr('Visualizza immagine') }}</button>
+                <button class="small secondary" type="button" [disabled]="busy"
+                  (click)="exportReceiptFile(receipt, file)">{{ tr('Esporta documento') }}</button>
+                <button class="small danger-text" type="button" [disabled]="busy"
+                  (click)="removeReceiptFile(receipt)">{{ tr('Rimuovi allegato') }}</button>
+              </div>
+            </ng-container>
+            <ng-template #receiptNoFile>
+              <button class="small secondary" type="button" [disabled]="busy"
+                (click)="attachReceiptFile(receipt)">{{ tr('Allega documento') }}</button>
+            </ng-template>
+          </ng-container>
+        </td>
+        <td class="actions"><button class="small danger-text" type="button"
+          [disabled]="busy || receiptAttachmentsLoading || !!receiptAttachments[receipt.id]"
+          (click)="deleteSaleReceipt(receipt)">{{ tr('Elimina incasso') }}</button></td>
       </tr></tbody></table>
     </div>
     <p *ngIf="!saleReceipts(sale.id).length" class="hint">{{ tr('Nessun incasso registrato.') }}</p>
+    <p class="form-note">{{ tr('I PDF vengono esportati per aprirli nel lettore del sistema; nessun documento è inviato online.') }}</p>
     <div *ngIf="balanceForSale(sale).outstanding_cents > 0">
       <h3>{{ tr('Nuovo incasso') }}</h3>
       <div class="form-grid">
@@ -450,6 +473,15 @@
       <div class="dialog-bottom"><button type="button" class="primary" [disabled]="busy || !receiptDraft.amount_eur || !receiptDraft.received_at"
         (click)="saveSaleReceipt()">{{ tr('Registra incasso') }}</button></div>
     </div>
+  </div>
+</div>
+
+<div class="overlay" *ngIf="receiptPreview as preview" role="dialog" aria-modal="true" aria-labelledby="receipt-preview-title">
+  <div class="dialog wide">
+    <div class="dialog-top"><h2 id="receipt-preview-title">{{ tr('Anteprima documento') }} — {{ preview.name }}</h2>
+      <button class="close" type="button" [attr.aria-label]="tr('Chiudi')" (click)="receiptPreview=null">×</button>
+    </div>
+    <img class="receipt-preview-image" [src]="preview.src" [alt]="preview.name">
   </div>
 </div>
 
