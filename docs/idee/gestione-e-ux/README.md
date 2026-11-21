@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (diciottesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (diciannovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **26 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -31,6 +31,15 @@ Aggiornato: **2026-11-21** (diciottesima ricognizione). Stato delle proposte: **
 | [REPS-UX-023](REPS-UX-023-prezzi-richiesti-listini-storico.md) | Prezzo richiesto per opera, distinzione dal suggerito/venduto e storico delle revisioni; listino locale condivisibile solo su scelta | P1–P2* | Proposta — da valutare |
 | [REPS-UX-024](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md) | Scadenziario facoltativo delle somme concordate per vendita, distinto dagli incassi effettivamente dichiarati e dal saldo autorevole | P1–P2* | Proposta — da valutare |
 | [REPS-UX-025](REPS-UX-025-istruzioni-allestimento-cura-opera.md) | Istruzioni di installazione, movimentazione e cura **della singola opera**: passaggi versionati, fonti e condivisione selettiva; non crea movimenti o report di condizione | P2* | Proposta — da valutare |
+| [REPS-UX-026](REPS-UX-026-diario-lavorazione-opera-fasi-datate.md) | Diario facoltativo del **processo di produzione originale** per opere già catalogate: eventi, date anche incerte, fonti e fotografie di lavorazione; non gestisce incarichi, costi o restauro | P2* | Proposta — da valutare |
+
+## Diciannovesima ricognizione (21 novembre 2026) — REPS-UX-026
+
+- **[REPS-UX-026 — Diario di lavorazione delle opere: passaggi datati e fotografie di processo](REPS-UX-026-diario-lavorazione-opera-fasi-datate.md):** studiato un registro **facoltativo** della produzione originale per una singola opera, utile soprattutto a pittori e studi che documentano decisioni, tecniche, passaggi intermedi e fotografia del processo. Il diario non è richiesto per catalogare un'opera e non produce vendite, incassi, costi o nuovi stati commerciali.
+- **Riscontro su `main`:** `src/app/models.ts`, README, MVP e portabilità attestano la classificazione delle fotografie `WORK_IN_PROGRESS` e tre flag correnti `signed`, `final_varnish`, `framed`, ma non una **cronologia esplicita con data dell'evento distinta dalla data della sua registrazione**. Non è un difetto funzionale già dimostrato. Le **12 esportazioni CSV** attuali restano uscite tabellari, non un importatore generale o backup.
+- **Separazione dei filoni:** UX-006 segue **incarichi e accordi con il committente**, UX-018 l'**inserimento di schede**, UX-003/008 **spese e materiali**, UX-011 **rapporti fra opere**, UX-025 **istruzioni future di allestimento**, UX-004 **condizioni e interventi conservativi**. Il diario segue soltanto **ciò che è stato compiuto durante la realizzazione dell'opera**. TECH-010/016 e il pacchetto aperto TECH-001 nella [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) restano studi indipendenti e non modificati.
+- **Vincoli/alternative:** niente date desunte da EXIF o spunte `signed` e simili, niente attribuzione automatica di costi/ore/scorte, nessuna pubblicazione di opere inedite. Dati e foto locali, anteprima privacy, backup completo nella cartella scelta, esportazione strutturata solo se progettata, lingua del sistema con fallback inglese. Prima verificare con artisti se le **didascalie `WORK_IN_PROGRESS` esistenti** bastino: una cronologia dettagliata potrebbe essere eccessiva.
+- **Stato:** «Proposta — da valutare»; **P2 soltanto ipotetica**; nessuna approvazione, assegnazione o merge. Aggiunta la ventiseiesima scheda nella stessa [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) e lasciato intatto il filone tecnico.
 
 ## Diciottesima ricognizione (21 novembre 2026) — REPS-UX-025
 
