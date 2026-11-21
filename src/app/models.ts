@@ -24,13 +24,14 @@ export interface MailDetail {
 export interface MailDraft {
   id: string; account_id: string; to: string; cc: string; bcc: string;
   subject: string; body: string; revision: number; updated_at: string;
+  attachments: string[];
 }
 export type MailDraftInput = Omit<MailDraft,'updated_at'|'revision'|'id'> & {
   id?: string | null; revision?: number | null;
 };
 export interface MailSendInput {
   account_id: string; to: string; cc: string; bcc: string;
-  subject: string; body: string; confirm: boolean;
+  subject: string; body: string; confirm: boolean; attachments: string[];
 }
 export interface MailSendResult {
   delivery: 'accepted'; sent_copy: 'saved'|'not_saved'|'not_configured';
