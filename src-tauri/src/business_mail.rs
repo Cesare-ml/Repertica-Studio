@@ -37,6 +37,9 @@ fn valid_email(email:&str)->bool {
             !local.is_empty() && !local.starts_with('.') && !local.ends_with('.')
                 && valid_host(domain) && local.len()<=64)
 }
+fn header_text(text:&str,max:usize)->bool{
+    text.chars().count()<=max && !text.chars().any(char::is_control)
+}
 fn safe_text(text:&str, max:usize)->bool {
     text.chars().count()<=max && !text.chars().any(|c| c=='\0' || (c.is_control() && c!='\n' && c!='\t' && c!='\r'))
 }
@@ -71,8 +74,8 @@ impl MailAccountInput {
         if self.imap_port!=993 || ![465,587].contains(&self.smtp_port) {
             return Err("Sono supportati solo IMAP TLS (993), SMTP TLS (465) e SMTP STARTTLS (587)".into());
         }
-        if !safe_text(&self.display_name,120) || !safe_text(&self.signature,3000)
-            || !safe_text(&self.imap_username,254) || !safe_text(&self.smtp_username,254)
+        if !header_text(&self.display_name,120) || !safe_text(&self.signature,3000)
+            || !header_text(&self.imap_username,254) || !header_text(&self.smtp_username,254)
             || self.imap_username.trim().is_empty() || self.smtp_username.trim().is_empty()
             || (!self.sent_folder.is_empty() && !valid_folder(&self.sent_folder))
             || self.imap_password.as_ref().is_some_and(|s|s.len()>2048 || s.contains('\0'))
@@ -354,7 +357,9 @@ pub fn mail_save_draft(db:State<'_,Database>,input:MailDraftInput)->Result<MailD
     let tx=conn.transaction().map_err(db_error)?;
     let previous=tx.query_row("SELECT revision FROM mail_drafts WHERE id=?1 AND account_id=?2",
         params![id,input.account_id],|r|r.get::<_,u32>(0)).optional().map_err(db_error)?;
-    if previous!=input.revision{return Err("Conflitto: la bozza è cambiata. Copia il testo prima di riaprirla.".into());}
+    if (input.id.is_some() && previous.is_none()) || previous!=input.revision {
+        return Err("Conflitto: la bozza è cambiata. Copia il testo prima di riaprirla.".into());
+    }
     let draft=MailDraft{id,account_id:input.account_id,to:input.to,cc:input.cc,bcc:input.bcc,
         subject:input.subject,body:input.body,revision:previous.unwrap_or(0)+1,
         updated_at:Utc::now().to_rfc3339()};
@@ -390,7 +395,7 @@ pub struct MailSendResult { pub delivery:String,pub sent_copy:String }
 #[tauri::command]
 pub async fn mail_send(db:State<'_,Database>,input:MailSendInput)->Result<MailSendResult,String>{
     if !input.confirm{return Err("L'invio richiede una conferma esplicita".into());}
-    if !safe_text(&input.subject,255)||input.subject.trim().is_empty()
+    if !header_text(&input.subject,255)||input.subject.trim().is_empty()
         || !safe_text(&input.body,100_000)||input.body.trim().is_empty(){
         return Err("Oggetto e testo del messaggio sono obbligatori".into());
     }
@@ -437,6 +442,7 @@ mod tests{
         assert!(!valid_host("localhost"));assert!(!valid_host("127.0.0.1"));
         assert!(!valid_host("example.com\nINJECT"));assert!(valid_host("mail.example.com"));
         assert!(valid_email("hello@example.com"));assert!(!valid_email("hello@localhost"));
+        assert!(!header_text("subject\r\nBcc:other@example.com",255));
     }
     #[test] fn folder_and_recipient_validation(){
         assert!(!valid_folder("INBOX\r\nDELETE"));
