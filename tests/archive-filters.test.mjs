@@ -81,3 +81,34 @@ test('untrusted ids cannot pollute the index prototype', () => {
   assert.equal(indexes.byCollector['__proto__'][0].artwork_id, 'artwork');
   assert.equal(Object.prototype.polluted, undefined);
 });
+
+test('artwork search ignores accents and requires every term across artwork and buyer fields', () => {
+  const works = [
+    artwork('a', { title: 'Città marina', technique: 'Olio su tela', status: 'sold' }),
+    artwork('b', { title: 'Città notturna', technique: 'Tempera', status: 'sold' }),
+    artwork('c', { title: 'Campagna', technique: 'Olio' })
+  ];
+  const indexes = buildSaleIndexes([
+    sale('a', 'c-1', 'Città marina', 'Élodie D’Amico'),
+    sale('b', 'c-2', 'Città notturna', 'Alessandro')
+  ]);
+  assert.deepEqual(filterArtworks(works, options({ query: '  ELODIE    teLa ' }), indexes)
+    .map(a => a.id), ['a']);
+  assert.deepEqual(filterArtworks(works, options({ query: 'citta olio' }), indexes)
+    .map(a => a.id), ['a']);
+  assert.deepEqual(filterArtworks(works, options({ query: 'citta acquerello' }), indexes), []);
+  assert.deepEqual(filterArtworks(works, options({ query: '   ' }), indexes)
+    .map(a => a.id), ['a', 'b', 'c']);
+});
+
+test('collector search combines acquired-work titles, name and address with accent folding', () => {
+  const people = [
+    collector('c1', { name: 'Élodie Rossi', address: 'Firenze' }),
+    collector('c2', { name: 'Elena Verdi', address: 'Torino' })
+  ];
+  const indexes = buildSaleIndexes([sale('a', 'c1', 'Luce marina', 'Élodie Rossi')]);
+  assert.deepEqual(filterCollectors(people, '  ELODIE    MARINA ', indexes).map(c => c.id), ['c1']);
+  assert.deepEqual(filterCollectors(people, 'luce torino', indexes), []);
+  assert.deepEqual(filterCollectors(people, 'élodie firenze', indexes).map(c => c.id), ['c1']);
+  assert.equal(filterCollectors(people, '   ', indexes), people);
+});
