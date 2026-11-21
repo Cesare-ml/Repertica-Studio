@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (ottava ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (nona ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -17,6 +17,7 @@ Data ricognizione: **2026-11-21** (ottava ricognizione). Stato uniforme: **Propo
 | [REPS-TECH-009](REPS-TECH-009-catalogo-verifiche-conservazione-backup.md) | Catalogo, verifica nel tempo e conservazione prudente delle copie di backup complete | P2 | Proposta — da valutare |
 | [REPS-TECH-010](REPS-TECH-010-storico-revisioni-metadati.md) | Cronologia locale delle revisioni dei metadati delle opere e recupero selettivo, senza alterare certificati o vendite | P2 | Proposta — da valutare |
 | [REPS-TECH-011](REPS-TECH-011-profili-multiarchivio-apertura-sicura.md) | Profili di più archivi **attivi ma indipendenti**, apertura e cambio di contesto sicuri, senza merge o sync | P1–P2 | Proposta — da valutare |
+| [REPS-TECH-012](REPS-TECH-012-migrazioni-archivio-preflight-copia-sicurezza.md) | Preflight read-only e checkpoint integrale verificato **prima** dell'aggiornamento dello schema SQLite, con recupero non distruttivo | P1–P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -91,3 +92,12 @@ Non è stata creata né considerata approvata una roadmap di sviluppo. Le priori
 3. Valutare sempre dati personali, assenza di lock-in, formati aperti, multilingua (lingua OS, fallback inglese), funzionamento offline-first, assenza di account o abbonamenti e scelta libera della cartella.
 4. Modificare **solo Markdown dentro questa cartella**, usando un branch e una PR esclusivamente documentali. Non toccare `docs/idee/gestione-e-ux/`; niente merge automatici, modifiche al codice, issue operative o assegnazioni implicite.
 5. Se emergono trade-off inconciliabili, registrarli come domanda al proprietario: non decidere in sua vece.
+
+## Nona ricognizione — 21 novembre 2026
+
+Dopo una nuova lettura di [`main`](../../../README.md), [MVP](../../MVP.md), [portabilità](../../DATA-PORTABILITY.md), [`db.rs`](../../../src-tauri/src/db.rs), [`lib.rs`](../../../src-tauri/src/lib.rs), [`backup.rs`](../../../src-tauri/src/backup.rs), delle undici schede tecniche già presenti e delle sedici proposte del filone [gestione e UX (PR #14)](https://github.com/Cesare-ml/Repertica-Studio/pull/14), è stata isolata **una** proposta sulla protezione degli archivi storici durante un futuro cambio di schema.
+
+- **[REPS-TECH-012](REPS-TECH-012-migrazioni-archivio-preflight-copia-sicurezza.md) — Migrazioni dell'archivio con preflight e copia di sicurezza verificata.** `db::open` applica oggi le migrazioni transazionali all'avvio e rifiuta schemi più nuovi, ma non è presente una fase preliminare dedicata a creare **prima** una copia autonoma di SQLite e media verificata. I backup completi *su richiesta* già esistono: la nuova idea riguarda **solo il momento e le garanzie del cambio di schema**, inclusi errore, WAL, foto storiche, recupero e compatibilità.
+- **Confini anti-doppione:** non ripete TECH-009 (catalogo/verifica periodica dei backup), TECH-010 (revisioni dei metadati), TECH-001 (formato di interscambio), TECH-011 (profili di più archivi), [issue #4](https://github.com/Cesare-ml/Repertica-Studio/issues/4) (aggiornamenti software firmati) o [issue #7](https://github.com/Cesare-ml/Repertica-Studio/issues/7) (collaudo backup). Non altera il catalogo gestione/UX, che tratta processi professionali.
+- **Rischio da non esagerare:** transazioni e ripristini esistenti proteggono già vari scenari, e non risulta dimostrata una perdita reale. La proposta richiede studio del preflight davvero read-only, scelta libera della cartella, disponibilità spazio, interruzioni e test su filesystem. P1–P2 è soltanto un suggerimento, **non un'autorizzazione**.
+- **Perimetro:** aggiunti solo la nuova scheda Markdown e questo indice sotto `docs/idee/strumenti-e-architettura/`. Nessun codice, test, workflow, impostazione o documento dell'altra attività è stato cambiato. La [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta in bozza e non deve essere unita automaticamente.
