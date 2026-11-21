@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (decima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (undicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -19,6 +19,7 @@ Data ricognizione: **2026-11-21** (decima ricognizione). Stato uniforme: **Propo
 | [REPS-TECH-011](REPS-TECH-011-profili-multiarchivio-apertura-sicura.md) | Profili di più archivi **attivi ma indipendenti**, apertura e cambio di contesto sicuri, senza merge o sync | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-012](REPS-TECH-012-migrazioni-archivio-preflight-copia-sicurezza.md) | Preflight read-only e checkpoint integrale verificato **prima** dell'aggiornamento dello schema SQLite, con recupero non distruttivo | P1–P2 | Proposta — da valutare |
 | [REPS-TECH-013](REPS-TECH-013-copie-fotografiche-condivisibili-privacy-metadati.md) | Copie fotografiche condivisibili con privacy dei metadati e originali intatti | P2 | Proposta — da valutare |
+| [REPS-TECH-014](REPS-TECH-014-bridge-mcp-locale-lettura-permessi.md) | Bridge MCP locale STDIO in lettura con scope minimo, consensi revocabili e confine esplicito con gli host IA esterni (approfondisce issue #3) | P1–P2 | Proposta — da valutare |
 
 ## Ricognizione e confini
 
@@ -112,3 +113,13 @@ Riletti nuovamente `main` ([MVP](../../MVP.md), [DATA-PORTABILITY](../../DATA-PO
 - **Verifica di attualità:** [DATA-PORTABILITY](../../DATA-PORTABILITY.md) documenta ora **sette** tipi di esportazione CSV, incluso `balances` (saldi delle vendite). I riferimenti a cinque o sei CSV nelle ricognizioni storiche rappresentano stati precedenti, non il totale corrente. Il nuovo studio non duplica questi CSV né i backup.
 - **Rischi e validazioni:** prove con fixture sintetiche nei tre formati, orientamento EXIF, fedeltà cromatica/ICC, pulizia dei chunk, output non sovrascritto, difesa da file malevoli e collaudo su cartelle rimovibili. Prima di decidere, verificare con utenti reali se inviano spesso foto a terzi e se preferiscono uno strumento esterno. **P2 è un suggerimento, non un mandato.**
 - **Perimetro:** modificati esclusivamente Markdown di questa cartella sulla [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), da lasciare **in bozza, non unita**. Nessun codice, test, build, workflow, impostazione, dipendenza o issue operativa modificati. Stato uniforme **Proposta — da valutare**.
+
+
+## Undicesima ricognizione — 21 novembre 2026
+
+Riesaminati il branch `main` (README, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/lib.rs`, `src-tauri/src/commands.rs`, `src/app/api.ts`, `src-tauri/capabilities/default.json`), le **13 proposte tecniche** precedenti e le **18 schede Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Verificata anche la [issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) già dedicata al server MCP locale via STDIO, non ancora presente nel `main` esaminato.
+
+- **[REPS-TECH-014](REPS-TECH-014-bridge-mcp-locale-lettura-permessi.md) — Bridge MCP locale read-only e consensi revocabili:** non inventa una funzionalità né apre una seconda issue; **approfondisce l'esigenza già registrata nella issue #3**, concentrandosi sulle scelte rimaste aperte (sottoprocesso STDIO, broker con app aperta o helper autonomo, limiti di campo, revoca, protezione dei dati dei collezionisti, compatibilità delle versioni e test cross-platform). Nel codice oggi i comandi Tauri comprendono anche scritture: l'eventuale bridge non deve esporli o farvi da proxy.
+- **Confine di privacy essenziale:** l'assenza di porte di rete nel bridge non impedisce a un **client MCP/IA esterno** di trasmettere a servizi online i dati letti. Gli ambiti vanno applicati nel backend, non dedotti da `readOnlyHint`, nomi dei client o etichette UI. Default disabilitato, sola lettura, revoca, niente SQL/path arbitrari. L'esecuzione di un client con gli stessi privilegi dell'utente non viene resa innocua dall'API MCP.
+- **Nessun doppione:** TECH-002 riguarda automazioni interne avviate dall'app, TECH-001 scambio completo, TECH-004 ricerca federata di backup e TECH-008 filtri nell'interfaccia; UX-001…018 riguardano processi gestionali e non vengono modificati. Priorità P1–P2 **solo proposta**, non un incarico. La scheda distingue requisiti già documentati, ipotesi e decisioni per il proprietario.
+- **Perimetro:** questo indice e la scheda sono esclusivamente Markdown sotto `docs/idee/strumenti-e-architettura/`. Nessun codice, build, workflow, dipendenza, altra cartella, issue operativa o merge. Tutte le **14 proposte** restano nello stato **«Proposta — da valutare»**; PR [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) aperta e in bozza.
