@@ -76,5 +76,7 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+          # The project has no `tauri` npm script (only tauri:dev / tauri:build), so call the CLI directly.
+          tauriScript: npx tauri
           # The extra config only switches on the signed update packages, which need the private key.
           args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
