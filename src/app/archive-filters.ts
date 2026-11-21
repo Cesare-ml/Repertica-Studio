@@ -25,20 +25,38 @@ export function buildSaleIndexes(sales: Sale[]): SaleIndexes {
   return { byCollector, byArtwork };
 }
 
+/** Normalize Latin diacritics and case for local, language-independent search. */
+function foldSearch(value: string): string {
+  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+}
+
+/**
+ * All whitespace-separated terms must match, but they can appear in different
+ * fields (for example an artwork's technique and its buyer's name).
+ */
+function searchTerms(query: string): string[] {
+  return foldSearch(query).trim().split(/\s+/u).filter(Boolean);
+}
+
+function matchesTerms(terms: string[], fields: Array<string | null | undefined>): boolean {
+  if (terms.length === 0) return true;
+  const text = foldSearch(fields.map(field => field ?? '').join(' '));
+  return terms.every(term => text.includes(term));
+}
+
 export function filterArtworks(
   artworks: Artwork[],
   filters: ArtworkFilters,
   indexes: SaleIndexes
 ): Artwork[] {
-  const q = filters.query.trim().toLocaleLowerCase('it');
+  const terms = searchTerms(filters.query);
   const acquiredIds = filters.collectorId === 'all' ? null :
     new Set((indexes.byCollector[filters.collectorId] ?? []).map(s => s.artwork_id));
   const visible = artworks.filter(a =>
     (filters.status === 'all' || a.status === filters.status) &&
     (acquiredIds === null || acquiredIds.has(a.id)) &&
-    (!q || [a.title, a.code, a.year, a.technique, a.support, a.location, a.description,
-      indexes.byArtwork[a.id]?.collector_name]
-      .some(value => (value ?? '').toLocaleLowerCase('it').includes(q))));
+    matchesTerms(terms, [a.title, a.code, a.year, a.technique, a.support, a.location,
+      a.description, indexes.byArtwork[a.id]?.collector_name]));
 
   if (filters.order === 'title') {
     return visible.sort((a, b) =>
@@ -62,10 +80,9 @@ export function filterCollectors(
   query: string,
   indexes: SaleIndexes
 ): Collector[] {
-  const q = query.trim().toLocaleLowerCase('it');
-  if (!q) return collectors;
+  const terms = searchTerms(query);
+  if (terms.length === 0) return collectors;
   return collectors.filter(c =>
-    [c.name, c.email, c.phone, c.address, c.notes,
-      ...(indexes.byCollector[c.id] ?? []).map(s => s.artwork_title)]
-      .some(value => (value ?? '').toLocaleLowerCase('it').includes(q)));
+    matchesTerms(terms, [c.name, c.email, c.phone, c.address, c.notes,
+      ...(indexes.byCollector[c.id] ?? []).map(s => s.artwork_title)]));
 }
