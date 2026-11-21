@@ -121,6 +121,7 @@ pub fn save_expense(db:State<'_,Database>,input:ExpenseInput)->Result<Expense,St
     }
     let notes=opt_text(input.notes,20000)?;
     let c=db.conn.lock().map_err(error)?;
+    let updating=input.id.is_some();
     let id=input.id.unwrap_or_else(||Uuid::new_v4().to_string());
     let exists:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM expenses WHERE id=?1)",params![id],|r|r.get(0)).map_err(error)?;
     let now=Utc::now().to_rfc3339();
@@ -128,7 +129,7 @@ pub fn save_expense(db:State<'_,Database>,input:ExpenseInput)->Result<Expense,St
         c.execute("UPDATE expenses SET expense_date=?2,category=?3,description=?4,amount_cents=?5,fund=?6,supplier=?7,purchase_url=?8,notes=?9,updated_at=?10 WHERE id=?1",
             params![id,input.expense_date,category,description,input.amount_cents,input.fund,supplier,purchase_url,notes,now]).map_err(error)?;
     }else{
-        if input.id.is_some() {return Err("Expense does not exist".into());}
+        if updating {return Err("Expense does not exist".into());}
         c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
             params![id,input.expense_date,category,description,input.amount_cents,input.fund,supplier,purchase_url,notes,now]).map_err(error)?;
     }
