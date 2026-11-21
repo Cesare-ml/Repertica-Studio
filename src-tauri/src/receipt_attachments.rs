@@ -262,7 +262,9 @@ mod tests {
         assert_eq!(saved.size_bytes, 16);
         assert!(data_core(&db, "r").unwrap().starts_with("data:application/pdf;base64,"));
         let exported = tmp.path().join("copy.pdf");
-        assert_eq!(export_core(&db, "r", &exported).unwrap(), exported.to_string_lossy());
+        // The reported path is canonical (`\\?\` prefixed on Windows).
+        let reported = export_core(&db, "r", &exported).unwrap();
+        assert_eq!(Path::new(&reported), fs::canonicalize(&exported).unwrap());
         assert_eq!(fs::read(&exported).unwrap(), b"%PDF-1.7\nreceipt");
         assert!(export_core(&db, "r", &exported).is_err()); // never overwrite
         assert!(export_core(&db, "r", &tmp.path().join("wrong.png")).is_err());
