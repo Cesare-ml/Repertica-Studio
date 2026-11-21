@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (ventitreesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-22** (ventiquattresima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -32,6 +32,15 @@ Data ricognizione: **2026-11-21** (ventitreesima ricognizione). Stato uniforme: 
 | [REPS-TECH-024](REPS-TECH-024-metadati-fotografici-iptc-xmp-interoperabili.md) | Lettura e interscambio selettivo dei metadati fotografici IPTC/XMP, con conflitti espliciti, originali intatti e nessun trasferimento implicito di diritti | P2 | Proposta — da valutare |
 | [REPS-TECH-025](REPS-TECH-025-esportazioni-tabellari-minimizzate-condivisione.md) | Copie tabellari con sole colonne e righe deliberatamente condivisibili, anteprima e protezioni conservative, senza alterare CSV integrali o backup | P2 | Proposta — da valutare |
 | [REPS-TECH-026](REPS-TECH-026-backup-compatti-snapshot-verificabili.md) | Studio di backup compatti **opt-in** per archivi multimediali grandi, con snapshot logici verificabili, copia integrale indipendente sempre esportabile e nessuna cancellazione implicita | P3; P2 solo con bisogno misurato | Proposta — da valutare |
+| [REPS-TECH-027](REPS-TECH-027-importazione-fotografie-heic-heif-offline.md) | Importazione facoltativa di fotografie HEIC/HEIF da smartphone con originale preservato, derivati dichiarati, sicurezza codec e funzionamento offline | P2 condizionata; P3 se workaround sufficiente | Proposta — da valutare |
+
+## Ventiquattresima ricognizione — 22 novembre 2026 — REPS-TECH-027
+
+- **[REPS-TECH-027 — Importazione offline delle fotografie HEIC/HEIF](REPS-TECH-027-importazione-fotografie-heic-heif-offline.md):** possibile miglioramento concreto per foto ricevute da iPhone/smartphone: conservare byte dell'originale, produrre eventualmente anteprime e derivati JPEG/PNG utilizzabili nell'archivio, distinguere i limiti di decoder, colore e metadati. **P2 condizionata** a bisogni verificati; in alternativa P3 o semplice guida alla conversione locale, senza nuove dipendenze.
+- **Verifica su `main`:** `imaging.rs`, `gallery.rs`, `commands.rs` e filtro del Media Center consentono oggi **JPEG/PNG/WebP**; `Cargo.toml` abilita soltanto questi codec. Il RAW allegabile è separato dalle immagini visibili. Non è stata misurata la richiesta degli utenti né provata una compatibilità HEIC nativa.
+- **Anti-doppione:** TECH-021 tratta profili ICC, TECH-024 metadati IPTC/XMP, TECH-013 privacy di copie esterne, TECH-005 cache/anteprime generali; la proposta si limita all'**ingresso affidabile e alla consultazione** del formato HEIC/HEIF. Le **31 schede UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) non sono state modificate.
+- **Salvaguardie:** funzionamento offline senza codec scaricati automaticamente, originali e hash intatti, backup indipendente, derivati dichiarati e nessun HEIC rinominato JPEG, nessuna condivisione implicita di GPS. Decoder, licenze, possibili brevetti HEVC, vulnerabilità e compatibilità multipiattaforma richiedono audit prima di qualunque scelta tecnica. [Apple Support](https://support.apple.com/en-jo/116944) · [libheif, studio delle alternative](https://github.com/strukturag/libheif).
+- **Esito:** catalogo di **27 proposte**, tutte «Proposta — da valutare». Solo la nuova scheda e questo indice Markdown nella cartella tecnica; nessuna approvazione, implementazione, issue o merge. Revisione del proprietario tramite [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
 
 ## Ventitreesima ricognizione — 21 novembre 2026 — REPS-TECH-026
 
