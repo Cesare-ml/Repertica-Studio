@@ -261,7 +261,7 @@ fn artwork_pages(item:&BrochureItem, art:&ArtPage,photo:Photo,page_num:u32)->Vec
     let technical=format!("{}  ·  {}  ·  {}  ·  {}",
         art.code,art.year.as_deref().unwrap_or(""),
         [art.technique.as_deref().unwrap_or(""),art.support.as_deref().unwrap_or("")].iter().filter(|x|!x.is_empty()).copied().collect::<Vec<_>>().join(" / "),
-        match (art.height,art.width) {(Some(h),Some(w))=>format!("{h:g} × {w:g} cm"),_=>String::new()});
+        match (art.height,art.width) {(Some(h),Some(w))=>format!("{h} × {w} cm"),_=>String::new()});
     let (allowed_chars,description_capacity) = match item.template.as_str() {
         "details"=>(32,28), "full_bleed"=>(85,4),_=>(91,7)
     };
@@ -386,7 +386,8 @@ pub fn export_brochure_pdf(db: State<'_,Database>, brochure_id:String, destinati
         let path=artwork.image_path.as_deref()
             .ok_or_else(||format!("Manca la fotografia per l'opera {}",artwork.title))?;
         let photo=load_photo(&db,path)?;
-        pages.extend(artwork_pages(item,&artwork,photo,pages.len() as u32+1));
+        let next_page=pages.len() as u32+1;
+        pages.extend(artwork_pages(item,&artwork,photo,next_page));
     }
     pages.push(contacts(&document));
     let pdf=render_pdf(pages);
