@@ -34,7 +34,7 @@ button.destructive:hover{background:#fff2f0}
 .brochure-panel{background:white;border-radius:13px;border:1px solid #e3e9e4;padding:23px;display:grid;gap:17px}
 .panel-caption{font-size:11px;letter-spacing:1.3px;font-weight:700;text-transform:uppercase;color:#5c796c;margin-bottom:2px}
 .brochure-panel label{display:grid;gap:6px;font-size:12px;color:#56675e;font-weight:600;min-width:0}
-.brochure-panel input:not([type=checkbox]),.brochure-panel textarea,.brochure-panel select{font:14px inherit;color:#253e34;width:100%;min-width:0;box-sizing:border-box;outline:none;background:#fcfdfb;border:1px solid #d6e0d8;border-radius:8px;padding:10px 11px}
+.brochure-panel input:not([type=checkbox]),.brochure-panel textarea,.brochure-panel select{font:inherit;font-size:14px;color:#253e34;width:100%;min-width:0;box-sizing:border-box;outline:none;background:#fcfdfb;border:1px solid #d6e0d8;border-radius:8px;padding:10px 11px}
 .brochure-panel input:focus,.brochure-panel textarea:focus,.brochure-panel select:focus{border-color:#658b78;box-shadow:0 0 0 3px #edf4ef}
 .brochure-panel textarea{resize:vertical;line-height:1.55}
 .two-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
