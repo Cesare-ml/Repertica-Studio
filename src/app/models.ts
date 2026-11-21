@@ -20,7 +20,7 @@ export interface Artwork {
 export type ArtworkInput = Pick<Artwork,
   'code' | 'title' | 'year' | 'technique' | 'support' | 'width_cm' |
   'height_cm' | 'depth_cm' | 'description' | 'location' | 'status'
-> & { id?: string };
+> & { id?: string; expected_updated_at?: string };
 
 export interface GalleryImage {
   id: string; artwork_id: string; image_path: string;
@@ -40,7 +40,7 @@ export interface Collector {
   id: string; name: string; email: string | null; phone: string | null;
   address: string | null; notes: string | null; created_at: string; updated_at: string;
 }
-export type CollectorInput = Pick<Collector, 'name' | 'email' | 'phone' | 'address' | 'notes'> & { id?: string };
+export type CollectorInput = Pick<Collector, 'name' | 'email' | 'phone' | 'address' | 'notes'> & { id?: string; expected_updated_at?: string };
 
 export interface Sale {
   id: string; artwork_id: string; collector_id: string; amount_cents: number;
