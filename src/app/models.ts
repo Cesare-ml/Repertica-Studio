@@ -1,3 +1,42 @@
+/** Personal email is separate from newsletter campaigns. Secrets are never returned by IPC. */
+export interface MailAccount {
+  id: string; email: string; display_name: string;
+  imap_host: string; imap_port: number; imap_username: string;
+  smtp_host: string; smtp_port: number; smtp_username: string;
+  sent_folder: string; signature: string;
+  created_at: string; updated_at: string;
+}
+export type MailAccountInput = Omit<MailAccount,'created_at'|'updated_at'|'id'> & {
+  id?: string | null; imap_password?: string | null; smtp_password?: string | null;
+};
+export interface MailFolder { name: string; role: 'inbox'|'sent'|'drafts'|'trash'|'junk'|'other'; }
+export interface MailHeader {
+  uid: number; uid_validity: number; folder: string;
+  subject: string; from: string; date: string; seen: boolean;
+  flagged: boolean; size: number;
+}
+export interface MailList {
+  folder: string; uid_validity: number; exists: number; items: MailHeader[];
+}
+export interface MailDetail {
+  header: MailHeader; body: string; html_only: boolean; attachment_count: number;
+}
+export interface MailDraft {
+  id: string; account_id: string; to: string; cc: string; bcc: string;
+  subject: string; body: string; revision: number; updated_at: string;
+  attachments: string[];
+}
+export type MailDraftInput = Omit<MailDraft,'updated_at'|'revision'|'id'> & {
+  id?: string | null; revision?: number | null;
+};
+export interface MailSendInput {
+  account_id: string; to: string; cc: string; bcc: string;
+  subject: string; body: string; confirm: boolean; attachments: string[];
+}
+export interface MailSendResult {
+  delivery: 'accepted'; sent_copy: 'saved'|'not_saved'|'not_configured';
+}
+
 export type ArtworkStatus = 'available' | 'reserved' | 'sold' | 'archived';
 
 // Publication Engine documents are independent from the exported PDF snapshots.

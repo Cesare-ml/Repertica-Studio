@@ -201,6 +201,10 @@
     </section>
 
 
+    <section *ngIf="section === 'mail'" class="page mail-section">
+      <rp-business-mail [language]="language" [collectors]="collectors"></rp-business-mail>
+    </section>
+
     <section *ngIf="section === 'brochures'" class="page brochure-section">
       <rp-brochures [artworks]="artworks" [language]="language"></rp-brochures>
     </section>

@@ -3,6 +3,7 @@ mod archive_code;
 mod auto_backup;
 mod backup;
 mod brochures;
+mod business_mail;
 mod collectors;
 mod commands;
 pub mod db;
@@ -39,6 +40,17 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            business_mail::mail_list_accounts,
+            business_mail::mail_save_account,
+            business_mail::mail_remove_account,
+            business_mail::mail_test_account,
+            business_mail::mail_list_folders,
+            business_mail::mail_list_messages,
+            business_mail::mail_read_message,
+            business_mail::mail_list_drafts,
+            business_mail::mail_save_draft,
+            business_mail::mail_remove_draft,
+            business_mail::mail_send,
             brochures::list_brochures,
             brochures::save_brochure,
             brochures::delete_brochure,

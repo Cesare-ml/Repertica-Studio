@@ -1,6 +1,8 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   Artwork, ArtworkInput, Brochure, Collector, CollectorInput, Sale, SaleInput,
+  MailAccount, MailAccountInput, MailFolder, MailList, MailDetail, MailDraft,
+  MailDraftInput, MailSendInput, MailSendResult,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleBalance, ReceiptYearOverview, ReceiptAttachment, MediaAudit, McpSetup,
@@ -14,6 +16,19 @@ import type { CsvRegisterKind } from './csv-registers';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
 export const api = {
+  mailListAccounts: () => invoke<MailAccount[]>('mail_list_accounts'),
+  mailSaveAccount: (input: MailAccountInput) => invoke<MailAccount>('mail_save_account', {input}),
+  mailRemoveAccount: (accountId: string) => invoke<void>('mail_remove_account', {accountId}),
+  mailTestAccount: (accountId: string) => invoke<{ok: boolean; folders: number}>('mail_test_account', {accountId}),
+  mailListFolders: (accountId: string) => invoke<MailFolder[]>('mail_list_folders', {accountId}),
+  mailListMessages: (accountId: string, folder: string) => invoke<MailList>('mail_list_messages',{accountId,folder}),
+  mailReadMessage: (accountId: string, folder: string, uid: number, uidValidity: number) =>
+    invoke<MailDetail>('mail_read_message',{accountId,folder,uid,uidValidity}),
+  mailListDrafts: (accountId: string) => invoke<MailDraft[]>('mail_list_drafts', {accountId}),
+  mailSaveDraft: (input: MailDraftInput) => invoke<MailDraft>('mail_save_draft', {input}),
+  mailRemoveDraft: (accountId: string, draftId: string, revision: number) =>
+    invoke<void>('mail_remove_draft', {accountId,draftId,revision}),
+  mailSend: (input: MailSendInput) => invoke<MailSendResult>('mail_send', {input}),
   listBrochures: () => invoke<Brochure[]>('list_brochures'),
   saveBrochure: (input: Brochure) => invoke<Brochure>('save_brochure', { input }),
   deleteBrochure: (id: string) => invoke<void>('delete_brochure', { id }),
