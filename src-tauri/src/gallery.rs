@@ -198,7 +198,7 @@ fn move_core(db: &Database, artwork_id: &str, image_id: &str, direction: &str) -
         let rows = statement.query_map(params![artwork_id], |r| r.get::<_, String>(0)).map_err(err)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(err)?
     };
-    let index = ordered_ids.iter().position(|id| id == image_id)
+    let index = ordered_ids.iter().position(|id| id.as_str() == image_id)
         .ok_or("Fotografia non trovata per questa opera")?;
     let neighbor = if direction == "up" {
         index.checked_sub(1)
