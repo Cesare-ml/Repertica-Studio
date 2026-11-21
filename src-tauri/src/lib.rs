@@ -40,6 +40,7 @@ pub fn run() {
             gallery::add_artwork_gallery_image,
             gallery::update_artwork_gallery_caption,
             gallery::promote_artwork_gallery_image,
+            gallery::move_artwork_gallery_image,
             gallery::artwork_gallery_image_data,
             gallery::delete_artwork_gallery_image,
             backup::create_backup,

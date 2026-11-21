@@ -513,6 +513,16 @@ export class AppComponent implements OnInit {
       }
     }, this.tr('Didascalia aggiornata'));
   }
+  async moveGalleryPhoto(image: GalleryImage, direction: 'up' | 'down'): Promise<void> {
+    const artwork = this.galleryArtwork;
+    if (!artwork || this.busy || image.artwork_id !== artwork.id) return;
+    const moved = await this.run(() => api.moveArtworkGalleryImage(artwork.id, image.id, direction),
+      this.tr('Ordine fotografie aggiornato'));
+    if (moved && this.galleryArtwork?.id === artwork.id) {
+      this.galleryImages = await api.listArtworkGallery(artwork.id);
+      this.change.detectChanges();
+    }
+  }
   async loadGalleryPreview(image: GalleryImage): Promise<void> {
     if (this.galleryPreviews[image.id]) return;
     try {

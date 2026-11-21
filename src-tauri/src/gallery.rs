@@ -11,12 +11,12 @@ use uuid::Uuid;
 #[derive(Debug, Serialize)]
 pub struct GalleryImage {
     id: String, artwork_id: String, image_path: String,
-    caption: Option<String>, created_at: String,
+    caption: Option<String>, created_at: String, sort_order: i64,
 }
 fn err(e: impl std::fmt::Display) -> String { e.to_string() }
 fn row(r: &Row<'_>) -> rusqlite::Result<GalleryImage> {
     Ok(GalleryImage { id: r.get(0)?, artwork_id: r.get(1)?, image_path: r.get(2)?,
-        caption: r.get(3)?, created_at: r.get(4)? })
+        caption: r.get(3)?, created_at: r.get(4)?, sort_order: r.get(5)? })
 }
 fn relative_media_path(path: &str) -> bool {
     let mut components = Path::new(path).components();
@@ -44,15 +44,15 @@ fn update_caption_core(db: &Database, image_id: &str, caption: Option<String>) -
     let updated = conn.execute("UPDATE artwork_images SET caption=?2 WHERE id=?1",
         params![image_id, caption]).map_err(err)?;
     if updated == 0 { return Err("Fotografia non trovata".into()); }
-    conn.query_row("SELECT id,artwork_id,image_path,caption,created_at FROM artwork_images WHERE id=?1",
+    conn.query_row("SELECT id,artwork_id,image_path,caption,created_at,sort_order FROM artwork_images WHERE id=?1",
         params![image_id], row).map_err(err)
 }
 fn list_core(db: &Database, artwork_id: &str) -> Result<Vec<GalleryImage>, String> {
     let conn = db.conn.lock().map_err(err)?;
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)", params![artwork_id], |r| r.get(0)).map_err(err)?;
     if !exists { return Err("Opera non trovata".into()); }
-    let mut query = conn.prepare("SELECT id,artwork_id,image_path,caption,created_at FROM artwork_images
-        WHERE artwork_id=?1 ORDER BY created_at,id").map_err(err)?;
+    let mut query = conn.prepare("SELECT id,artwork_id,image_path,caption,created_at,sort_order FROM artwork_images
+        WHERE artwork_id=?1 ORDER BY sort_order,id").map_err(err)?;
     let result = query.query_map(params![artwork_id], row).map_err(err)?
         .collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(result)
@@ -80,11 +80,12 @@ pub fn add_artwork_gallery_image(db: State<'_, Database>, artwork_id: String, da
     fs::write(&temp, &bytes).map_err(err)?;
     if let Err(e) = fs::rename(&temp, &target) { let _ = fs::remove_file(&temp); return Err(err(e)); }
     let stamp = Utc::now().to_rfc3339();
-    if let Err(e) = conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at)
-        VALUES(?1,?2,?3,?4,?5)", params![id, artwork_id, relative, caption, stamp]) {
+    if let Err(e) = conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
+        VALUES(?1,?2,?3,?4,?5,
+            (SELECT COALESCE(MAX(sort_order),0)+1 FROM artwork_images WHERE artwork_id=?2))", params![id, artwork_id, relative, caption, stamp]) {
         let _ = fs::remove_file(&target); return Err(err(e));
     }
-    conn.query_row("SELECT id,artwork_id,image_path,caption,created_at FROM artwork_images WHERE id=?1",
+    conn.query_row("SELECT id,artwork_id,image_path,caption,created_at,sort_order FROM artwork_images WHERE id=?1",
         params![id], row).map_err(err)
 }
 #[tauri::command]
@@ -136,6 +137,43 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
 pub fn promote_artwork_gallery_image(db: State<'_, Database>, artwork_id: String, image_id: String) -> Result<(), String> {
     promote_core(&db, &artwork_id, &image_id)
 }
+/// Reorder one photo by one position, keeping media paths and all historical metadata.
+fn move_core(db: &Database, artwork_id: &str, image_id: &str, direction: &str) -> Result<(), String> {
+    if direction != "up" && direction != "down" { return Err("Direzione non valida".into()); }
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let position: i64 = tx.query_row(
+        "SELECT sort_order FROM artwork_images WHERE id=?1 AND artwork_id=?2",
+        params![image_id,artwork_id], |r|r.get(0),
+    ).optional().map_err(err)?.ok_or("Fotografia non trovata per questa opera")?;
+    let neighbor: Option<(String,i64)> = if direction == "up" {
+        tx.query_row("SELECT id,sort_order FROM artwork_images
+            WHERE artwork_id=?1 AND (sort_order<?2 OR (sort_order=?2 AND id<?3))
+            ORDER BY sort_order DESC,id DESC LIMIT 1",
+            params![artwork_id,position,image_id], |r|Ok((r.get(0)?,r.get(1)?)))
+            .optional().map_err(err)?
+    } else {
+        tx.query_row("SELECT id,sort_order FROM artwork_images
+            WHERE artwork_id=?1 AND (sort_order>?2 OR (sort_order=?2 AND id>?3))
+            ORDER BY sort_order,id LIMIT 1",
+            params![artwork_id,position,image_id], |r|Ok((r.get(0)?,r.get(1)?)))
+            .optional().map_err(err)?
+    };
+    if let Some((neighbor_id,neighbor_position)) = neighbor {
+        let changed = tx.execute("UPDATE artwork_images SET sort_order=CASE
+                WHEN id=?1 THEN ?3 WHEN id=?2 THEN ?4 END
+            WHERE artwork_id=?5 AND id IN (?1,?2)",
+            params![image_id,neighbor_id,neighbor_position,position,artwork_id]).map_err(err)?;
+        if changed != 2 { return Err("Scambio fotografie incompleto".into()); }
+    }
+    tx.commit().map_err(err)
+}
+#[tauri::command]
+pub fn move_artwork_gallery_image(
+    db: State<'_, Database>, artwork_id: String, image_id: String, direction: String,
+) -> Result<(), String> {
+    move_core(&db, &artwork_id, &image_id, &direction)
+}
 #[tauri::command]
 pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
     let conn = db.conn.lock().map_err(err)?;
@@ -165,6 +203,41 @@ pub fn delete_artwork_gallery_image(db: State<'_, Database>, image_id: String) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reorder_is_scoped_persistent_and_preserves_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            for id in ["a","b"] {
+                c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES(?1,?1,?1,'t','t')",params![id]).unwrap();
+            }
+            for (id,art,pos) in [("one","a",1),("two","a",2),("three","a",3),("other","b",1)] {
+                c.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
+                    VALUES(?1,?2,?3,?4,'fixed',?5)",
+                    params![id,art,format!("media/{id}.png"),id,pos]).unwrap();
+            }
+        }
+        move_core(&db,"a","three","up").unwrap();
+        assert_eq!(list_core(&db,"a").unwrap().iter().map(|i|i.id.as_str()).collect::<Vec<_>>(),
+            vec!["one","three","two"]);
+        move_core(&db,"a","three","down").unwrap();
+        move_core(&db,"a","one","up").unwrap(); // boundary is no-op
+        assert!(move_core(&db,"b","one","up").is_err());
+        assert!(move_core(&db,"a","one","sideways").is_err());
+        assert!(move_core(&db,"a","absent","down").is_err());
+        for img in list_core(&db,"a").unwrap() {
+            assert_eq!(img.caption.as_deref(),Some(img.id.as_str()));
+            assert_eq!(img.image_path,format!("media/{}.png",img.id));
+            assert_eq!(img.created_at,"fixed");
+        }
+        assert_eq!(list_core(&db,"b").unwrap()[0].id,"other");
+        drop(db);
+        let reopened = crate::db::open(tmp.path().join("app")).unwrap();
+        assert_eq!(list_core(&reopened,"a").unwrap().iter().map(|i|i.id.as_str()).collect::<Vec<_>>(),
+            vec!["one","two","three"]);
+    }
     #[test]
     fn validation_rejects_traversal_and_invalid_formats() {
         assert!(!relative_media_path("media/../secret"));

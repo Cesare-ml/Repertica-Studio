@@ -24,7 +24,7 @@ export type ArtworkInput = Pick<Artwork,
 
 export interface GalleryImage {
   id: string; artwork_id: string; image_path: string;
-  caption: string | null; created_at: string;
+  caption: string | null; created_at: string; sort_order: number;
 }
 
 export interface Collector {
