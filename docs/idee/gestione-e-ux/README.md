@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (diciannovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **26 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-21** (ventesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **27 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -32,6 +32,15 @@ Aggiornato: **2026-11-21** (diciannovesima ricognizione). Stato delle proposte: 
 | [REPS-UX-024](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md) | Scadenziario facoltativo delle somme concordate per vendita, distinto dagli incassi effettivamente dichiarati e dal saldo autorevole | P1–P2* | Proposta — da valutare |
 | [REPS-UX-025](REPS-UX-025-istruzioni-allestimento-cura-opera.md) | Istruzioni di installazione, movimentazione e cura **della singola opera**: passaggi versionati, fonti e condivisione selettiva; non crea movimenti o report di condizione | P2* | Proposta — da valutare |
 | [REPS-UX-026](REPS-UX-026-diario-lavorazione-opera-fasi-datate.md) | Diario facoltativo del **processo di produzione originale** per opere già catalogate: eventi, date anche incerte, fonti e fotografie di lavorazione; non gestisce incarichi, costi o restauro | P2* | Proposta — da valutare |
+| [REPS-UX-027](REPS-UX-027-valute-estere-vendite-incassi-costi.md) | Valuta originaria di vendite, rate, incassi e spese, con riepiloghi per valuta e nessuna conversione implicita; compatibilità dei dati EUR esistenti | P1–P2* | Proposta — da valutare |
+
+## Ventesima ricognizione (21 novembre 2026) — REPS-UX-027
+
+- **[REPS-UX-027 — Vendite in valuta estera: importi originari, incassi e statistiche senza conversioni implicite](REPS-UX-027-valute-estere-vendite-incassi-costi.md):** proposta facoltativa per artisti/gallerie con operazioni fuori dall'eurozona. Una vendita **USD 2.200** non può essere sommata come se fosse **EUR 2.200**; incassi/rate devono mantenere la valuta contrattuale e le spese estere non devono entrare senza conversione nei margini EUR. Report per valuta sempre separati; un futuro equivalente gestionale richiederebbe **cambio manualmente dichiarato con fonte**, non un aggiornamento online o una conversione automatica.
+- **Fatti rilevati su `main`:** `src-tauri/src/models.rs` include già `Sale.currency`, ma gli input vendita non offrono la valuta e `commands.rs` scrive `currency='EUR'`; `finance.rs` descrive gli importi come centesimi EUR e aggrega vendite/spese, mentre il modello spese non include una valuta. `docs/MVP.md` annovera **multivaluta** tra i lavori mancanti, e i CSV esistenti sono dodici. Si tratta di un approfondimento di una **lacuna prevista**, non di un difetto misurato né di una funzionalità approvata.
+- **Coordinamento anti-doppione:** UX-023 copre il **prezzo richiesto/listino**, UX-002 le trattative, UX-012 gli accordi e le commissioni, UX-017 il gruppo di opere vendute, UX-003 i costi attribuiti; questa scheda riguarda soltanto **unità monetarie e significato dei totali** nei registri già esistenti. TECH-001/018/019 della [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) affrontano pacchetti aperti ed esportatori/importatori, non le regole gestionali; nessun loro file modificato.
+- **Vincoli:** l'esperienza EUR attuale resta predefinita e i dati storici devono restare invariati. Niente conti bancari, cambi online, conversioni automatiche, fatture o fiscalità; distinzione tra valore originario, incasso dichiarato e controvalore soltanto informativo. Lingua sistema/IT-EN-ES-FR-DE con fallback inglese, dati locali, backup/ripristino in cartella scelta, esportazioni compatibili e con valuta esplicita. Priorità **P1–P2 solo ipotetica** per chi lavora effettivamente con valute estere; prima interviste e alternative minime.
+- **Esito:** una nuova scheda Markdown e indice aggiornato, **27 proposte** tutte «Proposta — da valutare» nella [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), senza implementazione, approvazione, modifica ai file del filone tecnico o merge.
 
 ## Diciannovesima ricognizione (21 novembre 2026) — REPS-UX-026
 
