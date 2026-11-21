@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (ventitreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **30 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (ventiquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **31 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -35,8 +35,16 @@ Aggiornato: **2026-11-21** (ventitreesima ricognizione). Stato delle proposte: *
 | [REPS-UX-027](REPS-UX-027-valute-estere-vendite-incassi-costi.md) | Valuta originaria di vendite, rate, incassi e spese, con riepiloghi per valuta e nessuna conversione implicita; compatibilità dei dati EUR esistenti | P1–P2* | Proposta — da valutare |
 | [REPS-UX-028](REPS-UX-028-giustificativi-locali-spese-acquisti.md) | Giustificativi PDF/immagine locali per spese e acquisti, distinti dagli allegati agli incassi e senza generare ulteriori movimenti contabili | P1–P2* | Proposta — da valutare |
 | [REPS-UX-029](REPS-UX-029-dismissione-documentata-opere-senza-cancellazione.md) | Dismissione deliberata e documentata (distruzione/donazione/trasferimento), con storia dell'opera e decisione separate da movimento fisico, vendite e perdita non accertata | P2* | Proposta — da valutare |
-
 | [REPS-UX-030](REPS-UX-030-quadratura-facoltativa-estratti-conto-locali.md) | Quadratura facoltativa **solo locale** di incassi/spese con movimenti da CSV bancario selezionato dall'utente, anteprima e collegamenti manuali; nessun nuovo incasso automatico né collegamento online | P2–P3* | Proposta — da valutare |
+| [REPS-UX-031](REPS-UX-031-autorialita-opere-attribuzioni-collaborazioni.md) | Autorialità delle opere: attribuzioni anche incerte, più autori e identità distinte da proprietà, diritti, fotografia e vendite; prima verificare se basta un campo testuale opzionale | P2* (P1 solo se validato) | Proposta — da valutare |
+
+## Ventiquattresima ricognizione (22 novembre 2026) — REPS-UX-031
+
+- **[REPS-UX-031 — Autorialità delle opere: attribuzioni, collaborazioni e identità distinte](REPS-UX-031-autorialita-opere-attribuzioni-collaborazioni.md):** analisi di una possibile catalogazione autoriale facoltativa per gallerie, studi condivisi e archivi di opere di più artisti. Si distinguono creatore/autore dichiarato, attribuzione incerta, coautori, proprietario, custode, venditore, fotografo e titolare di diritti; nessuna relazione automatica produce autenticità, titolarità legale o percentuali economiche.
+- **Riscontro su `main`:** `Artwork` e `ArtworkInput` non espongono un autore strutturato; `Certificate.artist_name` è testo sul documento storico, `Brochure.artist` è testo della brochure e `studio_settings.artist_coefficient` è un parametro globale, non un profilo per autore. **Nessun difetto operativo dimostrato**, soltanto una possibile lacuna per archivi multi-artista.
+- **Alternativa più semplice:** un campo facoltativo «Autore/attribuzione» da validare con utenti prima di una directory di artisti, attribuzioni plurime e coefficienti specifici. Le vecchie opere non ricevono attribuzioni dedotte; certificati emessi e vendite non vengono riscritti.
+- **Coordinamento anti-doppione:** UX-021 riguarda **acquisizione e proprietà dichiarata**, UX-014 **contatti**, UX-010 **permessi e diritti**, UX-011 **cicli di opere**, UX-012 **accordi commerciali**. TECH-001/010/024 nella [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) affrontano portabilità, revisioni di metadati e metadati **fotografici**, non la semantica dell'autorialità dell'opera. Nessun file dell'altra automazione modificato.
+- **Priorità P2 ipotetica**, P1 solo se validata da gallerie/archivi con più autori. Offline, backup su cartella scelta, export aperto, lingua OS/fallback inglese e protezione delle note riservate rimangono vincoli. **31 schede**, tutte «Proposta — da valutare»: nessuna approvazione, assegnazione, modifica software o merge.
 
 ## Ventitreesima ricognizione (21 novembre 2026) — REPS-UX-030
 
