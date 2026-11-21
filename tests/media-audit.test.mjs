@@ -41,6 +41,7 @@ test('historic certificate snapshots with invalid JSON or image paths are surfac
   assert.match(rust, /path: "snapshot_json"\.into\(\)/);
   assert.match(source('src/app/models.ts'), /'invalid_snapshot'/);
   assert.match(source('src/app/app.component.ts'), /invalid_snapshot: 'Snapshot del certificato non valido'/);
+  assert.match(source('src/app/app.component.html'), /issue\.role === 'certificate' && issue\.imageId/);
   const translations = source('src/app/i18n.ts');
   assert.equal((translations.match(/"Snapshot del certificato non valido":/g) || []).length, 4);
 });
