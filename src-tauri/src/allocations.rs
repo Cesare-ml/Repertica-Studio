@@ -69,7 +69,16 @@ pub fn load_plan(conn: &Connection) -> Result<Plan, String> {
 /// Shares to freeze on a sale recorded now: empty when the split is switched off.
 pub fn shares_for_new_sale(conn: &Connection) -> Result<Vec<(String, i64)>, String> {
     if !enabled(conn)? { return Ok(vec![]); }
-    Ok(load_plan(conn)?.parts.into_iter().map(|p| (p.id, p.share_bp)).collect())
+    let shares: Vec<_> = load_plan(conn)?.parts.into_iter().map(|p| (p.id, p.share_bp)).collect();
+    // Imported or externally edited SQLite databases can contain an incomplete active
+    // plan even when each individual basis-point value passes its CHECK constraint.
+    // Refuse to freeze an invalid distribution on a new sale.
+    if shares.is_empty() || shares.len() > MAX_PARTS ||
+        shares.iter().any(|(_, bp)| !(0..=10_000).contains(bp)) ||
+        shares.iter().map(|(_, bp)| *bp).sum::<i64>() != 10_000 {
+        return Err("Il piano di ripartizione non è valido: le quote attive devono sommare al 100%".into());
+    }
+    Ok(shares)
 }
 
 /// Divide `net` cents by basis points; the last part takes the remainder so the cents always add up.
@@ -85,8 +94,21 @@ pub fn split(net: i64, shares_bp: &[i64]) -> Vec<i64> {
 }
 
 pub fn validate(input: &PlanInput) -> Result<(), String> {
+    // A disabled plan may be an unfinished draft, but must never contain the
+    // same persisted part twice: UPSERT would silently collapse both rows.
+    if input.parts.len() > MAX_PARTS {
+        return Err(format!("La ripartizione non può superare {MAX_PARTS} parti"));
+    }
+    let mut ids = std::collections::HashSet::new();
+    for part in &input.parts {
+        if let Some(id) = part.id.as_deref() {
+            if !ids.insert(id) {
+                return Err("La stessa parte della ripartizione non può essere usata due volte".into());
+            }
+        }
+    }
     if !input.enabled { return Ok(()); }
-    if input.parts.is_empty() || input.parts.len() > MAX_PARTS {
+    if input.parts.is_empty() {
         return Err(format!("La ripartizione deve avere da 1 a {MAX_PARTS} parti"));
     }
     let mut names: Vec<String> = Vec::new();
@@ -245,6 +267,39 @@ mod tests {
         assert_eq!(ids, vec!["personal", "savings"], "the unused 'activity' part is removed, the historical one stays");
         assert!(save_plan_core(&db, PlanInput { enabled: true, parts: vec![
             PartInput { id: Some("sconosciuta".into()), name: "X".into(), share_bp: 10000, pays_expenses: false }] }).is_err());
+    }
+
+    #[test]
+    fn duplicate_persisted_part_ids_are_rejected_before_writing_even_when_disabled() {
+        let (_dir, db) = setup();
+        let original = load_plan(&db.conn.lock().unwrap()).unwrap();
+        for enabled in [true, false] {
+            let bad = PlanInput { enabled, parts: vec![
+                PartInput { id: Some("personal".into()), name: "Autore".into(), share_bp: 6000, pays_expenses: false },
+                PartInput { id: Some("personal".into()), name: "Studio".into(), share_bp: 4000, pays_expenses: true },
+            ] };
+            assert!(save_plan_core(&db, bad).unwrap_err().contains("due volte"));
+            assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap().parts, original.parts);
+            assert_eq!(enabled(&db.conn.lock().unwrap()).unwrap(), original.enabled);
+        }
+    }
+
+    #[test]
+    fn corrupted_active_percentages_cannot_be_frozen_on_a_new_sale() {
+        let (_dir, db) = setup();
+        let mut c = db.conn.lock().unwrap();
+        c.execute("UPDATE allocation_parts SET share_bp=3000 WHERE id='personal'", []).unwrap();
+        assert!(shares_for_new_sale(&c).unwrap_err().contains("100%"));
+        c.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES('a','A','T','sold','t','t')", []).unwrap();
+        c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','C','t','t')", []).unwrap();
+        c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s','a','c',1000,'2026-11-21','t')", []).unwrap();
+        // The normal sale command performs this operation inside a transaction:
+        // no partially written finance row should survive a failed share validation.
+        let tx = c.transaction().unwrap();
+        assert!(crate::finance::attach_sale_finances(&tx, "s", 1000, 0, 0).is_err());
+        drop(tx);
+        let count: i64 = c.query_row("SELECT COUNT(*) FROM sale_finances WHERE sale_id='s'", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]
