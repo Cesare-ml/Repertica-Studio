@@ -2,13 +2,15 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21**. Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (seconda ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
 | [REPS-UX-001](REPS-UX-001-provenienza-movimentazioni.md) | Provenienza, ubicazioni e movimentazioni delle opere | P1 | Proposta — da valutare |
 | [REPS-UX-002](REPS-UX-002-trattative-prenotazioni.md) | Trattative, proposte e prenotazioni prima della vendita | P1–P2 | Proposta — da valutare |
 | [REPS-UX-003](REPS-UX-003-costo-e-margine-per-opera.md) | Scheda economica per opera e costi attribuiti | P2 | Proposta — da valutare |
+| [REPS-UX-004](REPS-UX-004-rapporti-stato-conservazione.md) | Rapporti di condizione e conservazione, con confronti datati | P2 | Proposta — da valutare |
+| [REPS-UX-005](REPS-UX-005-edizioni-multipli-serie-numerate.md) | Edizioni numerate, multipli e varianti con esemplari individuali | P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -16,7 +18,17 @@ Aggiornato: **2026-11-21**. Stato delle proposte: **Proposta — da valutare**.
 - [Issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13): incassi reali, documenti di acquisto, spese ricorrenti ed export CSV finanziario sono proposte già presenti; nessuna di queste tre idee le ripropone come novità.
 - [Issue #5](https://github.com/Cesare-ml/Repertica-Studio/issues/5): import da Gestionale Opere, non duplicato.
 - [Issue #3](https://github.com/Cesare-ml/Repertica-Studio/issues/3) e [#4](https://github.com/Cesare-ml/Repertica-Studio/issues/4): MCP locale e updater firmati appartengono al filone tecnico.
-- Al momento della ricognizione sul branch `main` non esisteva ancora `docs/idee/`; nessuna PR aperta nel repository. I nuovi file sono quindi i primi del filone **gestione e UX**.
+- Alla **prima** ricognizione sul branch `main` non esisteva ancora `docs/idee/`; la PR #14 ha introdotto il primo catalogo di gestione e UX. Le successive ricognizioni lavorano sulla medesima PR documentale in bozza.
+
+## Seconda ricognizione (21 novembre 2026)
+
+Le nuove proposte completano due lacune non coperte dalle prime schede o dalle issue aperte:
+
+- **REPS-UX-004** documenta rilievi dello stato fisico e confronti conservativi. Si distingue da UX-001 (movimenti/provenienza) e da [TECH-003, PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) (integrità dei file digitali). La [PR #17](https://github.com/Cesare-ml/Repertica-Studio/pull/17) propone una galleria fotografica locale, ancora distinta dal registro dei rilievi e non assunta come presente su `main`.
+- **REPS-UX-005** affronta la produzione e catalogazione professionale di edizioni numerate, copie fisiche e prove d'artista, non la sola immagine multipla di un'opera. Le regole correnti «una vendita per record opera» e «certificati immutabili» restano vincoli di progettazione.
+- L'altra automazione lavora esclusivamente sotto `docs/idee/strumenti-e-architettura/` e ha già proposto portabilità semantica, automazioni locali e diagnostica media. Nessun file del suo filone è stato modificato.
+- [Issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) comprende commissioni, incassi, documenti e cashflow: non viene duplicata in queste schede.
+- Nessuna priorità proposta costituisce approvazione o incarico di implementazione.
 
 ## Criteri editoriali
 
