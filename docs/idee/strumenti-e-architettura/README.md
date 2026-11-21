@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (sedicesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (diciassettesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -25,6 +25,14 @@ Data ricognizione: **2026-11-21** (sedicesima ricognizione). Stato uniforme: **P
 | [REPS-TECH-017](REPS-TECH-017-protezione-archivio-attivo-cifratura-facoltativa.md) | Protezione facoltativa dei dati dell'**archivio attivo a riposo** (SQLite, WAL, media, allegati e residui), distinta dai backup cifrati di TECH-006; alternative OS prima di cifratura integrata | P2–P3 | Proposta — da valutare |
 | [REPS-TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) | Esportazioni CSV degli otto registri a memoria contenuta, snapshot coerenti e pubblicazione finale non distruttiva; robustezza verificata su dischi e NAS | P2 | Proposta — da valutare |
 | [REPS-TECH-019](REPS-TECH-019-importazione-guidata-cataloghi-tabellari.md) | Importazione guidata da **CSV/TSV esterni non standard** con mappatura colonne, preflight di tutte le righe e conferma non distruttiva; distinta dal formato Repertica e dalla migrazione Gestionale Opere | P1–P2 | Proposta — da valutare |
+| [REPS-TECH-020](REPS-TECH-020-accessibilita-flussi-critici-tastiera-screen-reader.md) | Accessibilità verificabile dei dialoghi e delle operazioni critiche: focus, tastiera, screen reader, annunci, conferme, zoom e prove native, senza modificare logica e dati | P1–P2 | Proposta — da valutare |
+
+## Diciassettesima ricognizione — 21 novembre 2026 — REPS-TECH-020
+
+- **[REPS-TECH-020 — Accessibilità verificabile dei flussi critici desktop](REPS-TECH-020-accessibilita-flussi-critici-tastiera-screen-reader.md):** proposta di contratto di interazione per tastiera, focus nei dialoghi, annunci screen reader, conferme non ambigue di backup/ripristino, vendita, stampa e collegamento MCP. La verifica statica di `main` mostra già markup ARIA e pulsanti nativi, ma non una gestione esplicita e centralizzata del focus nei dialoghi Angular; il rischio **non è ancora un bug dimostrato in esecuzione**.
+- **Differenza dalle idee esistenti:** non crea un processo gestionale come UX-001…024 della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), né ripete TECH-015 (diagnostica), TECH-014 (permessi MCP) o TECH-012 (integrità delle migrazioni). Definisce criteri applicabili **trasversalmente** alle schermate, senza richiedere modifiche ora.
+- **Riscontri:** riletti `main` (README, MVP, `app.component.html`, `app.component.ts`, CSS, MCP), confronto con [W3C APG Dialog](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) e [WCAG 2.2](https://www.w3.org/TR/WCAG22/). Prima di qualsiasi scelta servono test manuali e casi riproducibili su Windows/macOS/Linux. **P1–P2 ipotetica**, non dichiarazione di conformità.
+- **Perimetro:** solo scheda Markdown e indice nella cartella tecnica; **20 proposte**, tutte «Proposta — da valutare». Nessuna implementazione, approvazione, issue operativa o merge. Revisione nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
 
 ## Sedicesima ricognizione — 21 novembre 2026 — REPS-TECH-019
 
