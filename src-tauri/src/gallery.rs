@@ -188,16 +188,26 @@ pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> 
     let (_, media_type) = mime(&bytes).ok_or("Formato file non valido")?;
     Ok(format!("data:{media_type};base64,{}", STANDARD.encode(bytes)))
 }
+fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(err)?;
+    let (artwork_id, relative): (String, String) = conn.query_row(
+        "SELECT artwork_id,image_path FROM artwork_images WHERE id=?1",
+        params![image_id], |r| Ok((r.get(0)?, r.get(1)?)),
+    ).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    if !relative_media_path(&relative) { return Err("Percorso media non valido".into()); }
+    // A previous cover can be in the gallery after promotion. Keep the bytes
+    // if any immutable certificate snapshot still refers to that historic cover.
+    let preserve = crate::commands::image_used_by_certificate(&conn, &artwork_id, &relative)?;
+    conn.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+    if !preserve {
+        // A failed unlink leaves an unreferenced file, never a broken DB link.
+        let _ = fs::remove_file(db.directory.join(relative));
+    }
+    Ok(())
+}
 #[tauri::command]
 pub fn delete_artwork_gallery_image(db: State<'_, Database>, image_id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(err)?;
-    let relative: String = conn.query_row("SELECT image_path FROM artwork_images WHERE id=?1",
-        params![image_id], |r| r.get(0)).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
-    if !relative_media_path(&relative) { return Err("Percorso media non valido".into()); }
-    conn.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
-    // A failed unlink leaves only an unreferenced media file, never a broken database link.
-    let _ = fs::remove_file(db.directory.join(relative));
-    Ok(())
+    delete_gallery_image_core(&db, &image_id)
 }
 
 #[cfg(test)]
@@ -238,6 +248,48 @@ mod tests {
         assert_eq!(list_core(&reopened,"a").unwrap().iter().map(|i|i.id.as_str()).collect::<Vec<_>>(),
             vec!["one","two","three"]);
     }
+    #[test]
+    fn deleting_promoted_old_cover_preserves_certified_photo() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        let historical = "media/certified.jpg";
+        fs::write(db.directory.join(historical), [0xff, 0xd8, 0xff, 0x01]).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','Artwork','t','t')",[]).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('former-cover','a',?1,'t')",params![historical]).unwrap();
+            conn.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('cert','a','RS-99','2026-11-21','Artist',?1,'t')",
+                params![r#"{"image_path":"media/certified.jpg"}"#]).unwrap();
+        }
+        delete_gallery_image_core(&db, "former-cover").unwrap();
+        assert!(db.directory.join(historical).is_file());
+        let conn = db.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT count(*) FROM artwork_images WHERE id='former-cover'", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn deleting_unreferenced_gallery_photo_removes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        let relative = "media/extra.jpg";
+        fs::write(db.directory.join(relative), [0xff, 0xd8, 0xff, 0x02]).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','Artwork','t','t')",[]).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('extra','a',?1,'t')",params![relative]).unwrap();
+        }
+        delete_gallery_image_core(&db, "extra").unwrap();
+        assert!(!db.directory.join(relative).exists());
+    }
+
     #[test]
     fn validation_rejects_traversal_and_invalid_formats() {
         assert!(!relative_media_path("media/../secret"));
