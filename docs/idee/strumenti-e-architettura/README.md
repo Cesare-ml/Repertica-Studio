@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-21** (ventiduesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-21** (ventitreesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -31,6 +31,15 @@ Data ricognizione: **2026-11-21** (ventiduesima ricognizione). Stato uniforme: *
 | [REPS-TECH-023](REPS-TECH-023-certificati-pdf-a-conservazione-verificabile.md) | Certificati da snapshot immutabili in PDF/A **validato realmente e offline**, distinguendo conservazione documentale, accessibilità e autenticità dell'opera | P2 | Proposta — da valutare |
 | [REPS-TECH-024](REPS-TECH-024-metadati-fotografici-iptc-xmp-interoperabili.md) | Lettura e interscambio selettivo dei metadati fotografici IPTC/XMP, con conflitti espliciti, originali intatti e nessun trasferimento implicito di diritti | P2 | Proposta — da valutare |
 | [REPS-TECH-025](REPS-TECH-025-esportazioni-tabellari-minimizzate-condivisione.md) | Copie tabellari con sole colonne e righe deliberatamente condivisibili, anteprima e protezioni conservative, senza alterare CSV integrali o backup | P2 | Proposta — da valutare |
+| [REPS-TECH-026](REPS-TECH-026-backup-compatti-snapshot-verificabili.md) | Studio di backup compatti **opt-in** per archivi multimediali grandi, con snapshot logici verificabili, copia integrale indipendente sempre esportabile e nessuna cancellazione implicita | P3; P2 solo con bisogno misurato | Proposta — da valutare |
+
+## Ventitreesima ricognizione — 21 novembre 2026 — REPS-TECH-026
+
+- **[REPS-TECH-026 — Backup compatti locali con snapshot verificabili e ripristino completo](REPS-TECH-026-backup-compatti-snapshot-verificabili.md):** valutazione di possibili copie che riutilizzino media/RAW immutati per ridurre consumo di spazio, **senza intaccare il backup integrale v1 predefinito**. Confrontate alternative reflink/CoW (con fallback full) e deposito a oggetti condivisi; un manifest compatto non viene spacciato per backup indipendente. Un'eventuale funzione «Esporta copia indipendente» dovrebbe produrre un backup completo verificato e trasportabile senza il deposito sorgente. **P3 ipotetica**, elevabile a P2 soltanto se dimensioni e frequenza degli archivi reali lo giustificano.
+- **Evidenza su `main`:** [`backup.rs`](../../../src-tauri/src/backup.rs) crea una nuova copia completa con `VACUUM INTO`, copia di `media/`, manifest v1, SHA-256 e verifica prima della pubblicazione. [`auto_backup.rs`](../../../src-tauri/src/auto_backup.rs) permette programmazione e conservazione delle ultime N copie, ma usa lo stesso backup completo; non emerge riuso fra copie. [MVP](../../MVP.md) segnala la necessità di collaudi nativi reali e il peso dei RAW. **Nessun rallentamento o problema di capienza è stato misurato**.
+- **Anti-doppione:** [TECH-009](REPS-TECH-009-catalogo-verifiche-conservazione-backup.md) studia catalogo/verifica/retention delle copie e mette la deduplicazione *fuori ambito*; [TECH-022](REPS-TECH-022-preflight-spazio-operazioni-locali.md) stima spazio prima della copia, [TECH-006](REPS-TECH-006-backup-cifrati-portabili.md) tratta cifratura e [TECH-001](REPS-TECH-001-pacchetto-dati-aperto.md) portabilità semantica. Le **30 schede Gestione e UX** nella [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) restano inalterate.
+- **Vincoli e rischi:** nessuna catena incrementale fragile, cancellazione/garbage collection o conversione implicita delle copie storiche; differenze tra filesystem, rischio di guasto comune del deposito condiviso e protezione dei dati personali in chiaro esplicitati. Offline-first, lingua di sistema/fallback inglese, cartella a libera scelta, ripristino protetto e export completo restano non negoziabili.
+- **Esito:** una nuova scheda e aggiornamento dell'indice, solo Markdown nella cartella tecnica. **26 proposte** «Proposta — da valutare» nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), in bozza e senza merge. Nessuna approvazione, assegnazione, issue operativa o avvio di sviluppo.
 
 ## Ventiduesima ricognizione — 21 novembre 2026 — REPS-TECH-025
 
