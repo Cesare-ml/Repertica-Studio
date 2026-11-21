@@ -238,14 +238,37 @@ pub fn overview(db: State<'_, Database>) -> Result<Overview, String> {
 pub fn data_directory(db: State<'_, Database>) -> String {
     db.directory.to_string_lossy().into_owned()
 }
-#[tauri::command]
-pub fn save_artwork_image(db: State<'_, Database>, artwork_id: String, data_base64: String) -> Result<(), String> {
+// Certificates freeze the artwork's image_path in snapshot_json. A later cover
+// replacement must not destroy that historical photograph. Malformed legacy
+// snapshots are treated conservatively: retain the file instead of risking loss.
+pub(crate) fn image_used_by_certificate(conn: &Connection, artwork_id: &str, image_path: &str) -> Result<bool, String> {
+    let mut statement = conn.prepare("SELECT snapshot_json FROM certificates WHERE artwork_id=?1").map_err(err)?;
+    let snapshots = statement.query_map(params![artwork_id], |row| row.get::<_, String>(0)).map_err(err)?;
+    for snapshot in snapshots {
+        let snapshot = snapshot.map_err(err)?;
+        match serde_json::from_str::<serde_json::Value>(&snapshot) {
+            Ok(value) if value.get("image_path").and_then(|path| path.as_str()) == Some(image_path) => {
+                return Ok(true);
+            }
+            Err(_) => return Ok(true),
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+fn save_artwork_image_core(db: &Database, artwork_id: &str, data_base64: &str) -> Result<(), String> {
     if data_base64.len()>16_800_000 { return Err("Immagine troppo grande (massimo 12 MiB)".into()); }
-    let bytes=STANDARD.decode(&data_base64).map_err(|_|"Immagine non valida".to_string())?;
+    let bytes=STANDARD.decode(data_base64).map_err(|_|"Immagine non valida".to_string())?;
     if bytes.len()>12*1024*1024 || bytes.is_empty() { return Err("Immagine troppo grande o vuota".into()); }
     let (ext,_mime)=image_type(&bytes).ok_or_else(||"Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
     let conn=db.conn.lock().map_err(err)?;
-    let old=artwork_by_id(&conn,&artwork_id)?.image_path;
+    let old=artwork_by_id(&conn,artwork_id)?.image_path;
+    // Resolve historical dependencies before touching SQLite or the filesystem.
+    let preserve_old = match old.as_deref() {
+        Some(path) => image_used_by_certificate(&conn, artwork_id, path)?,
+        None => false,
+    };
     let name=format!("{}.{ext}",Uuid::new_v4());
     let relative=format!("media/{name}");
     let target=db.directory.join(&relative);
@@ -255,8 +278,16 @@ pub fn save_artwork_image(db: State<'_, Database>, artwork_id: String, data_base
     if let Err(e)=conn.execute("UPDATE artworks SET image_path=?2,updated_at=?3 WHERE id=?1",params![artwork_id,relative,now()]) {
         let _=fs::remove_file(&target); return Err(err(e));
     }
-    if let Some(old_path)=old { if safe_relative(&old_path) { let _=fs::remove_file(db.directory.join(old_path)); } }
+    if let Some(old_path)=old {
+        if !preserve_old && safe_relative(&old_path) {
+            let _=fs::remove_file(db.directory.join(old_path));
+        }
+    }
     Ok(())
+}
+#[tauri::command]
+pub fn save_artwork_image(db: State<'_, Database>, artwork_id: String, data_base64: String) -> Result<(), String> {
+    save_artwork_image_core(&db, &artwork_id, &data_base64)
 }
 fn safe_relative(path: &str) -> bool {
     let p=std::path::Path::new(path);
@@ -289,5 +320,82 @@ mod tests {
         assert!(!safe_relative("/tmp/secret"));
         assert!(safe_relative("media/abc.png"));
         assert!(dim(Some(f64::NAN)).is_err());
+    }
+
+    fn artwork_with_cover() -> (tempfile::TempDir, Database) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        db.conn.lock().unwrap().execute(
+            "INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES('a','A-1','Test','t','t')",
+            [],
+        ).unwrap();
+        let first = STANDARD.encode([0xff, 0xd8, 0xff, 0x01]);
+        save_artwork_image_core(&db, "a", &first).unwrap();
+        (dir, db)
+    }
+
+    fn cover_path(db: &Database) -> String {
+        let conn = db.conn.lock().unwrap();
+        artwork_by_id(&conn, "a").unwrap().image_path.unwrap()
+    }
+
+    #[test]
+    fn replacement_preserves_historical_certificate_photo_and_snapshot() {
+        let (_dir, db) = artwork_with_cover();
+        let original = cover_path(&db);
+        let snapshot = {
+            let conn = db.conn.lock().unwrap();
+            serde_json::to_string(&artwork_by_id(&conn, "a").unwrap()).unwrap()
+        };
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                 VALUES('cert','a','RS-1','2026-11-21','Artist',?1,'t')",
+                params![snapshot],
+            ).unwrap();
+        }
+        save_artwork_image_core(&db, "a", &STANDARD.encode([0xff, 0xd8, 0xff, 0x02])).unwrap();
+        assert_ne!(cover_path(&db), original);
+        assert!(db.directory.join(&original).is_file(), "historical file must survive");
+        let conn = db.conn.lock().unwrap();
+        let stored: String = conn.query_row(
+            "SELECT snapshot_json FROM certificates WHERE id='cert'", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(stored, snapshot);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stored).unwrap()["image_path"].as_str(),
+            Some(original.as_str())
+        );
+        drop(conn);
+        // Backups copy the complete local media store, including historical photos
+        // no longer referenced by the active artwork or gallery.
+        let destination = tempfile::tempdir().unwrap();
+        let backup = crate::backup::create_backup_core(&db, destination.path()).unwrap();
+        let value = serde_json::to_value(backup).unwrap();
+        let backup_dir = value["directory"].as_str().unwrap();
+        assert!(std::path::Path::new(backup_dir).join(original).is_file());
+    }
+
+    #[test]
+    fn replacement_removes_unreferenced_previous_photo() {
+        let (_dir, db) = artwork_with_cover();
+        let original = cover_path(&db);
+        save_artwork_image_core(&db, "a", &STANDARD.encode([0xff, 0xd8, 0xff, 0x03])).unwrap();
+        assert_ne!(cover_path(&db), original);
+        assert!(!db.directory.join(original).exists());
+    }
+
+    #[test]
+    fn malformed_historical_snapshot_does_not_trigger_photo_deletion() {
+        let (_dir, db) = artwork_with_cover();
+        let original = cover_path(&db);
+        db.conn.lock().unwrap().execute(
+            "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+             VALUES('bad','a','RS-2','2026-11-21','Artist','{invalid','t')",
+            [],
+        ).unwrap();
+        save_artwork_image_core(&db, "a", &STANDARD.encode([0xff, 0xd8, 0xff, 0x04])).unwrap();
+        assert!(db.directory.join(original).is_file());
     }
 }
