@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (dodicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (tredicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -25,6 +25,7 @@ Aggiornato: **2026-11-21** (dodicesima ricognizione). Stato delle proposte: **Pr
 | [REPS-UX-017](REPS-UX-017-vendita-multiopera-ripartizione-importi.md) | Vendite con più opere, riepilogo unitario e ripartizione esplicita degli importi | P1–P2 | Proposta — da valutare |
 | [REPS-UX-018](REPS-UX-018-catalogazione-seriale-schede-bozza.md) | Catalogazione seriale con riuso controllato dei campi e bozze opzionali da completare | P1–P2 | Proposta — da valutare |
 | [REPS-UX-019](REPS-UX-019-storico-esposizioni-bibliografia-documentata.md) | Storico delle esposizioni effettive e bibliografia documentata per opera, con fonti e incertezze | P2 | Proposta — da valutare |
+| [REPS-UX-020](REPS-UX-020-etichette-inventariali-identificativi-scansionabili.md) | Etichette inventariali stampabili e identificazione locale con codici scansionabili, senza azioni automatiche | P1–P2* | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -152,3 +153,13 @@ Riesaminati `main` ([README](../../../README.md), [MVP](../../MVP.md), [DATA-POR
 - **Anti-doppione:** UX-009 pianifica mostre future e checklist, non attesta retroattivamente una presenza; UX-001 traccia movimenti, non esposizioni o bibliografia; UX-007 prepara dossier, non gestisce la qualità e il riuso delle fonti; UX-010 gestisce permessi/crediti, che non derivano da una citazione. TECH-001 riguarda il pacchetto generale di interoperabilità, senza modifiche ai suoi file.
 - **Vincoli da preservare:** nessuna mostra, articolo o fonte altera vendite, disponibilità, ubicazione o certificati; fonti non verificate dichiarate come tali, date incerte senza giorni inventati, nessun download automatico da URL/ISBN/DOI, nessuna scansione condivisa per impostazione predefinita, dati locali e backup completo a cartella scelta. Le nuove esportazioni sarebbero **aggiuntive** ai sette CSV già presenti.
 - **Ricerca ancora necessaria:** interviste a professionisti e prova su casi reali per decidere se due registri condivisi valgano più di semplici note. Nessuna idea approvata o assegnata. **Tutte le 19 schede sono «Proposta — da valutare»**. Modificati solo Markdown in `docs/idee/gestione-e-ux/`; la [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) rimane in bozza, senza merge.
+
+
+## Tredicesima ricognizione — 21 novembre 2026
+
+Riletti sul branch `main` [README](../../../README.md), [MVP](../../MVP.md), [ECONOMY-I18N](../../ECONOMY-I18N.md), [DATA-PORTABILITY](../../DATA-PORTABILITY.md), [modelli UI](../../../src/app/models.ts) e [schema SQLite](../../../src-tauri/src/db.rs); confrontate tutte le **19** schede UX precedenti (incluse UX-001, UX-005, UX-009, UX-015 e UX-018), le **15** schede tecniche documentate nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) e le ricerche su etichette/QR nel repository. Nessun workflow di stampa seriale di etichette o di identificazione da codice scansionato è stato individuato nei materiali consultati; ciò non dimostra un malfunzionamento.
+
+- **[REPS-UX-020](REPS-UX-020-etichette-inventariali-identificativi-scansionabili.md) — Etichette inventariali e identificativi scansionabili offline:** proposta per stampare cartellini di catalogo per opere/custodie e ritrovare la scheda tramite codice umano o QR locale con UUID. Un'etichetta **non autentica l'opera**, non contiene dati privati nel layout predefinito e **non registra automaticamente** presenza, consegne, cambi di ubicazione o vendite. Lo scanner USB è facoltativo; la ricerca manuale e il PDF locale sono alternative.
+- **Confine anti-duplicazione:** UX-015 progetta la **ricognizione fisica**, UX-001 la **movimentazione**, UX-009 le **mostre**, UX-007 i dossier, UX-005 gli esemplari fisici e UX-018 la catalogazione seriale. La nuova scheda riguarda esclusivamente **identificazione/etichettatura del record fisico**; i processi degli altri studi restano separati. Il filone tecnico (inclusi TECH-001/008/011) non viene modificato.
+- **Dipendenze e domande:** validare con professionisti la convenienza rispetto al solo codice cartaceo; valutare costo di stampa/QR, comportamento con titoli modificati, archivi clonati o futuri profili multipli, leggibilità e test nativi Windows/macOS/Linux. La priorità P1–P2 vale **soltanto per archivi numerosi** ed è ipotetica (*per piccoli archivi potrebbe essere P3*).
+- **Perimetro documentale:** questa scheda e l'indice sono gli unici file toccati, entrambi Markdown nella cartella `docs/idee/gestione-e-ux/`. Nessun codice, test, dipendenza, workflow, issue, certificato o file tecnico è stato modificato. Tutte le **20** idee restano **«Proposta — da valutare»**, senza approvazione, assegnazione o merge.
