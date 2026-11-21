@@ -44,3 +44,14 @@ Offline-only. No Sites, SaaS, AI API, server billing, external account, invoicin
 5. Expenses can be entered, edited, removed and appear in reports.
 6. OS language uses correct language or English fallback; override survives restart.
 7. Build Angular, Rust tests, macOS DMGs; verify native visual behavior.
+
+## CSV portability: sales and expense ledgers
+
+Use **Sales → Export sales CSV** or **Economy → Export expenses CSV** to choose a local file with the native Save dialog (including external drives or mounted shares). Exports contain **all recorded rows** irrespective of the year selected in the dashboard, sorted by date then stable ID. The original SQLite data is never modified.
+
+- UTF-8 with BOM, semicolon-separated fields, RFC-style double-quote escaping and CRLF records. Text that could be interpreted as a spreadsheet formula is prefixed with an apostrophe on export. Use the raw exported CSV as the interchange source; spreadsheet applications may change formatting on save.
+- Monetary values are **integer cents** (e.g. `gross_cents=15001` means €150.01), allocation shares are **basis points** (5000 = 50%), with EUR currency explicitly attached to sales. No floating-point conversion.
+- Sales include stable IDs and artwork/collector references, snapshot percentages, recorded taxes/shipping, net sales and notes. Expenses include stable ID, date, category, fund, amount, supplier, purchase URL and notes. These are **recorded sales and registered expenses, not confirmed bank receipts or payments**.
+- This is a **one-way tabular export**, not a full portable backup or an import format. For lossless recovery, use the verified **SQLite + media backup** in Settings. CSV files may contain customer personal data and must be stored securely.
+- Existing export filenames are deliberately **not overwritten**. If the selected file exists, choose a new filename. Saving inside the app's internal data directory is rejected.
+- Desktop acceptance pending: native Save dialog, exported Unicode and non-ASCII paths, files on removable disks, large registers and imports into common spreadsheet applications.

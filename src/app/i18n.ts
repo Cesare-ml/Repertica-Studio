@@ -5,6 +5,10 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  'Esporta vendite CSV': 'Export sales CSV',
+  'Esporta spese CSV': 'Export expenses CSV',
+  'Registro vendite esportato in CSV locale.': 'Sales register exported to local CSV.',
+  'Spese esportate in CSV locale.': 'Expenses exported to local CSV.',
   'IL TUO STUDIO': 'YOUR STUDIO',
   'Titolo, codice, tecnica, ubicazione, collezionista…':'Title, code, medium, location, collector…',
   'Filtra opere per stato':'Filter artworks by status',

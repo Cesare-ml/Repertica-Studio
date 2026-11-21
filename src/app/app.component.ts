@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { isTauri } from '@tauri-apps/api/core';
 import { locale as osLocale } from '@tauri-apps/plugin-os';
 import { AppLanguage, chooseLanguage, translate } from './i18n';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
 import type { ArtworkOrder } from './archive-filters';
@@ -278,6 +278,25 @@ export class AppComponent implements OnInit {
     await this.run(async () => {
       this.lastBackup = await api.createBackup(this.backupDestination);
     }, 'Backup completato e verificato. Conserva la cartella risultante in un luogo sicuro.');
+  }
+  async exportLedger(kind: 'sales' | 'expenses'): Promise<void> {
+    if (this.busy || !this.initialized) return;
+    const isSale = kind === 'sales';
+    try {
+      const destination = await save({
+        title: this.tr(isSale ? 'Esporta vendite CSV' : 'Esporta spese CSV'),
+        defaultPath: `ReperticaStudio-${isSale ? 'vendite' : 'spese'}-${today()}.csv`,
+        filters: [{ name: 'CSV', extensions: ['csv'] }]
+      });
+      if (typeof destination !== 'string') return;
+      await this.run(
+        () => api.exportLedgerCsv(kind, destination),
+        this.tr(isSale ? 'Registro vendite esportato in CSV locale.' : 'Spese esportate in CSV locale.')
+      );
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    }
+    this.change.detectChanges();
   }
   async chooseRestoreFolder(): Promise<void> {
     if (this.busy || !this.initialized) return;

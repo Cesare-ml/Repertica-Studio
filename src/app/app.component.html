@@ -121,7 +121,10 @@
 
     <section *ngIf="section === 'sales'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Registro vendite') }}</h2><p>{{ tr('Conserva lo storico delle opere vendute e dei relativi collezionisti.') }}</p></div>
-        <button class="primary" type="button" (click)="newSale()" [disabled]="!initialized || !sellableArtworks.length || !collectors.length">{{ tr('+ Registra vendita') }}</button></div>
+        <div class="finance-top-actions">
+          <button class="secondary" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
+          <button class="primary" type="button" (click)="newSale()" [disabled]="!initialized || !sellableArtworks.length || !collectors.length">{{ tr('+ Registra vendita') }}</button>
+        </div></div>
       <p class="hint" *ngIf="!sellableArtworks.length || !collectors.length">{{ tr('Per registrare una vendita occorrono almeno un\'opera disponibile e un collezionista.') }}</p>
       <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Data') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
         <tbody><tr *ngFor="let s of sales"><td><strong>{{ s.artwork_title }}</strong></td><td>{{ s.collector_name }}</td><td>{{ date(s.sold_at) }}</td>
@@ -185,7 +188,10 @@
         </div>
       </div>
       <div class="section-tools expenses-heading"><div><h2>{{ tr('Acquisti e spese') }}</h2><p>{{ tr('Materiali, imballaggi, attrezzatura, servizi e altri acquisti dello studio.') }}</p></div>
-        <button type="button" class="secondary" (click)="newExpense()">{{ tr('+ Registra spesa') }}</button></div>
+        <div class="finance-top-actions">
+          <button type="button" class="secondary" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
+          <button type="button" class="secondary" (click)="newExpense()">{{ tr('+ Registra spesa') }}</button>
+        </div></div>
       <div class="panel table-scroll"><table>
         <thead><tr><th>{{ tr('Data') }}</th><th>{{ tr('Categoria') }}</th><th>{{ tr('Descrizione') }}</th><th>{{ tr('Fornitore') }}</th><th>{{ tr('Fondo') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
         <tbody><tr *ngFor="let e of expenses"><td>{{ date(e.expense_date) }}</td><td>{{ categoryLabel(e.category) }}</td>

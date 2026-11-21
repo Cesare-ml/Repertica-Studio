@@ -1,6 +1,7 @@
 mod backup;
 mod commands;
 mod db;
+mod export;
 mod finance;
 mod models;
 
@@ -42,7 +43,8 @@ pub fn run() {
             finance::save_expense,
             finance::delete_expense,
             finance::finance_overview,
-            finance::price_preview
+            finance::price_preview,
+            export::export_ledger_csv
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");
