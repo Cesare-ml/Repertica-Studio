@@ -5,9 +5,9 @@ import { csvRegisterOptions } from '../src/app/csv-registers.ts';
 import { translate } from '../src/app/i18n.ts';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
-const kinds = ['artworks', 'collectors', 'certificates', 'sales', 'expenses'];
+const kinds = ['artworks', 'collectors', 'certificates', 'sales', 'receipts', 'expenses'];
 
-test('all five backend CSV register kinds have unique local export labels and filenames', () => {
+test('all six backend CSV register kinds have unique local export labels and filenames', () => {
   assert.deepEqual(Object.keys(csvRegisterOptions).sort(), [...kinds].sort());
   const backend = read('src-tauri/src/export.rs');
   const filenames = new Set();
@@ -34,4 +34,16 @@ test('every archive register export has an accessible button and uses native sav
   assert.match(component, /save\(\{/);
   assert.match(component, /csvRegisterOptions\[kind\]/);
   assert.match(component, /api\.exportLedgerCsv\(kind, destination\)/);
+});
+
+test('sale receipt CSV is a separate on-demand register, never mislabeled as sale revenue', () => {
+  const backend = read('src-tauri/src/export.rs');
+  const html = read('src/app/app.component.html');
+  assert.match(backend, /"receipt_id;sale_id;received_at;artwork_id;/);
+  assert.match(backend, /FROM sale_receipts r JOIN sales s ON s.id=r.sale_id/);
+  assert.match(html, /exportLedger\('receipts'\)/);
+  for (const locale of ['en', 'es', 'fr', 'de']) {
+    assert.notEqual(translate('Esporta incassi CSV', locale), 'Esporta incassi CSV');
+    assert.notEqual(translate('Registro incassi esportato in CSV locale.', locale), 'Registro incassi esportato in CSV locale.');
+  }
 });
