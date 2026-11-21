@@ -183,34 +183,41 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
 pub fn promote_artwork_gallery_image(db: State<'_, Database>, artwork_id: String, image_id: String) -> Result<(), String> {
     promote_core(&db, &artwork_id, &image_id)
 }
-/// Reorder one photo by one position, keeping media paths and all historical metadata.
+/// Reorder one photo by one visible position, keeping its media and metadata.
+/// Imported or manually edited archives may have duplicate/gapped sort_order values:
+/// swapping their numeric values would leave the visible order unchanged. On a
+/// successful move, assign a dense, deterministic sequence to this artwork only.
 fn move_core(db: &Database, artwork_id: &str, image_id: &str, direction: &str) -> Result<(), String> {
     if direction != "up" && direction != "down" { return Err("Direzione non valida".into()); }
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
-    let position: i64 = tx.query_row(
-        "SELECT sort_order FROM artwork_images WHERE id=?1 AND artwork_id=?2",
-        params![image_id,artwork_id], |r|r.get(0),
-    ).optional().map_err(err)?.ok_or("Fotografia non trovata per questa opera")?;
-    let neighbor: Option<(String,i64)> = if direction == "up" {
-        tx.query_row("SELECT id,sort_order FROM artwork_images
-            WHERE artwork_id=?1 AND (sort_order<?2 OR (sort_order=?2 AND id<?3))
-            ORDER BY sort_order DESC,id DESC LIMIT 1",
-            params![artwork_id,position,image_id], |r|Ok((r.get(0)?,r.get(1)?)))
-            .optional().map_err(err)?
-    } else {
-        tx.query_row("SELECT id,sort_order FROM artwork_images
-            WHERE artwork_id=?1 AND (sort_order>?2 OR (sort_order=?2 AND id>?3))
-            ORDER BY sort_order,id LIMIT 1",
-            params![artwork_id,position,image_id], |r|Ok((r.get(0)?,r.get(1)?)))
-            .optional().map_err(err)?
+    let mut ordered_ids: Vec<String> = {
+        let mut statement = tx.prepare(
+            "SELECT id FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order,id"
+        ).map_err(err)?;
+        let rows = statement.query_map(params![artwork_id], |r| r.get::<_, String>(0)).map_err(err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(err)?
     };
-    if let Some((neighbor_id,neighbor_position)) = neighbor {
-        let changed = tx.execute("UPDATE artwork_images SET sort_order=CASE
-                WHEN id=?1 THEN ?3 WHEN id=?2 THEN ?4 END
-            WHERE artwork_id=?5 AND id IN (?1,?2)",
-            params![image_id,neighbor_id,neighbor_position,position,artwork_id]).map_err(err)?;
-        if changed != 2 { return Err("Scambio fotografie incompleto".into()); }
+    let index = ordered_ids.iter().position(|id| id == image_id)
+        .ok_or("Fotografia non trovata per questa opera")?;
+    let neighbor = if direction == "up" {
+        index.checked_sub(1)
+    } else if index + 1 < ordered_ids.len() {
+        Some(index + 1)
+    } else {
+        None
+    };
+    let Some(neighbor) = neighbor else {
+        return tx.commit().map_err(err); // Already first/last: no-op.
+    };
+    ordered_ids.swap(index, neighbor);
+    for (index, id) in ordered_ids.iter().enumerate() {
+        let position = i64::try_from(index + 1).map_err(|_| "Troppe fotografie per il riordino")?;
+        let changed = tx.execute(
+            "UPDATE artwork_images SET sort_order=?3 WHERE artwork_id=?1 AND id=?2",
+            params![artwork_id, id, position],
+        ).map_err(err)?;
+        if changed != 1 { return Err("Riordino fotografie incompleto".into()); }
     }
     tx.commit().map_err(err)
 }
@@ -344,6 +351,51 @@ mod tests {
         assert_eq!(list_core(&reopened,"a").unwrap().iter().map(|i|i.id.as_str()).collect::<Vec<_>>(),
             vec!["one","two","three"]);
     }
+    #[test]
+    fn reordering_repairs_duplicate_and_extreme_positions_without_touching_other_artworks() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            for id in ["a", "b"] {
+                conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES(?1,?1,?1,'created','updated')", params![id]).unwrap();
+            }
+            for (id, owner, position) in [
+                ("first", "a", 0_i64),
+                ("second", "a", 0_i64),
+                ("third", "a", i64::MAX),
+                ("unrelated", "b", i64::MAX),
+            ] {
+                conn.execute("INSERT INTO artwork_images
+                    (id,artwork_id,image_path,caption,created_at,sort_order,kind)
+                    VALUES(?1,?2,?3,?1,'original',?4,'DETAIL')",
+                    params![id, owner, format!("media/{id}.jpg"), position]).unwrap();
+            }
+        }
+        // The old implementation swapped two equal sort_order values, doing nothing.
+        move_core(&db, "a", "second", "up").unwrap();
+        assert_eq!(list_core(&db, "a").unwrap().iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            vec!["second", "first", "third"]);
+        move_core(&db, "a", "third", "up").unwrap();
+        assert_eq!(list_core(&db, "a").unwrap().iter().map(|i| (i.id.as_str(), i.sort_order)).collect::<Vec<_>>(),
+            vec![("second", 1), ("third", 2), ("first", 3)]);
+        // Boundary moves and cross-artwork IDs must never alter these references.
+        move_core(&db, "a", "second", "up").unwrap();
+        assert!(move_core(&db, "a", "unrelated", "down").is_err());
+        assert_eq!(list_core(&db, "b").unwrap()[0].sort_order, i64::MAX);
+        for photo in list_core(&db, "a").unwrap() {
+            assert_eq!(photo.image_path, format!("media/{}.jpg", photo.id));
+            assert_eq!(photo.caption.as_deref(), Some(photo.id.as_str()));
+            assert_eq!(photo.kind, "DETAIL");
+            assert_eq!(photo.created_at, "original");
+        }
+        drop(db);
+        let reopened = crate::db::open(dir.path().join("app")).unwrap();
+        assert_eq!(list_core(&reopened, "a").unwrap().iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            vec!["second", "third", "first"]);
+    }
+
     #[test]
     fn deleting_promoted_old_cover_preserves_certified_photo() {
         let dir = tempfile::tempdir().unwrap();
