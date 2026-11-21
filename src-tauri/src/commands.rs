@@ -57,8 +57,7 @@ pub fn list_artworks(db: State<'_, Database>) -> Result<Vec<Artwork>, String> {
     let items = statement.query_map([], artwork_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(items)
 }
-#[tauri::command]
-pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artwork, String> {
+fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, String> {
     let code = required(input.code, 80, "Codice")?;
     let title = required(input.title, 240, "Titolo")?;
     let year = clean(input.year, 40)?;
@@ -73,8 +72,10 @@ pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artw
         return Err("Stato opera non valido".into());
     }
     let conn = db.conn.lock().map_err(err)?;
+    let editing = input.id.is_some();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let existing: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
+    if editing && !existing { return Err("Opera da modificare non trovata".into()); }
     let sale_exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE artwork_id=?1)",params![id],|r|r.get(0)).map_err(err)?;
     if input.status == "sold" && !sale_exists { return Err("Registra una vendita per indicare l'opera come venduta".into()); }
     if input.status != "sold" && sale_exists { return Err("L'opera ha una vendita registrata e deve restare venduta".into()); }
@@ -88,6 +89,10 @@ pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artw
             params![id,code,title,year,technique,support,width,height,depth,description,location,input.status,stamp]).map_err(err)?;
     }
     artwork_by_id(&conn, &id)
+}
+#[tauri::command]
+pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artwork, String> {
+    save_artwork_core(&db, input)
 }
 #[tauri::command]
 pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String> {
@@ -119,17 +124,18 @@ pub fn list_collectors(db: State<'_, Database>) -> Result<Vec<Collector>, String
     let items = statement.query_map([], collector_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(items)
 }
-#[tauri::command]
-pub fn save_collector(db: State<'_, Database>, input: CollectorInput) -> Result<Collector, String> {
+fn save_collector_core(db: &Database, input: CollectorInput) -> Result<Collector, String> {
     let name = required(input.name, 240, "Nome")?;
     let email = clean(input.email, 320)?;
     let phone = clean(input.phone, 100)?;
     let address = clean(input.address, 1000)?;
     let notes = clean(input.notes, 15_000)?;
     let conn = db.conn.lock().map_err(err)?;
+    let editing = input.id.is_some();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let stamp = now();
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
+    if editing && !exists { return Err("Collezionista da modificare non trovato".into()); }
     if exists {
         conn.execute("UPDATE collectors SET name=?2,email=?3,phone=?4,address=?5,notes=?6,updated_at=?7 WHERE id=?1",
             params![id,name,email,phone,address,notes,stamp]).map_err(err)?;
@@ -138,6 +144,10 @@ pub fn save_collector(db: State<'_, Database>, input: CollectorInput) -> Result<
             params![id,name,email,phone,address,notes,stamp]).map_err(err)?;
     }
     conn.query_row(&format!("SELECT {COLLECTOR_FIELDS} FROM collectors WHERE id=?1"),params![id],collector_row).map_err(err)
+}
+#[tauri::command]
+pub fn save_collector(db: State<'_, Database>, input: CollectorInput) -> Result<Collector, String> {
+    save_collector_core(&db, input)
 }
 #[tauri::command]
 pub fn delete_collector(db: State<'_, Database>, id: String) -> Result<(), String> {
@@ -397,5 +407,59 @@ mod tests {
         ).unwrap();
         save_artwork_image_core(&db, "a", &STANDARD.encode([0xff, 0xd8, 0xff, 0x04])).unwrap();
         assert!(db.directory.join(original).is_file());
+    }
+
+    fn artwork_edit_input(id: Option<String>, title: &str) -> ArtworkInput {
+        ArtworkInput {
+            id, code: "WORK-STALE-01".into(), title: title.into(), year: None,
+            technique: None, support: None, width_cm: None, height_cm: None,
+            depth_cm: None, description: None, location: None,
+            status: "available".into(),
+        }
+    }
+
+    fn collector_edit_input(id: Option<String>, name: &str) -> CollectorInput {
+        CollectorInput {
+            id, name: name.into(), email: None, phone: None,
+            address: None, notes: None,
+        }
+    }
+
+    #[test]
+    fn artwork_edit_never_recreates_a_deleted_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let created = save_artwork_core(&db, artwork_edit_input(None, "Original")).unwrap();
+        let changed = save_artwork_core(&db,
+            artwork_edit_input(Some(created.id.clone()), "Edited")).unwrap();
+        assert_eq!(changed.id, created.id);
+        assert_eq!(changed.title, "Edited");
+        db.conn.lock().unwrap().execute("DELETE FROM artworks WHERE id=?1",
+            params![created.id]).unwrap();
+        let error = save_artwork_core(&db,
+            artwork_edit_input(Some(created.id.clone()), "Resurrected")).unwrap_err();
+        assert!(error.contains("non trovata"));
+        let count: i64 = db.conn.lock().unwrap().query_row(
+            "SELECT count(*) FROM artworks", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0, "a stale editor must not silently insert an artwork");
+    }
+
+    #[test]
+    fn collector_edit_never_recreates_a_deleted_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let created = save_collector_core(&db, collector_edit_input(None, "Original")).unwrap();
+        let changed = save_collector_core(&db,
+            collector_edit_input(Some(created.id.clone()), "Edited")).unwrap();
+        assert_eq!(changed.id, created.id);
+        assert_eq!(changed.name, "Edited");
+        db.conn.lock().unwrap().execute("DELETE FROM collectors WHERE id=?1",
+            params![created.id]).unwrap();
+        let error = save_collector_core(&db,
+            collector_edit_input(Some(created.id.clone()), "Resurrected")).unwrap_err();
+        assert!(error.contains("non trovato"));
+        let count: i64 = db.conn.lock().unwrap().query_row(
+            "SELECT count(*) FROM collectors", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0, "a stale editor must not silently insert a collector");
     }
 }
