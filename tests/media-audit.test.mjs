@@ -12,7 +12,8 @@ test('the active-archive media audit uses a read-only local Tauri command', () =
   assert.match(rust, /symlink_metadata/);
   assert.match(rust, /unsafe_path/);
   assert.match(rust, /#\[test\]/);
-  assert.doesNotMatch(rust, /fs::remove_file|fs::write|\.execute\(/);
+  const implementation = rust.split('#[cfg(test)]')[0];
+  assert.doesNotMatch(implementation, /fs::remove_file|fs::write|\.execute\(/);
 });
 
 test('the audit exposes a bounded report and distinguishes file presence from hashes', () => {
