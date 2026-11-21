@@ -323,16 +323,19 @@ pub async fn mail_read_message(db:State<'_,Database>,account_id:String,folder:St
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub struct MailDraft {
     pub id:String,pub account_id:String,pub to:String,pub cc:String,pub bcc:String,
-    pub subject:String,pub body:String,pub revision:u32,pub updated_at:String
+    pub subject:String,pub body:String,pub revision:u32,pub updated_at:String,
+    #[serde(default)] pub attachments:Vec<String>
 }
 #[derive(Debug,Deserialize)]
 pub struct MailDraftInput {
     pub id:Option<String>,pub account_id:String,pub to:String,pub cc:String,
-    pub bcc:String,pub subject:String,pub body:String,pub revision:Option<u32>
+    pub bcc:String,pub subject:String,pub body:String,pub revision:Option<u32>,
+    #[serde(default)] pub attachments:Vec<String>
 }
 fn validate_draft(input:&MailDraftInput)->Result<(),String>{
     if !safe_text(&input.to,1024) || !safe_text(&input.cc,1024) || !safe_text(&input.bcc,1024)
-        || !safe_text(&input.subject,255) || !safe_text(&input.body,100_000){
+        || !header_text(&input.subject,255) || !safe_text(&input.body,100_000)
+        || input.attachments.len()>5 || input.attachments.iter().any(|p|p.len()>4096 || p.contains('\0')){
         return Err("La bozza contiene campi non validi o troppo lunghi".into());
     }
     Ok(())
@@ -362,7 +365,7 @@ pub fn mail_save_draft(db:State<'_,Database>,input:MailDraftInput)->Result<MailD
     }
     let draft=MailDraft{id,account_id:input.account_id,to:input.to,cc:input.cc,bcc:input.bcc,
         subject:input.subject,body:input.body,revision:previous.unwrap_or(0)+1,
-        updated_at:Utc::now().to_rfc3339()};
+        updated_at:Utc::now().to_rfc3339(),attachments:input.attachments};
     let json=serde_json::to_string(&draft).map_err(db_error)?;
     tx.execute("INSERT INTO mail_drafts(id,account_id,payload_json,revision,updated_at) VALUES(?1,?2,?3,?4,?5)
         ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,
@@ -500,7 +503,7 @@ mod tests{
     }
     #[test] fn drafts_enforce_length_limits(){
         let draft=MailDraftInput{id:None,account_id:"x".into(),to:"a@example.com".into(),
-            cc:String::new(),bcc:String::new(),subject:"Hello".into(),body:"ok".into(),revision:None};
+            cc:String::new(),bcc:String::new(),subject:"Hello".into(),body:"ok".into(),revision:None,attachments:vec![]};
         assert!(validate_draft(&draft).is_ok());
     }
 }
