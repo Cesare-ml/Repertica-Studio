@@ -33,6 +33,12 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
                     description,location,status,image_path,created_at,updated_at
              FROM artworks ORDER BY code COLLATE NOCASE,id"
         ),
+        "gallery" => (
+            "image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at",
+            "SELECT i.id,i.artwork_id,a.code,a.title,i.image_path,i.caption,i.sort_order,i.created_at
+             FROM artwork_images i JOIN artworks a ON a.id=i.artwork_id
+             ORDER BY a.code COLLATE NOCASE,a.id,i.sort_order,i.created_at,i.id"
+        ),
         "collectors" => (
             "collector_id;name;email;phone;address;notes;created_at;updated_at",
             "SELECT id,name,email,phone,address,notes,created_at,updated_at
@@ -241,6 +247,33 @@ seconda riga','t','t')", []).unwrap();
         assert!(csv.contains("\"s3\";\"2026-11-03\";\"a3\";\"ART-3\";\"Three\";\"c1\";\"'=Collector\";\"EUR\";5000;0;5000;\"t\""));
         assert_eq!(csv.matches("\r\n").count(), 4);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM sale_receipts", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
+    }
+
+    #[test]
+    fn gallery_csv_preserves_all_photo_metadata_and_order_without_exporting_image_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A-1','Opera','t','t');
+            INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
+                VALUES('second','a','media/second.jpg','Seconda','t',2),
+                      ('first','a','media/first.png','=SUM(1;2)','t',1);
+        "#).unwrap();
+        let csv = render_csv(&conn, "gallery").unwrap();
+        assert!(csv.starts_with(
+            "\u{feff}image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at\r\n"
+        ));
+        let first = "\"first\";\"a\";\"A-1\";\"Opera\";\"media/first.png\";\"'=SUM(1;2)\";1;\"t\"";
+        let second = "\"second\";\"a\";\"A-1\";\"Opera\";\"media/second.jpg\";\"Seconda\";2;\"t\"";
+        assert!(csv.contains(first), "{csv}");
+        assert!(csv.contains(second), "{csv}");
+        assert!(csv.find(first) < csv.find(second));
+        assert_eq!(csv.matches("\r\n").count(), 3);
+        assert_eq!(conn.query_row(
+            "SELECT COUNT(*) FROM artwork_images", [], |r| r.get::<_, i64>(0)
+        ).unwrap(), 2);
     }
 
     #[test]

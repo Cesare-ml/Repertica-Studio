@@ -5,9 +5,9 @@ import { csvRegisterOptions } from '../src/app/csv-registers.ts';
 import { translate } from '../src/app/i18n.ts';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
-const kinds = ['artworks', 'collectors', 'certificates', 'sales', 'balances', 'receipts', 'expenses'];
+const kinds = ['artworks', 'gallery', 'collectors', 'certificates', 'sales', 'balances', 'receipts', 'expenses'];
 
-test('all seven backend CSV register kinds have unique local export labels and filenames', () => {
+test('all eight backend CSV register kinds have unique local export labels and filenames', () => {
   assert.deepEqual(Object.keys(csvRegisterOptions).sort(), [...kinds].sort());
   const backend = read('src-tauri/src/export.rs');
   const filenames = new Set();
@@ -57,5 +57,19 @@ test('sale balances export includes exact cents and does not infer receipt recor
   for (const locale of ['en', 'es', 'fr', 'de']) {
     assert.notEqual(translate('Esporta saldi vendite CSV', locale), 'Esporta saldi vendite CSV');
     assert.notEqual(translate('Saldi vendite esportati in CSV locale.', locale), 'Saldi vendite esportati in CSV locale.');
+  }
+});
+
+test('gallery metadata export preserves image UUIDs, artwork relation, captions and order', () => {
+  const backend = read('src-tauri/src/export.rs');
+  const html = read('src/app/app.component.html');
+  assert.match(backend, /"image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at"/);
+  assert.match(backend, /FROM artwork_images i JOIN artworks a ON a.id=i.artwork_id/);
+  assert.match(backend, /ORDER BY a.code COLLATE NOCASE,a.id,i.sort_order,i.created_at,i.id/);
+  assert.match(html, /exportLedger\('gallery'\)/);
+  for (const locale of ['en', 'es', 'fr', 'de']) {
+    assert.notEqual(translate('Esporta metadati galleria CSV', locale), 'Esporta metadati galleria CSV');
+    assert.notEqual(translate('Metadati galleria esportati in CSV locale.', locale),
+      'Metadati galleria esportati in CSV locale.');
   }
 });
