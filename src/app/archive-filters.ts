@@ -31,40 +31,64 @@ function foldSearch(value: string): string {
     .replace(/\s+/gu, ' ').trim();
 }
 
+interface SearchTerm {
+  value: string;
+  excluded: boolean;
+}
+
 /**
- * Unquoted words are independent AND terms. Double quotes keep a sequence of
- * words together, e.g. `"olio su tela" marina` finds the phrase in one field
- * and "marina" in any other field. An unclosed quote includes the remainder.
+ * Unquoted words are independent AND terms; quoted phrases must match within
+ * one field. A leading minus excludes a word or a quoted phrase, for example
+ * `olio -tempera -"su tela"`. Lone '-' is ignored. Unclosed quotes still work.
  */
-function searchTerms(query: string): string[] {
-  const terms: string[] = [];
+function searchTerms(query: string): SearchTerm[] {
+  const terms: SearchTerm[] = [];
   let token = '';
   let quoted = false;
-  const push = () => {
+  let negateQuoted = false;
+  const push = (wasQuoted = false) => {
     const term = token.replace(/\s+/gu, ' ').trim();
-    if (term) terms.push(term);
+    if (term && term !== '-') {
+      const excluded = negateQuoted || (!wasQuoted && term.startsWith('-'));
+      const value = excluded && !negateQuoted ? term.slice(1) : term;
+      if (value) terms.push({ value, excluded });
+    }
     token = '';
+    negateQuoted = false;
   };
   for (const character of foldSearch(query)) {
     if (character === '"') {
-      push();
-      quoted = !quoted;
+      if (quoted) {
+        push(true);
+        quoted = false;
+      } else {
+        if (token === '-') {
+          token = '';
+          negateQuoted = true;
+        } else {
+          push();
+        }
+        quoted = true;
+      }
     } else if (!quoted && /\s/u.test(character)) {
       push();
     } else {
       token += character;
     }
   }
-  push();
+  push(quoted);
   return terms;
 }
 
-function matchesTerms(terms: string[], fields: Array<string | null | undefined>): boolean {
+function matchesTerms(terms: SearchTerm[], fields: Array<string | null | undefined>): boolean {
   if (terms.length === 0) return true;
-  // Match within a single field so a quoted phrase cannot accidentally span
-  // an artwork title, its technique and a collector name joined by spaces.
+  // A quoted phrase cannot span fields. Exclusions apply to the same fields
+  // as positive terms, including the linked collector or purchased artwork.
   const normalizedFields = fields.map(field => foldSearch(field ?? ''));
-  return terms.every(term => normalizedFields.some(field => field.includes(term)));
+  return terms.every(({ value, excluded }) => {
+    const found = normalizedFields.some(field => field.includes(value));
+    return excluded ? !found : found;
+  });
 }
 
 export function filterArtworks(
