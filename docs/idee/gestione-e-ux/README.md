@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (tredicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
+Aggiornato: **2026-11-21** (quattordicesima ricognizione). Stato delle proposte: **Proposta — da valutare**.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -26,6 +26,7 @@ Aggiornato: **2026-11-21** (tredicesima ricognizione). Stato delle proposte: **P
 | [REPS-UX-018](REPS-UX-018-catalogazione-seriale-schede-bozza.md) | Catalogazione seriale con riuso controllato dei campi e bozze opzionali da completare | P1–P2 | Proposta — da valutare |
 | [REPS-UX-019](REPS-UX-019-storico-esposizioni-bibliografia-documentata.md) | Storico delle esposizioni effettive e bibliografia documentata per opera, con fonti e incertezze | P2 | Proposta — da valutare |
 | [REPS-UX-020](REPS-UX-020-etichette-inventariali-identificativi-scansionabili.md) | Etichette inventariali stampabili e identificazione locale con codici scansionabili, senza azioni automatiche | P1–P2* | Proposta — da valutare |
+| [REPS-UX-021](REPS-UX-021-acquisizioni-opere-terzi-titolo-documentato.md) | Pratiche di acquisizione di opere da terzi: titolo dichiarato, fonti, acquisti e donazioni senza confondere custodia e pagamenti | P2 | Proposta — da valutare |
 
 ## Cosa è stato verificato per evitare duplicati
 
@@ -163,3 +164,13 @@ Riletti sul branch `main` [README](../../../README.md), [MVP](../../MVP.md), [EC
 - **Confine anti-duplicazione:** UX-015 progetta la **ricognizione fisica**, UX-001 la **movimentazione**, UX-009 le **mostre**, UX-007 i dossier, UX-005 gli esemplari fisici e UX-018 la catalogazione seriale. La nuova scheda riguarda esclusivamente **identificazione/etichettatura del record fisico**; i processi degli altri studi restano separati. Il filone tecnico (inclusi TECH-001/008/011) non viene modificato.
 - **Dipendenze e domande:** validare con professionisti la convenienza rispetto al solo codice cartaceo; valutare costo di stampa/QR, comportamento con titoli modificati, archivi clonati o futuri profili multipli, leggibilità e test nativi Windows/macOS/Linux. La priorità P1–P2 vale **soltanto per archivi numerosi** ed è ipotetica (*per piccoli archivi potrebbe essere P3*).
 - **Perimetro documentale:** questa scheda e l'indice sono gli unici file toccati, entrambi Markdown nella cartella `docs/idee/gestione-e-ux/`. Nessun codice, test, dipendenza, workflow, issue, certificato o file tecnico è stato modificato. Tutte le **20** idee restano **«Proposta — da valutare»**, senza approvazione, assegnazione o merge.
+
+## Quattordicesima ricognizione — 21 novembre 2026
+
+Nuova scheda **[REPS-UX-021 — Acquisizioni di opere da terzi e documentazione del titolo dichiarato](REPS-UX-021-acquisizioni-opere-terzi-titolo-documentato.md)**.
+
+- **Verifica su `main`:** ricontrollati README, MVP, `docs/ECONOMY-I18N.md`, `docs/DATA-PORTABILITY.md`, `src/app/models.ts`, `src-tauri/src/models.rs` e schema v6 in `src-tauri/src/db.rs`. Le opere non dispongono di un fascicolo di acquisizione, né di un autore strutturato; spese e vendite coprono registri economici distinti. La documentazione attuale elenca **otto** registri CSV, compresa la galleria; i precedenti riferimenti a sette sono storici. Nessun malfunzionamento rilevato.
+- **Problema concreto:** piccole gallerie e archivi devono separare l'arrivo in custodia dalla decisione di acquisto/donazione e dalle evidenze del titolo dichiarato, evitando di trasformare un prezzo pattuito in una spesa pagata o una proprietà certificata. Riscontro metodologico orientativo nelle procedure [Spectrum Object entry](https://collectionstrust.org.uk/resource/object-entry-the-spectrum-standard/) e [Acquisition and accessioning](https://collectionstrust.org.uk/resource/acquisition-and-accessioning-the-spectrum-standard/) di Collections Trust; non sono una attestazione legale da parte dell'app.
+- **Confini anti-doppione:** [UX-001](REPS-UX-001-provenienza-movimentazioni.md) riguarda provenienza e movimentazioni; [UX-003](REPS-UX-003-costo-e-margine-per-opera.md) attribuzioni di spese; [UX-012](REPS-UX-012-affidamenti-conto-vendita-rendiconti.md) opere di terzi senza acquisto; [UX-014](REPS-UX-014-rubrica-relazioni-professionali.md) contatti; [UX-017](REPS-UX-017-vendita-multiopera-ripartizione-importi.md) vendite in uscita. Nel filone tecnico [TECH-001](https://github.com/Cesare-ml/Repertica-Studio/pull/16) affronta interoperabilità complessiva e TECH-016 la custodia dei documenti: **non modificati**.
+- **Scelta prudente:** proposta opzionale, P2 **ipotetica** per gallerie/archivi e possibilmente non necessaria a singoli artisti. Lo stato resta **«Proposta — da valutare»**, senza approvazione, assegnazione, implementazione o merge.
+- **Perimetro della ricognizione:** aggiunta una sola nuova scheda e aggiornato questo indice, entrambi Markdown esclusivamente sotto `docs/idee/gestione-e-ux/`; la [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta in bozza e non va unita automaticamente.
