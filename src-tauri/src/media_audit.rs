@@ -119,8 +119,9 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
              UNION ALL
              SELECT artwork_id, id, 'gallery', image_path FROM artwork_images"
         ).map_err(error)?;
-        stmt.query_map([], reference).map_err(error)?
-            .collect::<Result<Vec<_>, _>>().map_err(error)?
+        let rows = stmt.query_map([], reference).map_err(error)?
+            .collect::<Result<Vec<_>, _>>().map_err(error)?;
+        rows
     };
 
     let mut result = MediaAudit {
