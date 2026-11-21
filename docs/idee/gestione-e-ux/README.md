@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-21** (ventunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **28 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-21** (ventiduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **29 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -34,6 +34,16 @@ Aggiornato: **2026-11-21** (ventunesima ricognizione). Stato delle proposte: **P
 | [REPS-UX-026](REPS-UX-026-diario-lavorazione-opera-fasi-datate.md) | Diario facoltativo del **processo di produzione originale** per opere già catalogate: eventi, date anche incerte, fonti e fotografie di lavorazione; non gestisce incarichi, costi o restauro | P2* | Proposta — da valutare |
 | [REPS-UX-027](REPS-UX-027-valute-estere-vendite-incassi-costi.md) | Valuta originaria di vendite, rate, incassi e spese, con riepiloghi per valuta e nessuna conversione implicita; compatibilità dei dati EUR esistenti | P1–P2* | Proposta — da valutare |
 | [REPS-UX-028](REPS-UX-028-giustificativi-locali-spese-acquisti.md) | Giustificativi PDF/immagine locali per spese e acquisti, distinti dagli allegati agli incassi e senza generare ulteriori movimenti contabili | P1–P2* | Proposta — da valutare |
+| [REPS-UX-029](REPS-UX-029-dismissione-documentata-opere-senza-cancellazione.md) | Dismissione deliberata e documentata (distruzione/donazione/trasferimento), con storia dell'opera e decisione separate da movimento fisico, vendite e perdita non accertata | P2* | Proposta — da valutare |
+
+## Ventiduesima ricognizione (21 novembre 2026) — REPS-UX-029
+
+- **[REPS-UX-029 — Dismissione documentata delle opere senza cancellare la storia](REPS-UX-029-dismissione-documentata-opere-senza-cancellazione.md):** proposta una pratica **facoltativa** per decisioni deliberate di uscita definitiva dal patrimonio/catalogo operativo, comprese distruzione dichiarata, donazione o trasferimento permanente: dati della decisione, fonte, eventuale esecuzione distinta, revisioni, consultazione storica e tutela dei documenti. Non si tratta di una vendita, di una rettifica dei pagamenti, di uno spostamento o di un accertamento di furto/smarrimento.
+- **Evidenza su `main`:** `src/app/models.ts` e `commands.rs` distinguono quattro stati `available/reserved/sold/archived`; `archived` non documenta motivo, fonte e data della dismissione. Il comando di eliminazione cancella le righe ammesse e gestisce i relativi media, mentre la cancellazione di opere legate a vendite/certificati è già protetta: l'idea **non** propone di aggirare i vincoli. Nessuna lacuna è stata dimostrata con test di utilizzo sul campo.
+- **Anti-doppione:** UX-001 registra **movimenti/custodia**, UX-004 **condizione**, UX-015 **ricognizione e discrepanze**, UX-021 **acquisizioni in entrata**, UX-013 **annullamenti/resi commerciali**. Un oggetto «non rinvenuto» non può diventare automaticamente «dismesso»; un'opera venduta non riceve un'altra uscita con effetti economici. Il filone [tecnico PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) conserva le proposte trasversali TECH-010/016 senza modifiche.
+- **Riferimento metodologico:** [Collections Trust / Spectrum: Deaccessioning and disposal](https://collectionstrust.org.uk/resource/deaccessioning-and-disposal-the-spectrum-standard/) e [Damage and loss](https://collectionstrust.org.uk/resource/damage-and-loss-the-spectrum-standard/), usati per distinguere operazioni, **non** per imporre normative museali a ogni artista.
+- **Scelte da convalidare:** priorità **P2 ipotetica**, soprattutto per archivi e gallerie; verificare se basta un evento datato, se la storia deve distinguere decisione/esecuzione e se servono allegati. Offline, lingua sistema/fallback inglese, export aperto e backup completo a cartella scelta sono vincoli conservati. **Nessuna approvazione, incarico, implementazione o merge**.
+- **Perimetro di questa ricognizione:** una nuova scheda e questo indice, solo Markdown sotto `docs/idee/gestione-e-ux/`. Il catalogo comprende **29 proposte**, tutte «Proposta — da valutare».
 
 ## Ventunesima ricognizione (21 novembre 2026) — REPS-UX-028
 
