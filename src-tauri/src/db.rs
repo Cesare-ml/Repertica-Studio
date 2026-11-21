@@ -12,7 +12,7 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     let conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 2 {
+    if version > 3 {
         return Err(format!("Archivio creato da una versione più recente (schema {version})").into());
     }
     if version == 0 {
@@ -126,6 +126,22 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             COMMIT;"
         )?;
     }
+    if version < 3 {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS artwork_images (
+                id TEXT PRIMARY KEY,
+                artwork_id TEXT NOT NULL REFERENCES artworks(id) ON DELETE CASCADE,
+                image_path TEXT NOT NULL UNIQUE,
+                caption TEXT CHECK(caption IS NULL OR length(caption) <= 300),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_artwork_images_artwork
+                ON artwork_images(artwork_id, created_at, id);
+            PRAGMA user_version=3;
+            COMMIT;"
+        )?;
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -145,7 +161,7 @@ mod tests {
         {
             let c = db.conn.lock().unwrap();
             let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-            assert_eq!(v, 2);
+            assert_eq!(v, 3);
             c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('x','Test','a','a')",[]).unwrap();
         }
         drop(db);
@@ -202,7 +218,7 @@ mod tests {
         let migrated = open(dir.path().into()).unwrap();
         let c = migrated.conn.lock().unwrap();
         let v: i64 = c.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
-        assert_eq!(v,2);
+        assert_eq!(v,3);
         let n: i64 = c.query_row("SELECT count(*) FROM sale_finances WHERE sale_id='s'",[],|r|r.get(0)).unwrap();
         assert_eq!(n,1);
     }
@@ -215,10 +231,36 @@ mod tests {
         assert!(c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,created_at,updated_at) VALUES('x','2026-10-01','materials','Brushes',100,'other','t','t')",[]).is_err());
     }
     #[test]
+    fn gallery_migration_preserves_primary_image_and_enforces_relations() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = open(temp.path().into()).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+                VALUES('a','A','Original','media/primary.jpg','t','t')", []).unwrap();
+            conn.execute("DROP TABLE artwork_images",[]).unwrap();
+            conn.pragma_update(None,"user_version",2).unwrap();
+        }
+        drop(db);
+        let upgraded = open(temp.path().into()).unwrap();
+        let conn = upgraded.conn.lock().unwrap();
+        let version: i64 = conn.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
+        assert_eq!(version,3);
+        let image: String = conn.query_row("SELECT image_path FROM artworks WHERE id='a'",[],|r|r.get(0)).unwrap();
+        assert_eq!(image,"media/primary.jpg");
+        assert!(conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+            VALUES('bad','nonexistent','media/extra.jpg','t')",[]).is_err());
+        conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+            VALUES('img','a','media/extra.jpg','t')",[]).unwrap();
+        conn.execute("DELETE FROM artworks WHERE id='a'",[]).unwrap();
+        let count: i64=conn.query_row("SELECT count(*) FROM artwork_images",[],|r|r.get(0)).unwrap();
+        assert_eq!(count,0);
+    }
+    #[test]
     fn newer_schema_is_not_downgraded() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
-        db.conn.lock().unwrap().pragma_update(None, "user_version", 3).unwrap();
+        db.conn.lock().unwrap().pragma_update(None, "user_version", 4).unwrap();
         drop(db);
         assert!(open(dir.path().into()).is_err());
     }
