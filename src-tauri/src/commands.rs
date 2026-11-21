@@ -108,8 +108,17 @@ fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, Stri
     tx.commit().map_err(err)?;
     Ok(saved)
 }
+/// Refuse a symlinked media directory before accessing local artwork files.
+fn require_regular_media_dir(directory: &std::path::Path) -> Result<(), String> {
+    let kind=fs::symlink_metadata(directory.join("media")).map_err(err)?.file_type();
+    if !kind.is_dir() || kind.is_symlink() {
+        return Err("La cartella media non è una directory locale regolare".into());
+    }
+    Ok(())
+}
 /// Write a picture into the media store (temporary file, then rename) and return its relative path.
 pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: &str) -> Result<String, String> {
+    require_regular_media_dir(directory)?;
     let name = format!("{}.{extension}", Uuid::new_v4());
     let relative = format!("media/{name}");
     let temporary = directory.join(format!("media/{name}.tmp"));
@@ -262,6 +271,10 @@ fn delete_artwork_core(db: &Database, id: &str) -> Result<(), String> {
             .collect::<Result<Vec<_>,_>>().map_err(err)?;
         paths
     };
+    // Do not delete DB rows if a swapped media directory could redirect cleanup.
+    if old_image.is_some() || raw_path.is_some() || !gallery_paths.is_empty() {
+        require_regular_media_dir(&db.directory)?;
+    }
     let affected = conn.execute("DELETE FROM artworks WHERE id=?1",params![id]).map_err(|_|"Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
     if affected == 0 { return Err("Opera non trovata".into()); }
     if let Some(path) = raw_path { crate::raw_files::remove_file(&db.directory, &path); }
@@ -431,6 +444,7 @@ fn save_artwork_image_core(db: &Database, artwork_id: &str, data_base64: &str) -
 fn save_artwork_image_bytes(db: &Database, artwork_id: &str, bytes: &[u8]) -> Result<(), String> {
     if bytes.len()>MAX_IMAGE_BYTES || bytes.is_empty() { return Err("Immagine troppo grande o vuota".into()); }
     let (ext,_mime)=image_type(bytes).ok_or_else(||"Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
+    require_regular_media_dir(&db.directory)?;
     let conn=db.conn.lock().map_err(err)?;
     let old=artwork_by_id(&conn,artwork_id)?.image_path;
     // Resolve historical dependencies before touching SQLite or the filesystem.
@@ -438,14 +452,9 @@ fn save_artwork_image_bytes(db: &Database, artwork_id: &str, bytes: &[u8]) -> Re
         Some(path) => image_used_by_certificate(&conn, artwork_id, path)?,
         None => false,
     };
-    let name=format!("{}.{ext}",Uuid::new_v4());
-    let relative=format!("media/{name}");
-    let target=db.directory.join(&relative);
-    let tmp=db.directory.join(format!("media/{name}.tmp"));
-    fs::write(&tmp,bytes).map_err(err)?;
-    if let Err(e)=fs::rename(&tmp,&target) { let _=fs::remove_file(&tmp); return Err(err(e)); }
+    let relative=store_media(&db.directory, bytes, ext)?;
     if let Err(e)=conn.execute("UPDATE artworks SET image_path=?2,image_media_id=NULL,updated_at=?3 WHERE id=?1",params![artwork_id,relative,now()]) {
-        let _=fs::remove_file(&target); return Err(err(e));
+        let _=fs::remove_file(db.directory.join(&relative)); return Err(err(e));
     }
     if let Some(old_path)=old {
         if !preserve_old { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &old_path); }
@@ -462,8 +471,11 @@ pub fn save_artwork_image_from_path(db: State<'_, Database>, artwork_id: String,
     save_artwork_image_bytes(&db, &artwork_id, &bytes)
 }
 pub(crate) fn safe_relative(path: &str) -> bool {
-    let p=std::path::Path::new(path);
-    p.components().all(|c|matches!(c,Component::Normal(_))) && p.starts_with("media")
+    // Only flat paths inside media/. Never an absolute, nested or cross-platform path.
+    let mut parts=std::path::Path::new(path).components();
+    matches!(parts.next(), Some(Component::Normal(folder)) if folder == "media")
+        && matches!(parts.next(), Some(Component::Normal(_)))
+        && parts.next().is_none() && !path.contains('\\')
 }
 pub(crate) fn image_type(bytes:&[u8])->Option<(&'static str,&'static str)> {
     if bytes.starts_with(&[0xff,0xd8,0xff]) { return Some(("jpg","image/jpeg")); }
@@ -471,14 +483,37 @@ pub(crate) fn image_type(bytes:&[u8])->Option<(&'static str,&'static str)> {
     if bytes.len()>=12 && &bytes[0..4]==b"RIFF" && &bytes[8..12]==b"WEBP" { return Some(("webp","image/webp")); }
     None
 }
-#[tauri::command]
-pub fn artwork_image_data(db: State<'_, Database>, artwork_id: String) -> Result<Option<String>, String> {
-    let conn=db.conn.lock().map_err(err)?;
-    let Some(relative)=artwork_by_id(&conn,&artwork_id)?.image_path else {return Ok(None);};
-    if !safe_relative(&relative) {return Err("Percorso media non valido".into());}
-    let bytes=fs::read(db.directory.join(relative)).map_err(err)?;
+// A replaced cover cannot make the preview allocate unbounded memory or read
+// an unrelated file. The IPC response always contains at most 12 MiB of bytes.
+fn artwork_image_data_core(db: &Database, artwork_id: &str) -> Result<Option<String>, String> {
+    use std::io::Read;
+    let relative={
+        let conn=db.conn.lock().map_err(err)?;
+        let Some(relative)=artwork_by_id(&conn,artwork_id)?.image_path else {return Ok(None);};
+        relative
+    };
+    if !safe_relative(&relative) { return Err("Percorso media non valido".into()); }
+    require_regular_media_dir(&db.directory)?;
+    let path=db.directory.join(relative);
+    let metadata=fs::symlink_metadata(&path).map_err(err)?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("File media non valido".into());
+    }
+    if metadata.len()==0 || metadata.len()>MAX_IMAGE_BYTES as u64 {
+        return Err("Immagine vuota o troppo grande (massimo 12 MiB)".into());
+    }
+    let file=fs::File::open(&path).map_err(err)?;
+    let mut bytes=Vec::new();
+    file.take(MAX_IMAGE_BYTES as u64+1).read_to_end(&mut bytes).map_err(err)?;
+    if bytes.is_empty() || bytes.len()>MAX_IMAGE_BYTES {
+        return Err("Immagine vuota o troppo grande (massimo 12 MiB)".into());
+    }
     let (_ext,mime)=image_type(&bytes).ok_or_else(||"Formato file non valido".to_string())?;
     Ok(Some(format!("data:{mime};base64,{}",STANDARD.encode(bytes))))
+}
+#[tauri::command]
+pub fn artwork_image_data(db: State<'_, Database>, artwork_id: String) -> Result<Option<String>, String> {
+    artwork_image_data_core(&db, &artwork_id)
 }
 
 #[cfg(test)]
@@ -490,6 +525,9 @@ mod tests {
         assert_eq!(image_type(&[0xff,0xd8,0xff,0]),Some(("jpg","image/jpeg")));
         assert!(!safe_relative("media/../secret"));
         assert!(!safe_relative("/tmp/secret"));
+        assert!(!safe_relative("media"));
+        assert!(!safe_relative("media/subdir/abc.png"));
+        assert!(!safe_relative("media\\abc.png"));
         assert!(safe_relative("media/abc.png"));
         assert!(dim(Some(f64::NAN)).is_err());
     }
@@ -556,6 +594,56 @@ mod tests {
         save_artwork_image_core(&db, "a", &STANDARD.encode([0xff, 0xd8, 0xff, 0x03])).unwrap();
         assert_ne!(cover_path(&db), original);
         assert!(!db.directory.join(original).exists());
+    }
+
+    #[test]
+    fn primary_preview_bounds_reads_and_preserves_corrupted_file_references() {
+        let (_temp,db)=artwork_with_cover();
+        let relative=cover_path(&db);
+        let path=db.directory.join(&relative);
+        assert_eq!(artwork_image_data_core(&db, "a").unwrap(),
+            Some(format!("data:image/jpeg;base64,{}",STANDARD.encode([0xff,0xd8,0xff,0x01]))));
+        // Sparse file avoids a large allocation in the test.
+        fs::File::create(&path).unwrap().set_len(MAX_IMAGE_BYTES as u64+1).unwrap();
+        assert!(artwork_image_data_core(&db, "a").unwrap_err().contains("12 MiB"));
+        fs::write(&path, []).unwrap();
+        assert!(artwork_image_data_core(&db, "a").is_err());
+        fs::write(&path, b"invalid image").unwrap();
+        assert!(artwork_image_data_core(&db, "a").unwrap_err().contains("Formato"));
+        fs::remove_file(&path).unwrap();
+        assert!(artwork_image_data_core(&db, "a").is_err());
+        assert_eq!(cover_path(&db), relative, "broken cover does not erase SQLite reference");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn primary_cover_symlink_cannot_read_external_file() {
+        use std::os::unix::fs::symlink;
+        let (_temp,db)=artwork_with_cover();
+        let file=db.directory.join(cover_path(&db));
+        let outside=tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), [0xff,0xd8,0xff,0x03]).unwrap();
+        fs::remove_file(&file).unwrap();
+        symlink(outside.path(), &file).unwrap();
+        assert!(artwork_image_data_core(&db, "a").unwrap_err().contains("non valido"));
+        assert_eq!(fs::read(outside.path()).unwrap(), [0xff,0xd8,0xff,0x03]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_media_directory_blocks_cover_reads_and_writes_without_mutating_database() {
+        use std::os::unix::fs::symlink;
+        let (_temp,db)=artwork_with_cover();
+        let original=cover_path(&db);
+        let outside=tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("untouched.jpg"), [0xff,0xd8,0xff]).unwrap();
+        fs::rename(db.directory.join("media"), db.directory.join("old-media")).unwrap();
+        symlink(outside.path(), db.directory.join("media")).unwrap();
+        assert!(artwork_image_data_core(&db, "a").is_err());
+        assert!(save_artwork_image_bytes(&db, "a", &[0xff,0xd8,0xff,0x02]).is_err());
+        assert!(store_media(&db.directory, &[0xff,0xd8,0xff], "jpg").is_err());
+        assert_eq!(cover_path(&db), original);
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
     }
 
     #[test]
