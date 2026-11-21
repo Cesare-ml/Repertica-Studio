@@ -78,9 +78,9 @@
               <strong>{{msg.header.from}}</strong>
               <span>{{msg.header.date}}</span>
             </div>
-            <div class="mail-safe-message" *ngIf="!msg.html_only">{{msg.body}}</div>
+            <div class="mail-safe-message" *ngIf="msg.body">{{msg.body}}</div>
             <div class="mail-safe-message mail-html-warning" *ngIf="msg.html_only">
-              {{t('This message has no text/plain part. For security, HTML and remote images are not displayed.')}}
+              {{t('This message contained HTML. It has been converted to safe plain text; remote images are not loaded.')}}
             </div>
             <p class="mail-hint" *ngIf="msg.attachment_count">
               {{msg.attachment_count}} {{t('attachments detected. Download support is planned for a later release.')}}
