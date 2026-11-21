@@ -11,6 +11,7 @@ Based on the **local** domains of `Gestionale-Opere` (treasury, `uscite_finanzia
 - **Allocation** divides each sale's net amount among personal, activity and savings by percentages that sum to exactly 100%.
 - Allocations use basis points and integer cents; the savings share absorbs any rounding remainder so the shares always sum to the net amount.
 - Allocation percentages are copied into `sale_finances` when a sale is entered. Later changes in settings affect **new** sales, not historic ones.
+- **Integrity protection:** when saving a split, repeated identifiers for the same allocation part are rejected, even if the split is switched off (unfinished drafts are otherwise allowed). Before recording a new sale, the active percentages are revalidated against the current SQLite contents: there must be 1–12 parts with individually valid basis-point values adding up to exactly 10,000. A damaged or externally edited plan cannot silently freeze an incorrect historical allocation; the sale transaction must roll back. Existing sale snapshots are never rewritten.
 - Expenses are assigned to activity or savings, with date, category (e.g. painting supplies, shipping, equipment, marketing), description, supplier and optional purchase link.
 - Monthly statistics group sales by their recorded sale date and expenses by their expense date; they do **not** claim money has been collected or paid. Future versions can separate receivables and actual cash movements.
 - `treasury_start_date` optionally filters summary calculations; it does not delete past data.
