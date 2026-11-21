@@ -24,6 +24,11 @@ chrono = { version = "0.4", features = ["serde", "clock"] }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 sha2 = "0.10"
+imap = "2.4.1"
+native-tls = "0.2"
+mailparse = "0.15"
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "native-tls", "hostname"] }
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-os = "2"
 tauri-plugin-updater = "2"
