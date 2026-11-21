@@ -38,10 +38,12 @@ I dati dell'archivio non vengono toccati dall'installazione. Se la nuova version
    git push origin v0.2.0
    ```
 
-3. Il workflow **Release** controlla che tag e versioni coincidano e che chiavi e variabili esistano, poi compila per Windows, firma il pacchetto di aggiornamento e pubblica la release con l'installatore e `latest.json`.
+3. Il workflow **Release** controlla che tag e versioni coincidano e che chiavi e variabili esistano, poi compila per Windows e macOS (Apple Silicon e Intel, uno alla volta), firma i pacchetti di aggiornamento e pubblica la release con gli installatori e `latest.json`, che contiene tutte le piattaforme.
 4. Le installazioni esistenti trovano la nuova versione al controllo successivo.
 
-Note: la release deve essere pubblicata (non bozza né pre-release) perché l'indirizzo `releases/latest/download/latest.json` la veda. Per ora le release sono solo per Windows: l'installatore non è firmato con un certificato di code signing, quindi Windows SmartScreen può mostrare un avviso al primo avvio («Altre informazioni → Esegui comunque»). Il pacchetto di aggiornamento è invece firmato con la chiave del progetto e verificato dall'app. macOS resta fuori finché non ci sono Developer ID e notarizzazione.
+Note: la release deve essere pubblicata (non bozza né pre-release) perché l'indirizzo `releases/latest/download/latest.json` la veda. Gli installatori non sono firmati con certificati di code signing: Windows SmartScreen può mostrare un avviso al primo avvio («Altre informazioni → Esegui comunque»), e le app macOS sono firmate solo ad-hoc e non notarizzate, quindi Gatekeeper può chiedere di aprirle con clic destro → Apri (o da Impostazioni di sistema → Privacy e sicurezza). I pacchetti di aggiornamento sono invece firmati con la chiave del progetto e verificati dall'app. Per evitare gli avvisi servono un certificato di code signing per Windows e Apple Developer ID con notarizzazione per macOS.
+
+**Aggiungere macOS a una release già pubblicata:** in GitHub, Actions → Release → *Run workflow*, scrivi il tag (per esempio `v0.1.1`) e spunta *only_macos*. Il workflow ricompila quella versione e aggiunge i pacchetti macOS e le voci `darwin-*` a `latest.json`.
 
 ## Cosa non è stato verificato
 

@@ -1,14 +1,29 @@
-# Publishes a signed Windows release: installer plus the `latest.json` feed read by the in-app updater.
-# Start it by pushing a tag such as `v0.2.0` (see docs/RELEASING.md for the one-time key setup).
+# Publishes a signed release for Windows and macOS (Apple Silicon and Intel): installers plus the
+# `latest.json` feed read by the in-app updater.
+# Start it by pushing a tag such as `v0.2.0`, or run it by hand with the name of an existing tag to add
+# builds to that release (see docs/RELEASING.md for the one-time key setup).
 # The private signing key lives only in the repository secrets; the public key is a repository variable.
 name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach to its release (for example v0.1.1)'
+        required: true
+        type: string
+      only_macos:
+        description: 'Build only the macOS packages (the Windows ones are already in the release)'
+        required: false
+        default: false
+        type: boolean
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 permissions:
   contents: write
 concurrency:
-  group: repertica-release-${{ github.ref }}
+  group: repertica-release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 jobs:
   check:
@@ -17,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
       - name: The tag, the app version and the signing setup must agree
         shell: bash
@@ -25,7 +41,7 @@ jobs:
           PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${RELEASE_TAG#v}"
           app="$(node -p "require('./src-tauri/tauri.conf.json').version")"
           pkg="$(node -p "require('./package.json').version")"
           crate="$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')"
@@ -36,20 +52,34 @@ jobs:
   publish:
     name: ${{ matrix.name }}
     needs: check
+    if: ${{ !(inputs.only_macos && matrix.name == 'Windows') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      # One at a time: every job merges its platform into the same latest.json.
+      max-parallel: 1
       matrix:
         include:
           - name: Windows
             runner: windows-latest
             args: ''
+          - name: macOS Apple Silicon
+            runner: macos-15
+            args: '--target aarch64-apple-darwin'
+            target: aarch64-apple-darwin
+          - name: macOS Intel
+            runner: macos-15-intel
+            args: '--target x86_64-apple-darwin'
+            target: x86_64-apple-darwin
     env:
       CARGO_INCREMENTAL: '0'
+      # macOS apps are ad-hoc signed (no Apple Developer ID); the update packages are minisign-signed.
+      APPLE_SIGNING_IDENTITY: '-'
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -86,8 +116,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           REPERTICA_UPDATER_PUBLIC_KEY: ${{ vars.REPERTICA_UPDATER_PUBLIC_KEY }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Repertica Studio ${{ github.ref_name }}'
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: 'Repertica Studio ${{ env.RELEASE_TAG }}'
           releaseBody: 'Vedi le note di rilascio e il file CHANGELOG per le novità di questa versione.'
           releaseDraft: false
           prerelease: false

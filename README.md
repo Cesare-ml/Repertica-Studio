@@ -73,7 +73,7 @@ Il workflow [macOS builds (Intel + Apple Silicon)](.github/workflows/build-macos
 2. Al termine, apri l'esecuzione e scarica gli artifact `repertica-macos-Apple-Silicon-...` e/o `repertica-macos-Intel-...`.
 3. Ogni artifact include il `.dmg` e il file SHA-256 per verificarlo.
 
-Il workflow esegue anche compilazioni sul branch `main` quando il codice dell'app cambia. I DMG sono **build di prova con firma ad hoc**, non notarizzate da Apple. macOS Gatekeeper potrebbe impedire l'apertura o mostrare avvisi: non presentarle come release pubbliche verificate. Nessuna release GitHub o aggiornamento automatico viene pubblicato da questa Action: le release ufficiali firmate escono dal workflow `Release` (tag `v*`). Per una distribuzione ufficiale senza avvisi occorreranno Developer ID, notarizzazione e test su dispositivi reali.
+Il workflow esegue anche compilazioni sul branch `main` quando il codice dell'app cambia. I DMG sono **build di prova con firma ad hoc**, non notarizzate da Apple. macOS Gatekeeper potrebbe impedire l'apertura o mostrare avvisi: non presentarle come release pubbliche verificate. Nessuna release GitHub o aggiornamento automatico viene pubblicato da questa Action: le release ufficiali firmate (Windows e macOS) escono dal workflow `Release` (tag `v*`). Per una distribuzione ufficiale senza avvisi occorreranno Developer ID, notarizzazione e test su dispositivi reali.
 
 ## Economia dello studio e lingue (in sviluppo)
 
