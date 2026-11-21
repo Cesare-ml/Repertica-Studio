@@ -132,6 +132,16 @@
           <label>{{t('Message')}}
             <textarea rows="14" [(ngModel)]="composer.body" maxlength="100000" [disabled]="busy"></textarea>
           </label>
+          <div class="mail-attachments-editor">
+            <div class="mail-inline-actions">
+              <button type="button" (click)="addAttachments()" [disabled]="busy">{{t('Attach files')}}</button>
+              <small>{{t('Max 5 files, 5 MiB each, 15 MiB total. Files stay on your computer until sent.')}}</small>
+            </div>
+            <div *ngFor="let path of composer.attachments" class="mail-file-row">
+              <span>{{attachmentName(path)}}</span>
+              <button type="button" [attr.aria-label]="t('Remove attachment')" (click)="removeAttachment(path)" [disabled]="busy">×</button>
+            </div>
+          </div>
           <div class="mail-compose-actions">
             <button type="button" (click)="saveDraft()" [disabled]="busy">{{t('Save local draft')}}</button>
             <button type="button" class="mail-primary" (click)="send()" [disabled]="busy">{{t('Send with SMTP')}}</button>
