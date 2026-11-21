@@ -13,7 +13,8 @@ import type {
   Artwork, ArtworkInput, ArtworkStatus, Collector, CollectorInput, Sale,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
-  SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview
+  SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
+  MediaAudit, MediaIssue
 } from './models';
 
 type Section = 'overview' | 'artworks' | 'collectors' | 'sales' | 'certificates' | 'finance' | 'settings';
@@ -125,6 +126,7 @@ export class AppComponent implements OnInit {
   lastBackup: BackupSummary | null = null;
   restoreCandidate: BackupSummary | null = null;
   lastRestore: RestoreSummary | null = null;
+  mediaAudit: MediaAudit | null = null;
 
   thumbnails: Record<string, string> = {};
   galleryArtwork: Artwork | null = null;
@@ -287,6 +289,34 @@ export class AppComponent implements OnInit {
       this.busy = false;
       this.change.detectChanges();
     }
+  }
+  async verifyArtworkMedia(): Promise<void> {
+    if (this.busy || !this.initialized) return;
+    this.busy = true;
+    this.mediaAudit = null;
+    this.errorMessage = '';
+    try {
+      this.mediaAudit = await api.auditArtworkMedia();
+    } catch (error) {
+      this.errorMessage = this.error(error);
+    } finally {
+      this.busy = false;
+      this.change.detectChanges();
+    }
+  }
+  mediaProblemLabel(problem: MediaIssue['problem']): string {
+    const labels: Record<MediaIssue['problem'], string> = {
+      unsafe_path: 'Percorso non sicuro',
+      missing: 'File mancante',
+      unreadable: 'File non leggibile',
+      not_regular: 'File non regolare o collegamento simbolico',
+      invalid_size: 'Dimensione file non valida',
+      invalid_header: 'Formato o intestazione non valida'
+    };
+    return this.tr(labels[problem]);
+  }
+  mediaArtworkLabel(id: string): string {
+    return this.artworks.find(a => a.id === id)?.title || id;
   }
   async chooseBackupDestination(): Promise<void> {
     if (this.busy || !this.initialized) return;
