@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **43 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **44 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -49,6 +49,14 @@ Aggiornato: **2026-11-22** (trentaseiesima ricognizione). Stato delle proposte: 
 | [REPS-UX-041](REPS-UX-041-titoli-descrizioni-opere-multilingua.md) | Titoli e descrizioni di presentazione riutilizzabili per lingua, senza traduzione automatica né modifica dei testi canonici e dei certificati | P2* (P3 se bastano override brochure; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-042](REPS-UX-042-pagamenti-dichiarati-spese-acquisti-differiti.md) | Acquisti a saldo differito: pagamenti manualmente dichiarati e scadenze, distinti dalle spese registrate e dalle uscite bancarie verificate | P2* (P3 se bastano note/calendario; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-043](REPS-UX-043-segnalazioni-assistenza-post-vendita-opere.md) | Richieste di assistenza **sull'opera dopo la vendita**: dichiarazioni, seguito ed esito distinti da resi, perizie e garanzie riconosciute | P2* solo se ricorrenti; P3 se bastano note | Proposta — da valutare |
+| [REPS-UX-044](REPS-UX-044-attrezzature-studio-manutenzioni-garanzie.md) | Registro facoltativo di attrezzature durevoli dello studio: identificazione del singolo bene, verifiche e manutenzioni dichiarate, senza creare spese o certificazioni di sicurezza | P2* per laboratori attrezzati; P3 se bastano note | Proposta — da valutare |
+
+## Trentasettesima ricognizione — 22 novembre 2026 — REPS-UX-044
+
+- **[REPS-UX-044 — Attrezzature durevoli, verifiche e manutenzioni dichiarate](REPS-UX-044-attrezzature-studio-manutenzioni-garanzie.md):** riesaminati `main`, `README.md`, `src-tauri/src/finance.rs`, `src/app/models.ts`, `src-tauri/src/db.rs`, `docs/ECONOMY-I18N.md` e `docs/DATA-PORTABILITY.md`. Repertica ha la categoria di spesa «Attrezzatura» ma non un registro dei **singoli strumenti durevoli** con seriali facoltativi, condizioni d'uso dichiarate, controlli effettuati e promemoria **non equivalenti a manutenzione eseguita**. Opportunità ipotetica per laboratori di ceramica, stampa/fotografia e studi con macchinari; nessuna domanda utente o incidente verificato.
+- **Anti-doppioni:** [UX-008](REPS-UX-008-scorte-materiali-consumi.md) tratta scorte consumabili; [UX-003](REPS-UX-003-costo-e-margine-per-opera.md) margini dell'opera; [UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) possibili uscite economiche e [UX-042](REPS-UX-042-pagamenti-dichiarati-spese-acquisti-differiti.md) pagamenti dichiarati di acquisti. [UX-004](REPS-UX-004-rapporti-stato-conservazione.md) riguarda la conservazione delle **opere**, non quella dei macchinari. Le **39 schede tecniche** dell'[altra PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) sono state confrontate, incluso TECH-016 sugli allegati riutilizzabili, e lasciate intatte.
+- **Alternativa minima prima dello sviluppo:** note riferite alle spese e calendario locale; un nuovo modulo è giustificato soltanto se servono davvero **identità e storia di ciascun esemplare**. Non introdurre ammortamenti, certificazioni di sicurezza, pagamenti, addebiti, notifiche o servizi online. **P2/P3 soltanto ipotetica**. SQLite/media locali, backup verificato a cartella scelta, import/export con anteprima, privacy di seriali/ubicazioni, lingua OS e fallback inglese, accessibilità.
+- **Esito:** **44 schede**, tutte **«Proposta — da valutare»**. Esclusivamente nuova scheda e indice Markdown sotto `docs/idee/gestione-e-ux/`; [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza, non unita; nessuna modifica al codice o alla cartella tecnica e nessuna approvazione o assegnazione.
 
 ## Trentaseiesima ricognizione — 22 novembre 2026 — REPS-UX-043
 
