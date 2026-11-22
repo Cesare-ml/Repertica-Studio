@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (ventottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **35 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (ventinovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **36 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -41,6 +41,15 @@ Aggiornato: **2026-11-22** (ventottesima ricognizione). Stato delle proposte: **
 | [REPS-UX-033](REPS-UX-033-entrate-professionali-non-vendita-opere.md) | Registro locale e facoltativo dei **compensi professionali extra-vendita** (didattica, licenze, servizi), distinti da vendite, incassi e quote congelate; nessun ricavo o pagamento presunto | P2* (P1–P2 solo se validato) | Proposta — da valutare |
 | [REPS-UX-034](REPS-UX-034-analisi-vendite-caratteristiche-opere.md) | Analisi aggregata delle **vendite registrate** per tecnica, supporto o anno delle opere: gruppi con metadati mancanti, definizioni verificabili e nessuna inferenza su incassi, utili o classificazioni storiche | P2* (P3 se bastano CSV; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-035](REPS-UX-035-preferenze-contatto-comunicazioni-individuali.md) | Preferenze di contatto dichiarate e avvisi contestuali per le comunicazioni individuali ai collezionisti, distinguendo inviti promozionali e comunicazioni su vendite senza presunzioni di consenso | P2*; P3 se bastano note/etichette | Proposta — da valutare |
+| [REPS-UX-036](REPS-UX-036-misure-opere-non-rettangolari.md) | Misure speciali dichiarate (diametro, ingombro, dimensioni variabili), senza alterare campi cm o stime rettangolari; prima valutare nota facoltativa | P2* (P3 se bastano note) | Proposta — da valutare |
+
+## Ventinovesima ricognizione — 22 novembre 2026 — REPS-UX-036
+
+- **[REPS-UX-036 — Misure non rettangolari e stime prudenti](REPS-UX-036-misure-opere-non-rettangolari.md):** proposta per rappresentare misure dichiarate come *diametro*, *ingombro massimo* o *dimensioni variabili*, preservando il dato originale e la fonte senza scambiarlo per una superficie rettangolare. Prima soluzione da valutare: **nota facoltativa distinta dalle dimensioni standard**, non un sistema geometrico complesso.
+- **Riscontri verificati su `main`:** [modelli](../../../src/app/models.ts), [maschera opera](../../../src/app/app.component.html), [schema SQLite](../../../src-tauri/src/db.rs), [anteprima prezzo](../../../src-tauri/src/finance.rs), [portabilità](../../DATA-PORTABILITY.md). Oggi le dimensioni sono altezza/larghezza/profondità in cm; l'anteprima usa larghezza × altezza × tariffa per cm² × coefficiente. Non è emerso nei file consultati un tipo distinto «diametro/ingombro». **Nessun difetto o richiesta utente misurata.**
+- **Coordinamento anti-doppione:** UX-022 riguarda i componenti fisici, UX-005 esemplari, UX-023 listini e UX-025 istruzioni operative; [TECH-001 e TECH-030](https://github.com/Cesare-ml/Repertica-Studio/pull/16) trattano portabilità e vocabolari, **non** il significato delle misure di forma irregolare. Nessun documento tecnico modificato.
+- **Tutele progettuali:** nessuna superficie, volume, stima, conversione di prezzo, spesa, vendita o variazione di certificato dedotta da una nota. I tre campi cm esistenti e i CSV storici non cambiano significato; un eventuale export integrale preserva fonte e misura dichiarata, con lingua sistema/fallback inglese, offline, backup selezionabile e anteprima della condivisione.
+- **Priorità:** **P2 esclusivamente ipotetica**, P3 se la descrizione dell'opera già risolve il problema. Tutte le **36 schede** rimangono **«Proposta — da valutare»**. Una sola nuova scheda e indice nella cartella Gestione e UX; [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza, **senza merge**, nessuna approvazione o assegnazione allo sviluppo.
 
 ## Ventottesima ricognizione — 22 novembre 2026 — REPS-UX-035
 
