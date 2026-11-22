@@ -204,9 +204,9 @@ test('typographic apostrophes, quotes and dashes search both artworks and collec
 
 test('incomplete contacts exclude blank or whitespace-only email and phone values', () => {
   const people = [
-    collector('a', { name: 'Senza contatti', email: '  ', phone: '\\t' }),
+    collector('a', { name: 'Senza contatti', email: '  ', phone: '\t' }),
     collector('b', { name: 'Solo email', email: 'a@example.org', phone: ' ' }),
-    collector('c', { name: 'Solo telefono', email: '\\n', phone: '333 123' }),
+    collector('c', { name: 'Solo telefono', email: '\n', phone: '333 123' }),
     collector('d', { name: 'Nessuno', email: null, phone: null })
   ];
   const found = filterCollectors(people, '', buildSaleIndexes([]), 'incomplete').map(c => c.id);
