@@ -176,27 +176,42 @@ pub fn save_core(db: &Database, input: ScheduleInput, now: NaiveDateTime) -> Res
     status(&conn, now)
 }
 
-/// Keep only the newest `keep` automatic backups that live in `destination`.
+/// Keep only the newest `keep` automatic backups **in this destination**.
+/// Entries in other directories (e.g. an old external disk) and invalid/tampered
+/// entries must not count toward the quota or cause legitimate copies to be deleted.
 fn apply_retention(db: &Database, destination: &Path, keep: i64) -> Result<(), String> {
     if keep <= 0 { return Ok(()); }
     let conn = db.conn.lock().map_err(err)?;
     let entries: Vec<(String, String)> = {
         let mut statement = conn.prepare("SELECT directory,created_at FROM auto_backup_log ORDER BY created_at DESC,directory DESC").map_err(err)?;
-        let rows = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
+        let rows = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?
+            .collect::<Result<Vec<_>, _>>().map_err(err)?;
         rows
     };
     let canonical_destination = fs::canonicalize(destination).map_err(err)?;
-    for (directory, _) in entries.into_iter().skip(keep as usize) {
+    // Filter first, *then* apply the quota. Otherwise a newer backup made on
+    // another disk (or a malformed log row) can consume a retention slot here.
+    let eligible: Vec<String> = entries.into_iter().filter_map(|(directory, _)| {
         let path = Path::new(&directory);
-        let name_ok = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(BACKUP_PREFIX));
-        let inside = fs::canonicalize(path).ok().and_then(|p| p.parent().map(|parent| parent == canonical_destination)).unwrap_or(false);
-        let is_backup = path.join("manifest.json").is_file() && path.join("repertica.sqlite").is_file();
-        let plain = fs::symlink_metadata(path).map(|m| m.is_dir() && !m.file_type().is_symlink()).unwrap_or(false);
-        if name_ok && inside && is_backup && plain {
-            if fs::remove_dir_all(path).is_err() { continue; } // keep the log entry and retry next time
-        } else if path.exists() {
-            continue; // never touch anything that does not look exactly like our own backup
+        let name_ok = path.file_name().and_then(|n| n.to_str())
+            .is_some_and(|name| name.starts_with(BACKUP_PREFIX));
+        let plain_directory = fs::symlink_metadata(path)
+            .map(|meta| meta.is_dir() && !meta.file_type().is_symlink()).unwrap_or(false);
+        let directly_inside = fs::canonicalize(path).ok()
+            .and_then(|resolved| resolved.parent()
+                .map(|parent| parent == canonical_destination.as_path()))
+            .unwrap_or(false);
+        let regular_file = |name: &str| fs::symlink_metadata(path.join(name))
+            .map(|meta| meta.is_file() && !meta.file_type().is_symlink()).unwrap_or(false);
+        if name_ok && plain_directory && directly_inside
+            && regular_file("manifest.json") && regular_file("repertica.sqlite") {
+            Some(directory)
+        } else {
+            None // Keep suspicious/absent folders and their log entries untouched.
         }
+    }).collect();
+    for directory in eligible.into_iter().skip(keep as usize) {
+        if fs::remove_dir_all(&directory).is_err() { continue; }
         conn.execute("DELETE FROM auto_backup_log WHERE directory=?1", params![directory]).map_err(err)?;
     }
     Ok(())
@@ -445,6 +460,53 @@ mod tests {
         assert!(destination.join("note.txt").exists());
         let logged: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM auto_backup_log", [], |r| r.get(0)).unwrap();
         assert_eq!(logged, 2);
+    }
+
+    #[test]
+    fn retention_counts_backups_per_destination_even_after_switching_disks() {
+        let (dir, db, first_destination) = setup();
+        let second_destination = dir.path().join("second-disk");
+        fs::create_dir(&second_destination).unwrap();
+        save_core(&db, input(&first_destination, 2), at("2026-11-10 08:00")).unwrap();
+        let a1 = run_core(&db, at("2026-11-11 09:00")).unwrap().last_directory.unwrap();
+        let a2 = run_core(&db, at("2026-11-12 09:00")).unwrap().last_directory.unwrap();
+
+        save_core(&db, input(&second_destination, 2), at("2026-11-12 11:00")).unwrap();
+        let b1 = run_core(&db, at("2026-11-13 09:00")).unwrap().last_directory.unwrap();
+        let b2 = run_core(&db, at("2026-11-14 09:00")).unwrap().last_directory.unwrap();
+
+        save_core(&db, input(&first_destination, 2), at("2026-11-14 11:00")).unwrap();
+        let a3 = run_core(&db, at("2026-11-15 09:00")).unwrap().last_directory.unwrap();
+        assert!(!Path::new(&a1).exists(), "only the oldest backup on disk A is pruned");
+        assert!(Path::new(&a2).is_dir() && Path::new(&a3).is_dir(),
+            "two newest copies on disk A survive despite later backups on disk B");
+        assert!(Path::new(&b1).is_dir() && Path::new(&b2).is_dir(),
+            "copies on the other disk are untouched");
+        let count: i64 = db.conn.lock().unwrap().query_row(
+            "SELECT count(*) FROM auto_backup_log", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn invalid_newer_log_entry_does_not_consume_a_retention_slot() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 2), at("2026-11-10 08:00")).unwrap();
+        let oldest = run_core(&db, at("2026-11-11 09:00")).unwrap().last_directory.unwrap();
+        let keep = run_core(&db, at("2026-11-12 09:00")).unwrap().last_directory.unwrap();
+
+        let fake = destination.join("ReperticaStudio-backup-not-a-backup");
+        fs::create_dir(&fake).unwrap();
+        fs::write(fake.join("note.txt"), "non e un backup").unwrap();
+        db.conn.lock().unwrap().execute(
+            "INSERT INTO auto_backup_log(directory,created_at) VALUES(?1,'2099-01-01T00:00:00')",
+            params![fake.to_string_lossy()],
+        ).unwrap();
+
+        let newest = run_core(&db, at("2026-11-13 09:00")).unwrap().last_directory.unwrap();
+        assert!(!Path::new(&oldest).exists(), "oldest real copy can be pruned");
+        assert!(Path::new(&keep).is_dir() && Path::new(&newest).is_dir(),
+            "a bogus log row must not cost a real copy its retention slot");
+        assert!(fake.join("note.txt").exists(), "unrecognized folder is never removed");
     }
 
     #[test]
