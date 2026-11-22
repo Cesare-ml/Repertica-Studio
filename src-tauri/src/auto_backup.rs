@@ -184,8 +184,9 @@ fn apply_retention(db: &Database, destination: &Path, keep: i64) -> Result<(), S
     let conn = db.conn.lock().map_err(err)?;
     let entries: Vec<(String, String)> = {
         let mut statement = conn.prepare("SELECT directory,created_at FROM auto_backup_log ORDER BY created_at DESC,directory DESC").map_err(err)?;
-        statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?
-            .collect::<Result<Vec<_>, _>>().map_err(err)?
+        let rows = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?
+            .collect::<Result<Vec<_>, _>>().map_err(err)?;
+        rows
     };
     let canonical_destination = fs::canonicalize(destination).map_err(err)?;
     // Filter first, *then* apply the quota. Otherwise a newer backup made on
