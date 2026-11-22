@@ -127,17 +127,32 @@ fn require_regular_media_dir(directory: &std::path::Path) -> Result<(), String> 
     Ok(())
 }
 /// Write a picture into the media store (temporary file, then rename) and return its relative path.
-pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: &str) -> Result<String, String> {
+/// The injected writer makes a short/disk-full write testable without filling an actual drive.
+fn store_media_with_writer<F>(
+    directory: &std::path::Path, bytes: &[u8], extension: &str, write: F,
+) -> Result<String, String>
+where
+    F: FnOnce(&std::path::Path, &[u8]) -> std::io::Result<()>,
+{
     require_regular_media_dir(directory)?;
     let name = format!("{}.{extension}", Uuid::new_v4());
     let relative = format!("media/{name}");
     let temporary = directory.join(format!("media/{name}.tmp"));
-    fs::write(&temporary, bytes).map_err(err)?;
+    // A failing fs::write may leave a partially written .tmp file behind.
+    // Clean it even when the rename was never attempted, keeping backups tidy.
+    if let Err(e) = write(temporary.as_path(), bytes) {
+        let _ = fs::remove_file(&temporary);
+        return Err(err(e));
+    }
     if let Err(e) = fs::rename(&temporary, directory.join(&relative)) {
         let _ = fs::remove_file(&temporary);
         return Err(err(e));
     }
     Ok(relative)
+}
+
+pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: &str) -> Result<String, String> {
+    store_media_with_writer(directory, bytes, extension, |path, data| fs::write(path, data))
 }
 /// Create an artwork with an automatic archive code, its photographs and an optional sale in
 /// a single transaction. Every picture is validated before anything is written, and files
@@ -1180,6 +1195,29 @@ mod tests {
         let counter: i64 = db.conn.lock().unwrap()
             .query_row("SELECT last_number FROM certificate_counter", [], |r| r.get(0)).unwrap();
         assert_eq!(counter, 2, "a rejected certificate must not consume a number");
+    }
+
+    #[test]
+    fn partial_media_write_failure_cleans_temp_and_preserves_existing_photos() {
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path().join("media");
+        fs::create_dir(&media).unwrap();
+        fs::write(media.join("existing.png"), b"untouched").unwrap();
+
+        // Simulate a disk that fills after part of the photo has been written.
+        // The helper must not leak a .tmp file into future archive backups.
+        let failure = store_media_with_writer(dir.path(), b"abcdefgh", "png", |temp, bytes| {
+            fs::write(temp, &bytes[..4])?;
+            Err(std::io::Error::from_raw_os_error(if cfg!(windows) { 112 } else { 28 }))
+        }).unwrap_err();
+        assert!(failure.contains("Spazio su disco"), "{failure}");
+        let remaining = fs::read_dir(&media).unwrap()
+            .map(|item| item.unwrap().file_name()).collect::<Vec<_>>();
+        assert_eq!(remaining, vec![std::ffi::OsString::from("existing.png")]);
+        assert_eq!(fs::read(media.join("existing.png")).unwrap(), b"untouched");
+
+        let relative = store_media(dir.path(), b"valid-image-bytes", "png").unwrap();
+        assert_eq!(fs::read(dir.path().join(relative)).unwrap(), b"valid-image-bytes");
     }
 
     #[test]
