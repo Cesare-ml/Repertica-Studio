@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **48 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **49 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -54,6 +54,14 @@ Data ricognizione: **2026-11-22** (quarantacinquesima ricognizione). Stato unifo
 | [REPS-TECH-046](REPS-TECH-046-master-fotografici-tiff-bigtiff-offline.md) | Master fotografici TIFF/BigTIFF conservabili come originali offline con hash, backup integrale ed eventuali preview derivate dichiarate; fase iniziale senza obbligo di decoder | P2 condizionata a casi reali; P3/nessuno sviluppo se non utile | Proposta — da valutare |
 | [REPS-TECH-047](REPS-TECH-047-ocr-locale-documenti-scansionati-consenso.md) | OCR locale manuale dei documenti scansionati con originali intatti, testo temporaneo per default e indice solo eventuale opt-in; distinto dal testo PDF nativo di TECH-028 | P2–P3 condizionata, nessuno sviluppo se OCR esterno basta | Proposta — da valutare |
 | [REPS-TECH-048](REPS-TECH-048-parita-ricerca-interfaccia-mcp-unicode.md) | Ricerca opere con semantica Unicode e corrispondenze verificabili fra interfaccia Angular e MCP locale, senza aprire campi privati o cambiare gli ordinamenti/limiti intenzionali | P2 se le divergenze contano nell'uso reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+| [REPS-TECH-049](REPS-TECH-049-confine-istruzioni-dati-mcp-prompt-injection.md) | Testi delle schede come dati non attendibili negli output MCP: rischio di prompt injection indiretta, confini di responsabilità degli host e test sintetici senza censurare le opere | P2–P3 condizionata | Proposta — da valutare |
+
+## Quarantaseiesima ricognizione — 22 novembre 2026 — REPS-TECH-049
+
+- **[REPS-TECH-049 — Testi delle schede come dati non attendibili nei risultati MCP](REPS-TECH-049-confine-istruzioni-dati-mcp-prompt-injection.md):** verificati su `main` `docs/MCP.md`, `src-tauri/src/mcp.rs`, le 48 proposte tecniche precedenti e le 53 idee del filone [Gestione e UX, PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il server già esistente restituisce titoli/descrizioni in JSON dentro risultati MCP testuali. Un assistente potrebbe interpretare istruzioni presenti nei record come comandi: **rischio da studiare**, non vulnerabilità osservata in Repertica.
+- **Confini:** TECH-014 riguarda permessi e campi consentiti; TECH-036 limiti di dimensione/paginazione; TECH-048 semantica della ricerca. Questa proposta tratta **l'interpretazione dei testi non attendibili da parte dell'host**, senza aggiungere nuovi tool, campi privati, servizi esterni o filtri/censure sulle descrizioni artistiche. L'app conserva SQLite read-only e il collegamento resta facoltativo.
+- **Decisione/priorità:** prima test **solo sintetici e in ambiente isolato** e valutazione di una guida sulla responsabilità dei client; eventuali metadati strutturati soltanto se gli host li supportano davvero, senza promettere una difesa totale. **P2–P3 ipotetica**; **nessuno sviluppo** se le misure di documentazione sono sufficienti.
+- **Perimetro:** **49 proposte**, tutte **«Proposta — da valutare»**. Modificati soltanto Markdown in questa cartella; nessun codice, test, workflow, configurazione, dipendenza, issue o file UX toccato. PR documentale in bozza, **senza merge né approvazione**.
 
 ## Quarantacinquesima ricognizione — 22 novembre 2026 — REPS-TECH-048
 
