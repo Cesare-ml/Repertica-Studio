@@ -142,7 +142,7 @@ where
 }
 
 pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: &str) -> Result<String, String> {
-    store_media_with_writer(directory, bytes, extension, fs::write)
+    store_media_with_writer(directory, bytes, extension, |path, data| fs::write(path, data))
 }
 /// Create an artwork with an automatic archive code, its photographs and an optional sale in
 /// a single transaction. Every picture is validated before anything is written, and files
