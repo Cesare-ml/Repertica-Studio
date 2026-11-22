@@ -191,6 +191,20 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
     if old_primary.as_deref() == Some(new_primary.as_str()) {
         return Err("Immagini principale e aggiuntiva duplicate".into());
     }
+    // Imported archives and external tools can leave a regular file containing
+    // anything (or a sparse, oversized file) behind a gallery reference.
+    // Reject it before the transaction changes the cover or gallery metadata.
+    // Only its first 12 bytes are needed to detect our supported formats.
+    let candidate = fs::File::open(db.directory.join(&new_primary)).map_err(err)?;
+    let size = candidate.metadata().map_err(err)?.len();
+    if size == 0 || size > MAX_GALLERY_PREVIEW_BYTES {
+        return Err("Fotografia da promuovere vuota o troppo grande (massimo 12 MiB)".into());
+    }
+    let mut signature = Vec::with_capacity(12);
+    candidate.take(12).read_to_end(&mut signature).map_err(err)?;
+    if mime(&signature).is_none() {
+        return Err("Formato fotografia da promuovere non valido".into());
+    }
 
     // The catalogue link travels with the picture it describes.
     let new_media: Option<String> = tx.query_row("SELECT media_id FROM artwork_images WHERE id=?1", params![image_id], |r| r.get(0)).map_err(err)?;
@@ -580,6 +594,57 @@ mod tests {
             [], |r| r.get(0),
         ).unwrap();
         assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn promotion_refuses_corrupted_or_oversized_gallery_files_without_changing_references() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        let cover = "media/cover.jpg";
+        let gallery = "media/candidate.png";
+        let old_bytes = [0xff, 0xd8, 0xff, 0x01];
+        let png_bytes = [137, 80, 78, 71, 13, 10, 26, 10];
+        fs::write(db.directory.join(cover), old_bytes).unwrap();
+        fs::write(db.directory.join(gallery), b"invalid image bytes").unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+                VALUES('art','A','Title',?1,'created','original')", params![cover]).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at)
+                VALUES('photo','art',?1,'Caption','created')", params![gallery]).unwrap();
+        }
+
+        let assert_unchanged = || {
+            let conn = db.conn.lock().unwrap();
+            let primary: String = conn.query_row("SELECT image_path FROM artworks WHERE id='art'",
+                [], |r| r.get(0)).unwrap();
+            let extra: String = conn.query_row("SELECT image_path FROM artwork_images WHERE id='photo'",
+                [], |r| r.get(0)).unwrap();
+            let timestamp: String = conn.query_row("SELECT updated_at FROM artworks WHERE id='art'",
+                [], |r| r.get(0)).unwrap();
+            assert_eq!((primary.as_str(), extra.as_str(), timestamp.as_str()),
+                (cover, gallery, "original"));
+            assert!(db.directory.join(cover).is_file());
+            assert!(db.directory.join(gallery).is_file());
+        };
+        assert!(promote_core(&db, "art", "photo").unwrap_err().contains("Formato"));
+        assert_unchanged();
+
+        fs::File::create(db.directory.join(gallery)).unwrap()
+            .set_len(MAX_GALLERY_PREVIEW_BYTES + 1).unwrap();
+        assert!(promote_core(&db, "art", "photo").unwrap_err().contains("12 MiB"));
+        assert_unchanged();
+
+        fs::write(db.directory.join(gallery), png_bytes).unwrap();
+        promote_core(&db, "art", "photo").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let primary: String = conn.query_row("SELECT image_path FROM artworks WHERE id='art'",
+            [], |r| r.get(0)).unwrap();
+        let extra: String = conn.query_row("SELECT image_path FROM artwork_images WHERE id='photo'",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!((primary.as_str(), extra.as_str()), (gallery, cover));
+        assert_eq!(fs::read(db.directory.join(cover)).unwrap(), old_bytes);
+        assert_eq!(fs::read(db.directory.join(gallery)).unwrap(), png_bytes);
     }
 
     #[cfg(unix)]
