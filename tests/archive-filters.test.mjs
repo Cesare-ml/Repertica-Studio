@@ -181,3 +181,34 @@ test('collector search matches phone numbers across formatting without weakening
   assert.deepEqual(found('3331239999'), []);
   assert.deepEqual(found('2026'), ['a']); // No digit-only fuzzy matching for years.
 });
+
+
+test('typographic apostrophes, quotes and dashes search both artworks and collectors', () => {
+  const works = [
+    artwork('a', { title: 'L’Amico — ritratto', technique: 'Olio su tela' }),
+    artwork('b', { title: 'Paesaggio–notturno', technique: 'Tempera' })
+  ];
+  const indexes = buildSaleIndexes([sale('a', 'c1', 'L’Amico — ritratto', 'D’Amico')]);
+  const ids = query => filterArtworks(works, options({ query }), indexes).map(w => w.id);
+
+  assert.deepEqual(ids("l'amico - ritratto"), ['a']);
+  assert.deepEqual(ids('paesaggio-notturno'), ['b']);
+  assert.deepEqual(ids('“olio su tela” d’amico'), ['a']);
+  assert.deepEqual(ids('“olio su” ritratto'), ['a']);
+  assert.deepEqual(ids('“olio su” notturno'), []);
+
+  const people = [collector('c1', { name: 'D’Amico', notes: 'Collezione – privata' })];
+  assert.deepEqual(filterCollectors(people, "d'amico", indexes).map(c => c.id), ['c1']);
+  assert.deepEqual(filterCollectors(people, 'collezione - privata', indexes).map(c => c.id), ['c1']);
+});
+
+test('incomplete contacts exclude blank or whitespace-only email and phone values', () => {
+  const people = [
+    collector('a', { name: 'Senza contatti', email: '  ', phone: '\\t' }),
+    collector('b', { name: 'Solo email', email: 'a@example.org', phone: ' ' }),
+    collector('c', { name: 'Solo telefono', email: '\\n', phone: '333 123' }),
+    collector('d', { name: 'Nessuno', email: null, phone: null })
+  ];
+  const found = filterCollectors(people, '', buildSaleIndexes([]), 'incomplete').map(c => c.id);
+  assert.deepEqual(found, ['a', 'd']);
+});
