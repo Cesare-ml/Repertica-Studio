@@ -258,17 +258,27 @@ pub fn move_artwork_gallery_image(
 }
 // Preview bytes enter the Tauri IPC response as base64. Even if a media file
 // was replaced on disk after import, never allocate an unbounded buffer for it.
-fn gallery_image_data_core(db: &Database, image_id: &str) -> Result<String, String> {
+// Resolve the reference under the SQLite lock, then release it before any
+// potentially slow filesystem read or base64 conversion. USB and NAS media
+// previews must not block edits to unrelated artworks and collectors.
+fn gallery_image_data_with_reader(
+    db: &Database, image_id: &str, reader: impl FnOnce(&Path) -> Result<String, String>,
+) -> Result<String, String> {
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let relative: String = conn.query_row("SELECT image_path FROM artwork_images WHERE id=?1",
-        params![image_id], |r| r.get(0)).optional().map_err(err)?
-        .ok_or("Fotografia non trovata")?;
+    let relative: String = {
+        let conn = db.conn.lock().map_err(err)?;
+        conn.query_row("SELECT image_path FROM artwork_images WHERE id=?1",
+            params![image_id], |r| r.get(0)).optional().map_err(err)?
+            .ok_or("Fotografia non trovata")?
+    };
     if !relative_media_path(&relative) { return Err("Percorso media non valido".into()); }
-    let path = db.directory.join(relative);
-    let typ = fs::symlink_metadata(&path).map_err(err)?.file_type();
+    reader(&db.directory.join(relative))
+}
+
+fn read_gallery_image_file(path: &Path) -> Result<String, String> {
+    let typ = fs::symlink_metadata(path).map_err(err)?.file_type();
     if !typ.is_file() || typ.is_symlink() { return Err("File media non valido".into()); }
-    let file = fs::File::open(&path).map_err(err)?;
+    let file = fs::File::open(path).map_err(err)?;
     let length = file.metadata().map_err(err)?.len();
     if length == 0 || length > MAX_GALLERY_PREVIEW_BYTES {
         return Err("Fotografia vuota o troppo grande (massimo 12 MiB)".into());
@@ -283,6 +293,10 @@ fn gallery_image_data_core(db: &Database, image_id: &str) -> Result<String, Stri
     }
     let (_, media_type) = mime(&bytes).ok_or("Formato file non valido")?;
     Ok(format!("data:{media_type};base64,{}", STANDARD.encode(bytes)))
+}
+
+fn gallery_image_data_core(db: &Database, image_id: &str) -> Result<String, String> {
+    gallery_image_data_with_reader(db, image_id, read_gallery_image_file)
 }
 #[tauri::command]
 pub fn artwork_gallery_image_data(db: State<'_, Database>, image_id: String) -> Result<String, String> {
@@ -600,6 +614,34 @@ mod tests {
             "SELECT COUNT(*) FROM artwork_images WHERE id='extra'", [], |r| r.get(0),
         ).unwrap();
         assert_eq!(row_count, 1);
+    }
+
+    #[test]
+    fn gallery_preview_releases_sqlite_lock_before_media_read() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(temp.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','A','Art','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('photo','art','media/photo.png','t')", []).unwrap();
+        }
+        // Reader injection checks lock lifetime deterministically, without
+        // timing assumptions or a slow disk. The actual reader is used below.
+        let value = gallery_image_data_with_reader(&db, "photo", |path| {
+            assert_eq!(path, db.directory.join("media/photo.png"));
+            assert!(db.conn.try_lock().is_ok(), "preview I/O must not hold SQLite mutex");
+            Ok("ready".to_owned())
+        }).unwrap();
+        assert_eq!(value, "ready");
+
+        let png = [137, 80, 78, 71, 13, 10, 26, 10];
+        fs::write(db.directory.join("media/photo.png"), png).unwrap();
+        assert_eq!(gallery_image_data_core(&db, "photo").unwrap(),
+            format!("data:image/png;base64,{}", STANDARD.encode(png)));
+        assert!(gallery_image_data_with_reader(&db, "missing", |_| panic!("no read for missing photo"))
+            .is_err());
     }
 
     #[test]
