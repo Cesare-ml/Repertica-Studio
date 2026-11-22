@@ -275,6 +275,17 @@ fn record_outcome(
     if !same_configuration(started, &status(conn, now)?) {
         return Ok(());
     }
+    // Manual "Run now" and the scheduled timer may overlap on a slow USB/NAS.
+    // A backup started earlier can finish last; its result must not replace the
+    // more recent attempt's success/error in the UI or rewind retry scheduling.
+    // Successful older copies are still added to auto_backup_log above.
+    let latest_attempt: Option<String> = conn.query_row(
+        "SELECT last_attempt_at FROM backup_schedule WHERE singleton=1",
+        [], |row| row.get(0),
+    ).map_err(err)?;
+    if parse_stamp(&latest_attempt).is_some_and(|latest| latest > now) {
+        return Ok(());
+    }
     match outcome {
         Ok(summary) => {
             conn.execute("UPDATE backup_schedule SET last_attempt_at=?1,last_success_at=?1,last_status='OK',last_message=NULL,last_directory=?2 WHERE singleton=1",
@@ -728,6 +739,42 @@ mod tests {
         assert!(state.last_attempt_at.is_none() && state.last_status.is_none());
         assert!(tick(&db, at("2026-11-21 09:06")).unwrap().is_some(),
             "an old failure must not impose a 30-minute retry delay on the new disk");
+    }
+
+    #[test]
+    fn an_older_overlapping_backup_cannot_overwrite_the_newer_attempt() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-20 08:00")).unwrap();
+        let started = status(&db.conn.lock().unwrap(), at("2026-11-21 09:05")).unwrap();
+        // Real verified backup summaries: even an older, valid copy must not
+        // overwrite newer status when a USB/NAS operation finishes out of order.
+        let older_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let newer_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let conn = db.conn.lock().unwrap();
+
+        record_outcome(&conn, &started, at("2026-11-21 09:06"), &Ok(newer_copy.clone())).unwrap();
+        record_outcome(&conn, &started, at("2026-11-21 09:05"),
+            &Err("Older disk error arrived late".into())).unwrap();
+        let after_success = status(&conn, at("2026-11-21 09:07")).unwrap();
+        assert_eq!(after_success.last_attempt_at.as_deref(), Some("2026-11-21T09:06:00"));
+        assert_eq!(after_success.last_success_at.as_deref(), Some("2026-11-21T09:06:00"));
+        assert_eq!(after_success.last_status.as_deref(), Some("OK"));
+        assert_eq!(after_success.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+
+        record_outcome(&conn, &started, at("2026-11-21 09:10"),
+            &Err("Latest disk error".into())).unwrap();
+        record_outcome(&conn, &started, at("2026-11-21 09:07"), &Ok(older_copy.clone())).unwrap();
+        let after_error = status(&conn, at("2026-11-21 09:11")).unwrap();
+        assert_eq!(after_error.last_attempt_at.as_deref(), Some("2026-11-21T09:10:00"));
+        assert_eq!(after_error.last_success_at.as_deref(), Some("2026-11-21T09:06:00"));
+        assert_eq!(after_error.last_status.as_deref(), Some("ERROR"));
+        assert_eq!(after_error.last_message.as_deref(), Some("Latest disk error"));
+        assert_eq!(after_error.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+        let logged: i64 = conn.query_row(
+            "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
+            params![older_copy.directory], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(logged, 1, "the valid older backup remains registered for recovery");
     }
 
     #[test]
