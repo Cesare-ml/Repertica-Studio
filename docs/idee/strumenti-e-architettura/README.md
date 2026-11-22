@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (ventisettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **30 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (ventottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **31 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -36,6 +36,15 @@ Data ricognizione: **2026-11-22** (ventisettesima ricognizione). Stato uniforme:
 | [REPS-TECH-028](REPS-TECH-028-ricerca-testo-pdf-allegati-offline.md) | Ricerca testuale offline nei PDF già allegati agli incassi: selezione esplicita, parsing sicuro e indice locale facoltativo ed eliminabile, senza OCR automatico | P2–P3 condizionata | Proposta — da valutare |
 | [REPS-TECH-029](REPS-TECH-029-scambio-selettivo-schede-opere-archivi-indipendenti.md) | Scambio selettivo e verificabile di schede-opera e foto scelte fra archivi indipendenti; prima export/consultazione, eventuale import assistito senza sincronizzazione o trasferimenti impliciti di proprietà | P2–P3 condizionata | Proposta — da valutare |
 | [REPS-TECH-030](REPS-TECH-030-vocabolari-locali-tecniche-supporti-interoperabili.md) | Vocabolari locali facoltativi per tecniche/supporti e corrispondenze semantiche confermate, con testi originali invariati, interoperabilità e lingue non obbligatorie | P2–P3 condizionata | Proposta — da valutare |
+| [REPS-TECH-031](REPS-TECH-031-allegati-bozze-posta-ripristinabili.md) | Bozze della posta: preflight dei riferimenti esterni e studio di copie locali gestite, verificabili e ripristinabili; invio sempre manuale | P2 condizionata | Proposta — da valutare |
+
+## Ventottesima ricognizione — 22 novembre 2026 — REPS-TECH-031
+
+- **[REPS-TECH-031 — Allegati delle bozze email: preflight, copie gestite e ripristino](REPS-TECH-031-allegati-bozze-posta-ripristinabili.md):** approfondito un limite **già dichiarato** della [Posta professionale](../../BUSINESS-MAIL-DESKTOP.md): la bozza memorizza percorsi assoluti per gli allegati, non i file stessi. La proposta distingue una **fase minima** (stato di disponibilità e verifica SHA-256 di file collegati, conferma su modifiche prima dell'invio) da una **fase opzionale** (copia privata gestita, esplicitamente scelta, inclusa nel backup verificato e ripristinabile su altri PC). Non prescrive una nuova architettura né la copia automatica delle vecchie bozze.
+- **Evidenza sul `main` del 22/11:** `business_mail.rs` registra `MailDraft.attachments: Vec<String>`, legge i file al momento dell'invio e applica già i limiti **5 file / 5 MiB per file / 15 MiB complessivi**, prima di contattare SMTP. `backup.rs` include SQLite e la cartella `media/`, **non** i file esterni citati dalle bozze. La copia di un draft nel backup non implica portabilità dei suoi allegati. Non è stato osservato un incidente, né si sostiene che l'app invii allegati non verificati: il problema è la **stabilità dell'identità del file scelto** nel tempo.
+- **Anti-doppione:** [TECH-016](REPS-TECH-016-allegati-documentali-locali-multi-entita.md) riguarda custodia documentale multi-entità, non lo stato di una bozza e il passaggio all'invio SMTP; TECH-001 portabilità generale; TECH-022 spazio di backup; [UX-035](https://github.com/Cesare-ml/Repertica-Studio/pull/14) riguarda preferenze di contatto, non i byte allegati. Non è stato modificato alcun documento Gestione e UX.
+- **Tutele e alternativa minima:** non cambiare la semantica delle bozze esistenti, non inviare mai automaticamente, non ritentare SMTP ambiguo, non esporre allegati via MCP. Distinguere riferimenti esterni fragili da copie gestite e avvisare che **i backup attuali sono in chiaro**. Le password restano nel portachiavi OS. Un semplice avviso/controllo potrebbe essere sufficiente se l'uso delle bozze con allegati è raro. Priorità **P2 condizionata**, **non approvata**.
+- **Esito:** **31 schede**, tutte **«Proposta — da valutare»**, un nuovo Markdown e questo indice esclusivamente in `docs/idee/strumenti-e-architettura/`. [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) da lasciare aperta, in bozza e senza merge, per revisione personale. Nessuna implementazione, test, workflow, configurazione, issue, dipendenza o approvazione.
 
 ## Ventisettesima ricognizione — 22 novembre 2026 — REPS-TECH-030 e verifica TECH-014
 
