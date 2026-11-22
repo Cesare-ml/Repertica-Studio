@@ -80,6 +80,24 @@ fn get_core(db: &Database, receipt_id: &str) -> Result<Option<ReceiptAttachment>
         params![receipt_id], row,
     ).optional().map_err(err)
 }
+// Stage the verified evidence outside the SQLite mutex. Slow removable disks
+// must not stall unrelated artwork, collector or sales queries while writing
+// up to 12 MiB. Files are named exclusively by Repertica and never overwritten.
+fn stage_receipt_file(db: &Database, bytes: &[u8], ext: &str) -> Result<String, String> {
+    media_directory(db)?;
+    let relative = format!("media/receipt-{}.{}", Uuid::new_v4(), ext);
+    let target = db.directory.join(&relative);
+    let mut output = OpenOptions::new().write(true).create_new(true)
+        .open(&target).map_err(err)?;
+    let written = output.write_all(bytes).and_then(|_| output.sync_all());
+    drop(output);
+    if let Err(e) = written {
+        let _ = fs::remove_file(&target);
+        return Err(err(e));
+    }
+    Ok(relative)
+}
+
 fn attach_core(db: &Database, receipt_id: &str, source: &Path) -> Result<ReceiptAttachment, String> {
     if !source.is_absolute() { return Err("Seleziona un file tramite il dialogo nativo".into()); }
     let name = source.file_name().and_then(|v| v.to_str()).ok_or("Nome del documento non valido")?;
@@ -98,36 +116,39 @@ fn attach_core(db: &Database, receipt_id: &str, source: &Path) -> Result<Receipt
     }
     let (ext, mime_type) = mime(&bytes).ok_or("Sono consentiti solo PDF, JPEG, PNG e WebP")?;
     let digest = format!("{:x}", Sha256::digest(&bytes));
-    let conn = db.conn.lock().map_err(err)?;
-    media_directory(db)?;
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sale_receipts WHERE id=?1)",
-        params![receipt_id], |r| r.get(0),
-    ).map_err(err)?;
-    if !exists { return Err("Incasso non trovato".into()); }
-    let already: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sale_receipt_attachments WHERE receipt_id=?1)",
-        params![receipt_id], |r| r.get(0),
-    ).map_err(err)?;
-    if already { return Err("Questo incasso ha già un allegato".into()); }
 
-    let relative = format!("media/receipt-{}.{}", Uuid::new_v4(), ext);
-    let target = db.directory.join(&relative);
-    let mut output = OpenOptions::new().write(true).create_new(true).open(&target).map_err(err)?;
-    let written = output.write_all(&bytes).and_then(|_| output.sync_all());
-    drop(output);
-    if let Err(e) = written { let _ = fs::remove_file(&target); return Err(err(e)); }
-
-    let stamp = Utc::now().to_rfc3339();
-    let inserted = conn.execute(
-        "INSERT INTO sale_receipt_attachments
-        (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
-        VALUES(?1,?2,?3,?4,?5,?6,?7)",
-        params![receipt_id,relative,name,mime_type,bytes.len() as i64,digest,stamp],
-    );
-    if let Err(e) = inserted { let _ = fs::remove_file(&target); return Err(err(e)); }
-    conn.query_row(&format!("SELECT {FIELDS} FROM sale_receipt_attachments WHERE receipt_id=?1"),
-        params![receipt_id], row).map_err(err)
+    // A receipt may be deleted or acquire another attachment during staging.
+    // Check both invariants under the mutex AFTER the slow file operation;
+    // discard the staged file on every rejected link or SQLite error.
+    let relative = stage_receipt_file(db, &bytes, ext)?;
+    let linked = (|| -> Result<ReceiptAttachment, String> {
+        let conn = db.conn.lock().map_err(err)?;
+        media_directory(db)?;
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sale_receipts WHERE id=?1)",
+            params![receipt_id], |r| r.get(0),
+        ).map_err(err)?;
+        if !exists { return Err("Incasso non trovato".into()); }
+        let already: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sale_receipt_attachments WHERE receipt_id=?1)",
+            params![receipt_id], |r| r.get(0),
+        ).map_err(err)?;
+        if already { return Err("Questo incasso ha già un allegato".into()); }
+        let stamp = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO sale_receipt_attachments
+            (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
+            VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![receipt_id, &relative, name, mime_type, bytes.len() as i64, &digest, &stamp],
+        ).map_err(err)?;
+        Ok(ReceiptAttachment {
+            receipt_id: receipt_id.into(), media_path: relative.clone(),
+            original_name: name.into(), mime_type: mime_type.into(),
+            size_bytes: bytes.len() as i64, sha256: digest, created_at: stamp,
+        })
+    })();
+    if linked.is_err() { let _ = fs::remove_file(db.directory.join(&relative)); }
+    linked
 }
 // Used by both viewing/exporting and by destructive unlinking. A manually
 // replaced or corrupt file must not be discarded just because the record's
@@ -317,6 +338,33 @@ mod tests {
         c.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
             VALUES('r','s','2026-11-21',400,'cash','t')", []).unwrap();
     }
+    #[test]
+    fn staging_does_not_lock_sqlite_and_failed_links_leave_no_orphan_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("proof.pdf");
+        let content = b"%PDF-1.7\\nverified-evidence";
+        fs::write(&source, content).unwrap();
+
+        // Holding this mutex would deadlock an implementation that stages
+        // receipt evidence through SQLite; the staging helper must be file-only.
+        let guard = db.conn.lock().unwrap();
+        let staged = stage_receipt_file(&db, content, "pdf").unwrap();
+        assert_eq!(fs::read(db.directory.join(&staged)).unwrap(), content);
+        drop(guard);
+        fs::remove_file(db.directory.join(&staged)).unwrap();
+
+        assert!(attach_core(&db, "unknown-receipt", &source).is_err());
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 0,
+            "rejected receipts must not leave staged media behind");
+        let saved = attach_core(&db, "r", &source).unwrap();
+        assert!(attach_core(&db, "r", &source).is_err());
+        let files: Vec<_> = fs::read_dir(db.directory.join("media")).unwrap().collect();
+        assert_eq!(files.len(), 1, "duplicate attachment must not leak another file");
+        assert_eq!(fs::read(db.directory.join(saved.media_path)).unwrap(), content);
+    }
+
     #[test]
     fn attachment_is_linked_checked_and_explicitly_removed() {
         let tmp = tempfile::tempdir().unwrap();
