@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (quarantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **47 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (quarantunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **48 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -53,6 +53,13 @@ Aggiornato: **2026-11-22** (quarantesima ricognizione). Stato delle proposte: **
 | [REPS-UX-045](REPS-UX-045-rettifica-sostituzione-certificati-opere.md) | Annotazioni documentali e collegamento esplicito dei certificati sostitutivi: originali e seriali immutabili, nessuna revoca o consegna presunta | P1–P2* solo con casi verificati; altrimenti P2–P3 | Proposta — da valutare |
 | [REPS-UX-046](REPS-UX-046-consegne-spedizioni-post-vendita-checklist.md) | Consegne post-vendita: checklist facoltativa, ritiri e spedizioni con eventi dichiarati, destinatario separato dall'acquirente e nessuna consegna presunta | P2* solo con frequenza verificata; P3 se bastano note | Proposta — da valutare |
 | [REPS-UX-047](REPS-UX-047-budget-consuntivo-mostre-fiere-spese-collegate.md) | Budget e consuntivo economico per mostre e fiere, con collegamenti a spese esistenti senza duplicare i registri | P2* se validato; P3 o nessuno sviluppo se basta Calc | Proposta — da valutare |
+| [REPS-UX-048](REPS-UX-048-identificativi-storici-riferimenti-esterni-opere.md) | Codici storici e identificativi usati da gallerie/archivi terzi, qualificati per fonte, ricercabili senza alterare l'UUID o il codice corrente | P2* per archivi legacy; P3 se bastano note | Proposta — da valutare |
+
+## Quarantunesima ricognizione — 22 novembre 2026 — REPS-UX-048
+
+- **[REPS-UX-048 — Identificativi storici e riferimenti esterni delle opere](REPS-UX-048-identificativi-storici-riferimenti-esterni-opere.md):** verificati su `main` il codice archivio corrente univoco e progressivo (`archive_code.rs`), il solo campo `Artwork.code` (`models.rs`), la ricerca locale che non ha un elenco qualificato di codici esterni (`archive-filters.ts`), README/MVP e CSV opere (`DATA-PORTABILITY.md`). Confrontate le **47 schede Gestione e UX** precedenti e le **43 idee tecniche** dell'[altra PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). È un'opportunità documentale ipotetica per inventari e cataloghi legacy, **non** un bug o una richiesta utente verificata.
+- **Confini anti-doppioni:** UX-020 identifica un record tramite etichette/UUID **attuale**, UX-019 documenta mostre e bibliografia, UX-018 catalogazione seriale, UX-041 titoli multilingua, UX-001 proprietà/custodia. TECH-019/029/001 studiano **importazione e interoperabilità**: qui solo gestione e ricerca di **sigle esterne con ambito/fonte**. Nessun cambiamento al codice corrente, certificati, vendite, spese o file tecnici.
+- **Alternativa/cautele:** provare prima una nota testuale nella descrizione e la ricerca già esistente, con 5–10 inventari anonimi; se basta, **nessun nuovo sviluppo**. Due archivi possono usare «17» per opere diverse: mostrare ambiguità, mai fusione/attribuzione automatica. `artworks.id` rimane l'identità; codici di terzi non provano autenticità, possesso o spostamenti. **P2 condizionata** per archivi con necessità reale, **P3** altrimenti; backup/export locali, lingua OS e fallback inglese, condivisione minimizzata. Totale **48 schede**, tutte **«Proposta — da valutare»**; [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza senza merge.
 
 ## Quarantesima ricognizione — 22 novembre 2026 — REPS-UX-047
 
