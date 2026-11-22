@@ -153,14 +153,21 @@ fn verified_attachment_bytes(db: &Database, attachment: &ReceiptAttachment) -> R
     }
     Ok(bytes)
 }
-fn data_core(db: &Database, receipt_id: &str) -> Result<String, String> {
-    // Hold the SQLite mutex while reading to serialize with backup and attachment removal.
+// Keep the SQLite mutex while verifying the stored bytes: a concurrent detach
+// must not remove the file between the metadata lookup and the integrity check.
+// Return the verified bytes directly so exports need not encode 12 MiB to base64
+// and immediately decode them again.
+fn verified_receipt_core(db: &Database, receipt_id: &str) -> Result<(ReceiptAttachment, Vec<u8>), String> {
     let conn = db.conn.lock().map_err(err)?;
     let attachment: ReceiptAttachment = conn.query_row(
         &format!("SELECT {FIELDS} FROM sale_receipt_attachments WHERE receipt_id=?1"),
         params![receipt_id], row,
     ).optional().map_err(err)?.ok_or("Allegato non trovato")?;
     let bytes = verified_attachment_bytes(db, &attachment)?;
+    Ok((attachment, bytes))
+}
+fn data_core(db: &Database, receipt_id: &str) -> Result<String, String> {
+    let (attachment, bytes) = verified_receipt_core(db, receipt_id)?;
     Ok(format!("data:{};base64,{}", attachment.mime_type, STANDARD.encode(bytes)))
 }
 // Imported or manually edited archives can point an artwork, collector, RAW,
@@ -256,15 +263,14 @@ pub fn remove_sale_receipt_attachment(db: State<'_, Database>, receipt_id: Strin
 
 
 fn export_core(db: &Database, receipt_id: &str, destination: &Path) -> Result<String, String> {
-    // Reuse the read path: it validates the stored file type, length and original
-    // SHA-256 *before* any external file is written. No original source path is used.
-    let url = data_core(db, receipt_id)?;
-    let (prefix, encoded) = url.split_once(";base64,").ok_or("Formato documento interno non valido")?;
-    let ext = match prefix {
-        "data:application/pdf" => "pdf",
-        "data:image/jpeg" => "jpg",
-        "data:image/png" => "png",
-        "data:image/webp" => "webp",
+    // Validate MIME, size and SHA-256 before creating any external file.
+    // Export the verified bytes directly, without a base64 round-trip.
+    let (attachment, bytes) = verified_receipt_core(db, receipt_id)?;
+    let ext = match attachment.mime_type.as_str() {
+        "application/pdf" => "pdf",
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
         _ => return Err("Tipo documento non consentito".into()),
     };
     if !destination.is_absolute()
@@ -280,7 +286,6 @@ fn export_core(db: &Database, receipt_id: &str, destination: &Path) -> Result<St
     }
     let name = destination.file_name().ok_or("Nome file non valido")?;
     let target = parent.join(name);
-    let bytes = STANDARD.decode(encoded).map_err(err)?;
     let mut output = OpenOptions::new().write(true).create_new(true)
         .open(&target).map_err(err)?;
     let written = output.write_all(&bytes).and_then(|_| output.sync_all());
@@ -341,6 +346,45 @@ mod tests {
         assert!(!db.directory.join(saved.media_path).exists());
         db.conn.lock().unwrap().execute("DELETE FROM sale_receipts WHERE id='r'", []).unwrap();
     }
+    #[test]
+    fn image_evidence_exports_preserve_exact_verified_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let samples: [(&str, &[u8], &str); 3] = [
+            ("photo.jpg", b"\xff\xd8\xffphoto-evidence", "jpg"),
+            ("photo.png", b"\x89PNG\r\n\x1a\nphoto-evidence", "png"),
+            ("photo.webp", b"RIFF1234WEBPphoto-evidence", "webp"),
+        ];
+        for (name, bytes, ext) in samples {
+            let source = tmp.path().join(name);
+            fs::write(&source, bytes).unwrap();
+            let attached = attach_core(&db, "r", &source).unwrap();
+            let destination = tmp.path().join(format!("export.{ext}"));
+            export_core(&db, "r", &destination).unwrap();
+            assert_eq!(fs::read(&destination).unwrap(), bytes, "round-trip for {name}");
+            assert_eq!(fs::read(db.directory.join(&attached.media_path)).unwrap(), bytes);
+            detach_core(&db, "r").unwrap();
+        }
+    }
+
+    #[test]
+    fn corrupted_receipt_evidence_is_not_exported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("proof.pdf");
+        fs::write(&source, b"%PDF-1.7\nproof-A").unwrap();
+        let attached = attach_core(&db, "r", &source).unwrap();
+        // Same length and valid magic bytes: only the digest can detect this change.
+        fs::write(db.directory.join(&attached.media_path), b"%PDF-1.7\nproof-B").unwrap();
+        let destination = tmp.path().join("export.pdf");
+        let error = export_core(&db, "r", &destination).unwrap_err();
+        assert!(error.contains("SHA-256"), "{error}");
+        assert!(!destination.exists(), "never create an unverified external document");
+        assert!(get_core(&db, "r").unwrap().is_some(), "keep the original receipt link");
+    }
+
     #[test]
     fn rejects_bad_type_empty_and_symlink_inputs() {
         let tmp = tempfile::tempdir().unwrap();
