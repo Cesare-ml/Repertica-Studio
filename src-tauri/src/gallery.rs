@@ -99,7 +99,7 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
     let (ext, _) = mime(bytes).ok_or("Sono consentite solo immagini JPEG, PNG o WebP")?;
     let caption = normalize_caption(caption)?;
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
+    let mut conn = db.conn.lock().map_err(err)?;
     let count: i64 = conn.query_row("SELECT count(*) FROM artwork_images WHERE artwork_id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
     if count >= 20 { return Err("Massimo 20 fotografie aggiuntive per opera".into()); }
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)", params![artwork_id], |r| r.get(0)).map_err(err)?;
@@ -111,13 +111,42 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
     fs::write(&temp, bytes).map_err(err)?;
     if let Err(e) = fs::rename(&temp, &target) { let _ = fs::remove_file(&temp); return Err(err(e)); }
     let stamp = Utc::now().to_rfc3339();
-    if let Err(e) = conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
-        VALUES(?1,?2,?3,?4,?5,
-            (SELECT COALESCE(MAX(sort_order),0)+1 FROM artwork_images WHERE artwork_id=?2))", params![id, artwork_id, relative, caption, stamp]) {
-        let _ = fs::remove_file(&target); return Err(err(e));
-    }
-    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
-        params![id], row).map_err(err)
+    // Imported archives may contain duplicate positions or i64::MAX. SQLite
+    // promotes MAX(sort_order)+1 to REAL at that limit, which cannot be read
+    // back as an integer. Compact just this artwork's visible order before
+    // appending, and commit all position updates and the new row together.
+    let inserted = (|| -> Result<GalleryImage, String> {
+        let tx = conn.transaction().map_err(err)?;
+        let ordered_ids: Vec<String> = {
+            let mut query = tx.prepare(
+                "SELECT id FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order,id"
+            ).map_err(err)?;
+            let rows = query.query_map(params![artwork_id], |r| r.get::<_, String>(0)).map_err(err)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(err)?
+        };
+        for (index, existing_id) in ordered_ids.iter().enumerate() {
+            let position = i64::try_from(index + 1).map_err(|_| "Troppe fotografie per l'ordinamento")?;
+            tx.execute(
+                "UPDATE artwork_images SET sort_order=?3 WHERE id=?1 AND artwork_id=?2",
+                params![existing_id, artwork_id, position],
+            ).map_err(err)?;
+        }
+        let next_position = i64::try_from(ordered_ids.len() + 1)
+            .map_err(|_| "Troppe fotografie per l'ordinamento")?;
+        tx.execute(
+            "INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            params![id, artwork_id, relative, caption, stamp, next_position],
+        ).map_err(err)?;
+        let image = tx.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
+            params![id], row).map_err(err)?;
+        tx.commit().map_err(err)?;
+        Ok(image)
+    })();
+    // A failed SQLite transaction must not strand an imported photograph on
+    // disk; rollback restores any positions that were being normalized.
+    if inserted.is_err() { let _ = fs::remove_file(&target); }
+    inserted
 }
 fn update_kind_core(db: &Database, image_id: &str, kind: &str) -> Result<GalleryImage, String> {
     let kind = normalize_kind(Some(kind))?;
@@ -394,6 +423,66 @@ mod tests {
         let reopened = crate::db::open(dir.path().join("app")).unwrap();
         assert_eq!(list_core(&reopened, "a").unwrap().iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
             vec!["second", "third", "first"]);
+    }
+
+    #[test]
+    fn appending_gallery_photo_repairs_extreme_positions_and_preserves_other_artworks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            for id in ["a", "b"] {
+                conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES(?1,?1,?1,'t','t')", params![id]).unwrap();
+            }
+            for (id, owner, position) in [
+                ("first", "a", 0_i64), ("second", "a", 0_i64),
+                ("third", "a", i64::MAX), ("other", "b", i64::MAX),
+            ] {
+                conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
+                    VALUES(?1,?2,?3,?1,'original',?4)",
+                    params![id, owner, format!("media/{id}.jpg"), position]).unwrap();
+            }
+        }
+        let appended = add_gallery_bytes(&db, "a", &[0xff, 0xd8, 0xff, 0x01],
+            Some("  Fotografia aggiunta  ".into())).unwrap();
+        assert_eq!(appended.sort_order, 4);
+        assert_eq!(appended.caption.as_deref(), Some("Fotografia aggiunta"));
+        assert_eq!(fs::read(db.directory.join(&appended.image_path)).unwrap(),
+            [0xff, 0xd8, 0xff, 0x01]);
+        assert_eq!(list_core(&db, "a").unwrap().iter()
+            .map(|photo| photo.sort_order).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+        for original in list_core(&db, "a").unwrap().into_iter().take(3) {
+            assert_eq!(original.image_path, format!("media/{}.jpg", original.id));
+            assert_eq!(original.caption.as_deref(), Some(original.id.as_str()));
+            assert_eq!(original.created_at, "original");
+        }
+        assert_eq!(list_core(&db, "b").unwrap()[0].sort_order, i64::MAX);
+        drop(db);
+        let reopened = crate::db::open(tmp.path().join("app")).unwrap();
+        assert_eq!(list_core(&reopened, "a").unwrap().len(), 4);
+        assert_eq!(list_core(&reopened, "a").unwrap()[3].id, appended.id);
+    }
+
+    #[test]
+    fn rejected_gallery_append_rolls_back_positions_and_removes_new_media() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','A','t','t');
+                INSERT INTO artwork_images(id,artwork_id,image_path,created_at,sort_order)
+                VALUES('existing','a','media/existing.jpg','t',9223372036854775807);
+                CREATE TRIGGER reject_new_gallery BEFORE INSERT ON artwork_images
+                BEGIN SELECT RAISE(ABORT, 'simulated_insert_failure'); END;").unwrap();
+        }
+        assert!(add_gallery_bytes(&db, "a", &[0xff, 0xd8, 0xff, 0x01], None).is_err());
+        let photos = list_core(&db, "a").unwrap();
+        assert_eq!(photos.len(), 1);
+        assert_eq!(photos[0].sort_order, i64::MAX);
+        assert_eq!(photos[0].id, "existing");
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 0);
     }
 
     #[test]
