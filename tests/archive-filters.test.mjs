@@ -212,3 +212,25 @@ test('incomplete contacts exclude blank or whitespace-only email and phone value
   const found = filterCollectors(people, '', buildSaleIndexes([]), 'incomplete').map(c => c.id);
   assert.deepEqual(found, ['a', 'd']);
 });
+
+
+test('artwork dimensions are searchable in cm with x or × and decimal commas', () => {
+  const works = [
+    artwork('a', { title: 'Città marina', width_cm: 30.5, height_cm: 40.25, depth_cm: 2 }),
+    artwork('b', { title: 'Verticale', width_cm: 40.25, height_cm: 30.5 }),
+    artwork('c', { title: 'Orizzonte', width_cm: 30, height_cm: 40 }),
+    artwork('d', { title: 'Senza misure', width_cm: null, height_cm: null, depth_cm: null })
+  ];
+  const indexes = buildSaleIndexes([sale('a', 'buyer', 'Città marina', 'Élodie Rossi')]);
+  const found = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+
+  assert.deepEqual(found('30,5 × 40,25'), ['a']);
+  assert.deepEqual(found('30.5 x 40.25'), ['a']);
+  assert.deepEqual(found('30,5 X 40,25 X 2'), ['a']);
+  assert.deepEqual(found('"30,5 × 40,25" ELODIE'), ['a']);
+  assert.deepEqual(found('40,25x30,5'), ['b']); // Width and height keep their order.
+  assert.deepEqual(found('30 × 40'), ['c']);
+  assert.deepEqual(found('30x50'), []);
+  assert.deepEqual(found('30,5'), ['a', 'b']); // Single dimensions remain searchable.
+  assert.deepEqual(found('d'), ['d']); // Missing measurements are never fabricated.
+});
