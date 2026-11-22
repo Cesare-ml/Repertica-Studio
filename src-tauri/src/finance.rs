@@ -209,7 +209,7 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
     // SQLite files edited outside Studio can contain sales with broken foreign keys.
     // Check owners alongside the monetary figures: a report must not silently
     // count turnover for an artwork or collector that no longer exists.
-    let mut q=c.prepare("SELECT s.id,s.amount_cents,s.sold_at,COALESCE(sf.tax_cents,0),COALESCE(sf.shipping_cents,0),
+    let mut q=c.prepare("SELECT s.id,s.amount_cents,s.sold_at,sf.tax_cents,sf.shipping_cents,
             a.id,co.id
         FROM sales s
         LEFT JOIN sale_finances sf ON sf.sale_id=s.id
@@ -217,13 +217,17 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
         LEFT JOIN collectors co ON co.id=s.collector_id
         WHERE substr(s.sold_at,1,4)=?1").map_err(error)?;
     let rows=q.query_map(params![year.to_string()],|r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,
-        r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<String>>(6)?))).map_err(error)?
+        r.get::<_,Option<i64>>(3)?,r.get::<_,Option<i64>>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<String>>(6)?))).map_err(error)?
         .collect::<Result<Vec<_>,_>>().map_err(error)?;
     for (sale,gross,date,taxes,shipping,artwork,collector) in rows {
         if settings.treasury_start_date.as_ref().is_some_and(|start|date.as_str()<start.as_str()){continue;}
         if !date_ok(&date) {return Err(format!("Invalid sale date in archive: {sale}"));}
         if artwork.is_none() {return Err(format!("Archived sale has missing artwork: {sale}"));}
         if collector.is_none() {return Err(format!("Archived sale has missing collector: {sale}"));}
+        // Sales are created with a detail row, and schema v2 backfills legacy sales.
+        // If imported SQLite lost that row, never invent zero taxes/shipping.
+        let taxes=taxes.ok_or_else(||format!("Archived sale has missing financial details: {sale}"))?;
+        let shipping=shipping.ok_or_else(||format!("Archived sale has missing financial details: {sale}"))?;
         if gross<=0 || taxes<0 || shipping<0 {
             return Err(format!("Invalid sale finances in archive: {sale}"));
         }
@@ -429,8 +433,30 @@ mod tests{
             c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES(?1,?1,?1,'t','t')",params![id]).unwrap();
             c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
                 VALUES(?1,?1,'c',?2,'2026-03-01','t')",params![id,i64::MAX]).unwrap();
+            c.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                VALUES(?1,0,0,3334,3333,3333)",params![id]).unwrap();
         }
         assert!(finance_overview_core(&c,2026).err().unwrap().contains("overflow"));
+    }
+    #[test]
+    fn imported_sale_without_financial_details_is_not_reported_with_fake_zero_deductions(){
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().to_owned()).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        sale(&mut c,"s",10_000,"2026-06-12",1_200,300);
+        assert_eq!(finance_overview_core(&c,2026).unwrap().net_cents,8_500);
+
+        // An external editor can delete the financial row with foreign keys
+        // enabled; normal SQLite referential integrity alone does not detect it.
+        c.execute("DELETE FROM sale_finances WHERE sale_id='s'",[]).unwrap();
+        let message=finance_overview_core(&c,2026).err().expect("missing details must fail");
+        assert!(message.contains("missing financial details"),"{message}");
+        assert!(message.contains("s"),"{message}");
+
+        // Repairing the row restores the report without rewriting the sale.
+        c.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+            VALUES('s',1200,300,3334,3333,3333)",[]).unwrap();
+        assert_eq!(finance_overview_core(&c,2026).unwrap().net_cents,8_500);
     }
     #[test]
     fn financial_report_rejects_invalid_imported_expense_dates(){
