@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **50 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (quarantottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **51 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -56,6 +56,14 @@ Data ricognizione: **2026-11-22** (quarantasettesima ricognizione). Stato unifor
 | [REPS-TECH-048](REPS-TECH-048-parita-ricerca-interfaccia-mcp-unicode.md) | Ricerca opere con semantica Unicode e corrispondenze verificabili fra interfaccia Angular e MCP locale, senza aprire campi privati o cambiare gli ordinamenti/limiti intenzionali | P2 se le divergenze contano nell'uso reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-049](REPS-TECH-049-confine-istruzioni-dati-mcp-prompt-injection.md) | Testi delle schede come dati non attendibili negli output MCP: rischio di prompt injection indiretta, confini di responsabilità degli host e test sintetici senza censurare le opere | P2–P3 condizionata | Proposta — da valutare |
 | [REPS-TECH-050](REPS-TECH-050-confronto-backup-senza-ripristino.md) | Confronto descrittivo e read-only di due backup completi verificati: differenze per record e hash media senza ripristino, fusione o deduzioni sulla provenienza | P2–P3 condizionata; nessuno sviluppo se bastano CSV/Calc | Proposta — da valutare |
+| [REPS-TECH-051](REPS-TECH-051-manifest-iiif-presentazione-opere.md) | Manifest IIIF Presentation 3 per opere e immagini selezionate: pacchetto di **prepubblicazione offline**, URL HTTP(S) dichiarati dal destinatario, senza hosting né diritti presunti | P3, P2 solo con domanda istituzionale verificata | Proposta — da valutare |
+
+## Quarantottesima ricognizione — 23 novembre 2026 — REPS-TECH-051
+
+- **[REPS-TECH-051 — Esportazione IIIF Presentation per lo scambio con archivi e musei](REPS-TECH-051-manifest-iiif-presentazione-opere.md):** riesaminati su `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/media.rs` e `gallery.rs`, tutte le **50 schede TECH** esistenti e le **55 UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Repertica già esporta dati tabellari e documenti e conserva versioni fotografiche; non emerge un export standard IIIF per viewer di archivi/musei. Nessuna richiesta IIIF di un utilizzatore è stata verificata: **opportunità specialistica, non difetto del programma**.
+- **Confini verificati:** TECH-001 riguarda portabilità/reimport del catalogo completo, TECH-013/021/024 riguardano copie/metadati/colore, TECH-029 scambio fra archivi; UX-007/010/041 dossier, diritti e testi multilingua. IIIF qui significa **solo selezione esplicita e proiezione di contenuti pubblicabili**, non backup, autorizzazione alla riproduzione, sito pubblico, hosting o server immagini.
+- **Vincolo tecnico decisivo:** secondo la [specifica IIIF Presentation 3.0](https://iiif.io/api/presentation/3.0/), gli `id` delle risorse IIIF devono essere HTTP(S). Un JSON con file locali non equivale a una risorsa IIIF effettivamente raggiungibile: primo risultato possibile è **bozza offline/non pubblicata**, con URL di destinazione forniti consapevolmente e prova HTTP successiva solo da parte di chi pubblica. Nessun cloud obbligatorio né upload dal desktop.
+- **Valutazione prima di sviluppare:** chiedere a istituzioni/utenti concreti se usano IIIF e se bastano immagini+CSV+brochure già disponibili. Priorità **P3**, P2 solo se il bisogno si conferma; **nessuno sviluppo** se i destinatari fanno già la conversione. Una sola scheda Markdown aggiunta; nessun documento UX modificato, nessuna approvazione, nessuna PR di implementazione o merge.
 
 ## Quarantasettesima ricognizione — 22 novembre 2026 — REPS-TECH-050
 
