@@ -131,6 +131,31 @@ fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+// SQLite page integrity and foreign keys alone cannot detect an imported sale
+// without its financial row, or taxes/shipping exceeding the agreed price.
+// All schema versions >= 2 populate sale_finances for every historical sale.
+fn validate_sale_finances(conn: &Connection) -> Result<(), String> {
+    let invalid_sale: Option<String> = conn.query_row(
+        "SELECT s.id FROM sales s
+         LEFT JOIN sale_finances f ON f.sale_id=s.id
+         WHERE f.sale_id IS NULL OR s.amount_cents <= 0
+            OR f.tax_cents NOT BETWEEN 0 AND s.amount_cents
+            OR f.shipping_cents NOT BETWEEN 0 AND (s.amount_cents - f.tax_cents)
+            OR f.personal_bp NOT BETWEEN 0 AND 10000
+            OR f.activity_bp NOT BETWEEN 0 AND 10000
+            OR f.savings_bp NOT BETWEEN 0 AND 10000
+            OR f.personal_bp != 10000 - f.activity_bp - f.savings_bp
+         LIMIT 1",
+        [], |row| row.get(0)
+    ).optional().map_err(error)?;
+    if let Some(sale_id) = invalid_sale {
+        return Err(format!(
+            "Il backup contiene dettagli economici mancanti o incoerenti per la vendita {sale_id}"
+        ));
+    }
+    Ok(())
+}
+
 fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String> {
     check_regular(path)?;
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -143,6 +168,8 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
     if !(1..=crate::db::SCHEMA_VERSION).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    // v1 predates finance rows; migration v2 created them for all existing sales.
+    if schema >= 2 { validate_sale_finances(&conn)?; }
     // Legacy schemas 1-3 have no sale_receipts table: never infer payments.
     if schema >= 4 { validate_receipt_balances(&conn)?; }
     let mut counts = [0_i64; 4];
@@ -542,6 +569,8 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
             VALUES('sale','a','c',1000,'2026-11-21','now')", []).unwrap();
+        conn.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+            VALUES('sale',0,0,3334,3333,3333)", []).unwrap();
         conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
             VALUES('receipt','sale','2026-11-21',500,'cash','now')", []).unwrap();
         conn.execute("INSERT INTO sale_receipt_attachments
@@ -694,6 +723,8 @@ mod tests {
             let conn = db.conn.lock().unwrap();
             conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
                 VALUES('s','a','c',10000,'2026-11-21','t')",[]).unwrap();
+            conn.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                VALUES('s',0,0,3334,3333,3333)",[]).unwrap();
             conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
                 VALUES('r','s','2026-11-21',3500,'bank_transfer','t')",[]).unwrap();
         }
@@ -722,6 +753,8 @@ mod tests {
             let conn = db.conn.lock().unwrap();
             conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
                 VALUES('s','a','c',10000,'2026-11-21','t')", []).unwrap();
+            conn.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                VALUES('s',0,0,3334,3333,3333)", []).unwrap();
             conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
                 VALUES('r1','s','2026-11-21',4000,'cash','t')", []).unwrap();
         }
@@ -764,6 +797,58 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1);
         assert!(db.directory.join(DB_FILE).exists());
+    }
+
+    #[test]
+    fn missing_sale_finances_prevents_publishing_a_new_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            // Simulate a legacy import made without the normal sale transaction.
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('missing','a','c',1000,'2026-11-21','t')", []).unwrap();
+        }
+        let destination = tmp.path().join("usb-drive");
+        fs::create_dir(&destination).unwrap();
+        let message = create_backup_core(&db, &destination).unwrap_err();
+        assert!(message.contains("dettagli economici"), "{message}");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
+        assert!(db.directory.join(DB_FILE).is_file());
+    }
+
+    #[test]
+    fn rehashed_backup_with_overbudget_taxes_is_rejected_before_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('sale','a','c',1000,'2026-11-21','t')", []).unwrap();
+            conn.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                VALUES('sale',0,0,3334,3333,3333)", []).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            // Each field passes its own SQLite CHECK, but their sum exceeds the sale.
+            snapshot.execute("UPDATE sale_finances SET tax_cents=950,shipping_cents=100
+                WHERE sale_id='sale'", []).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("dettagli economici"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        let conn = db.conn.lock().unwrap();
+        let tax: i64 = conn.query_row("SELECT tax_cents FROM sale_finances WHERE sale_id='sale'",
+            [], |row| row.get(0)).unwrap();
+        assert_eq!(tax, 0, "the live archive must not be replaced by the corrupt snapshot");
     }
 
     #[test]
