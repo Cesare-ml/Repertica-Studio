@@ -345,12 +345,13 @@ fn delete_sale_core(db: &Database, id: &str) -> Result<(), String> {
 fn certificate_row(row: &Row<'_>) -> rusqlite::Result<Certificate> {
     Ok(Certificate { id:row.get(0)?,artwork_id:row.get(1)?,serial:row.get(2)?,issued_at:row.get(3)?,
         artist_name:row.get(4)?,collector_name:row.get(5)?,notes:row.get(6)?,
-        snapshot_json:row.get(7)?,artwork_title:row.get(8)?,created_at:row.get(9)? })
+        snapshot_json:row.get(7)?,artwork_title:row.get(8)?,created_at:row.get(9)?,
+        language:row.get(10)?,issued_place:row.get(11)? })
 }
 #[tauri::command]
 pub fn list_certificates(db: State<'_, Database>) -> Result<Vec<Certificate>, String> {
     let conn=db.conn.lock().map_err(err)?;
-    let mut statement=conn.prepare("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at
+    let mut statement=conn.prepare("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at,c.language,c.issued_place
         FROM certificates c JOIN artworks a ON a.id=c.artwork_id ORDER BY c.created_at DESC").map_err(err)?;
     let items = statement.query_map([], certificate_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(items)
@@ -360,11 +361,22 @@ pub fn issue_certificate(db: State<'_, Database>, input: CertificateInput) -> Re
     issue_certificate_core(&db, input)
 }
 fn issue_certificate_core(db: &Database, input: CertificateInput) -> Result<Certificate, String> {
-    let artist_name=required(input.artist_name,240,"Nome dell'artista")?;
     let collector_name=clean(input.collector_name,240)?;
     let notes=clean(input.notes,10_000)?;
+    let place=clean(input.place,240)?;
+    let language=match input.language.as_deref().map(str::trim).filter(|l| !l.is_empty()).unwrap_or("it") {
+        l @ ("it"|"en"|"bilingual") => l.to_string(),
+        _ => return Err("Lingua del certificato non valida".into()),
+    };
+    let typed_artist=clean(input.artist_name,240)?;
     let mut conn=db.conn.lock().map_err(err)?;
     let tx=conn.transaction().map_err(err)?;
+    // The artist who signs is set once in the settings; a name given explicitly wins.
+    let artist_name=match typed_artist {
+        Some(name)=>name,
+        None=>tx.query_row("SELECT artist_name FROM studio_settings WHERE singleton=1",[],|r|r.get::<_,Option<String>>(0)).map_err(err)?
+            .ok_or_else(||"Imposta il nome dell'artista in Impostazioni prima di emettere un certificato".to_string())?,
+    };
     let artwork=artwork_by_id(&tx,&input.artwork_id)?;
     let snapshot_json=serde_json::to_string(&artwork).map_err(err)?;
     tx.execute("UPDATE certificate_counter SET last_number=last_number+1 WHERE singleton=1",[]).map_err(err)?;
@@ -376,10 +388,10 @@ fn issue_certificate_core(db: &Database, input: CertificateInput) -> Result<Cert
     let id=Uuid::new_v4().to_string();
     let stamp=now();
     let issued_at=today.format("%Y-%m-%d").to_string();
-    tx.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,created_at)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-        params![id,input.artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,stamp]).map_err(err)?;
-    let cert=tx.query_row("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at FROM certificates c JOIN artworks a ON a.id=c.artwork_id WHERE c.id=?1",
+    tx.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,created_at,language,issued_place)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        params![id,input.artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,stamp,language,place]).map_err(err)?;
+    let cert=tx.query_row("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at,c.language,c.issued_place FROM certificates c JOIN artworks a ON a.id=c.artwork_id WHERE c.id=?1",
         params![id],certificate_row).map_err(err)?;
     tx.commit().map_err(err)?;
     Ok(cert)
@@ -1074,11 +1086,31 @@ mod tests {
     }
 
     #[test]
+    fn certificates_take_the_artist_from_the_settings_and_record_language_and_place() {
+        let (_dir, db, artwork, _collector) = sale_fixture();
+        let plain = |artist: Option<&str>, language: Option<&str>| CertificateInput {
+            artwork_id: artwork.clone(), artist_name: artist.map(String::from), collector_name: None, notes: None,
+            language: language.map(String::from), place: Some("  Verona ".into()),
+        };
+        // No artist in the settings and none typed: refused, and no number is consumed.
+        let error = issue_certificate_core(&db, plain(None, None)).unwrap_err();
+        assert!(error.contains("nome dell'artista"), "{error}");
+        db.conn.lock().unwrap().execute("UPDATE studio_settings SET artist_name='Maria Rossi' WHERE singleton=1", []).unwrap();
+        let from_settings = issue_certificate_core(&db, plain(Some("  "), Some("bilingual"))).unwrap();
+        assert_eq!(from_settings.artist_name, "Maria Rossi");
+        assert_eq!((from_settings.language.as_str(), from_settings.issued_place.as_deref()), ("bilingual", Some("Verona")));
+        let typed = issue_certificate_core(&db, plain(Some("Altro Nome"), None)).unwrap();
+        assert_eq!((typed.artist_name.as_str(), typed.language.as_str()), ("Altro Nome", "it"));
+        assert!(issue_certificate_core(&db, plain(None, Some("fr"))).unwrap_err().contains("Lingua"));
+        assert!(from_settings.serial.ends_with("000001") && typed.serial.ends_with("000002"));
+    }
+
+    #[test]
     fn certificates_use_the_local_calendar_and_unique_increasing_serials() {
         let (_dir, db, artwork, _collector) = sale_fixture();
         let input = || CertificateInput {
-            artwork_id: artwork.clone(), artist_name: "Artista".into(),
-            collector_name: None, notes: None,
+            artwork_id: artwork.clone(), artist_name: Some("Artista".into()),
+            collector_name: None, notes: None, language: None, place: None,
         };
         let first = issue_certificate_core(&db, input()).unwrap();
         let second = issue_certificate_core(&db, input()).unwrap();
@@ -1087,7 +1119,7 @@ mod tests {
         assert!(first.serial.starts_with(&format!("RS-{}-", today.year())), "{}", first.serial);
         assert!(first.serial.ends_with("000001") && second.serial.ends_with("000002"));
         assert!(issue_certificate_core(&db, CertificateInput {
-            artwork_id: "missing".into(), artist_name: "A".into(), collector_name: None, notes: None,
+            artwork_id: "missing".into(), artist_name: Some("A".into()), collector_name: None, notes: None, language: None, place: None,
         }).is_err());
         let counter: i64 = db.conn.lock().unwrap()
             .query_row("SELECT last_number FROM certificate_counter", [], |r| r.get(0)).unwrap();

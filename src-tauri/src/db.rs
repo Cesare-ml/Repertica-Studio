@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 16;
+pub const SCHEMA_VERSION: i64 = 17;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -521,6 +521,24 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             CREATE INDEX IF NOT EXISTS idx_mail_drafts_account ON mail_drafts(account_id,updated_at DESC);
             PRAGMA user_version=16;
             COMMIT;")?;
+    }
+    if version < 17 {
+        // The artist's name lives in the settings; each certificate also records its language and place of issue.
+        let has_column = |table: &str, column: &str| -> Result<bool, rusqlite::Error> {
+            conn.query_row(&format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name='{column}'"), [], |r| r.get::<_, i64>(0)).map(|n| n > 0)
+        };
+        let mut script = String::from("BEGIN IMMEDIATE;");
+        if !has_column("studio_settings", "artist_name")? {
+            script.push_str("ALTER TABLE studio_settings ADD COLUMN artist_name TEXT CHECK(artist_name IS NULL OR length(artist_name) BETWEEN 1 AND 240);");
+        }
+        if !has_column("certificates", "language")? {
+            script.push_str("ALTER TABLE certificates ADD COLUMN language TEXT NOT NULL DEFAULT 'it' CHECK(language IN ('it','en','bilingual'));");
+        }
+        if !has_column("certificates", "issued_place")? {
+            script.push_str("ALTER TABLE certificates ADD COLUMN issued_place TEXT CHECK(issued_place IS NULL OR length(issued_place) BETWEEN 1 AND 240);");
+        }
+        script.push_str("PRAGMA user_version=17; COMMIT;");
+        conn.execute_batch(&script)?;
     }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.

@@ -45,11 +45,17 @@ pub struct Certificate {
     pub id: String, pub artwork_id: String, pub serial: String, pub issued_at: String,
     pub artist_name: String, pub collector_name: Option<String>, pub notes: Option<String>,
     pub snapshot_json: String, pub artwork_title: String, pub created_at: String,
+    /// `it`, `en` or `bilingual`: the language of the printed declaration.
+    pub language: String, pub issued_place: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct CertificateInput {
-    pub artwork_id: String, pub artist_name: String,
+    pub artwork_id: String,
+    /// Empty or missing: the artist name saved in the settings is used.
+    #[serde(default)] pub artist_name: Option<String>,
     pub collector_name: Option<String>, pub notes: Option<String>,
+    #[serde(default)] pub language: Option<String>,
+    #[serde(default)] pub place: Option<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct Overview {

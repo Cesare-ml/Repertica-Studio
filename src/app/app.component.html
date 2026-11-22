@@ -35,6 +35,15 @@
         <div></div>
         <button type="button" class="primary" (click)="navigate('artworks'); newArtwork()" [disabled]="!initialized">{{ tr('+ Nuova opera') }}</button>
       </div>
+      <aside class="panel artist-prompt" *ngIf="initialized && !artistName" aria-labelledby="artist-prompt-title">
+        <div><h3 id="artist-prompt-title">{{ tr('Come ti chiami?') }}</h3>
+          <p>{{ tr('Il tuo nome d’artista comparirà sui certificati di autenticità. Potrai cambiarlo in Impostazioni.') }}</p></div>
+        <div class="artist-row">
+          <label class="settings-input"><span class="sr-only">{{ tr('Nome dell’artista') }}</span>
+            <input maxlength="240" [(ngModel)]="artistNameDraft" [placeholder]="tr('Nome e cognome')" (keydown.enter)="saveArtistName(artistNameDraft)"></label>
+          <button type="button" class="primary" (click)="saveArtistName(artistNameDraft)" [disabled]="busy || !artistNameDraft.trim()">{{ tr('Salva') }}</button>
+        </div>
+      </aside>
       <aside class="panel guide" *ngIf="showGuide" aria-labelledby="guide-title">
         <div class="guide-head">
           <div><h3 id="guide-title">{{ tr('Per iniziare') }}</h3>
@@ -77,9 +86,6 @@
     <section *ngIf="section === 'artworks'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Archivio opere') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
-              <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('raw_files')" [disabled]="busy || !initialized">{{ tr('Esporta metadati RAW CSV') }}</button>
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
           <button class="primary action-glyph action-glyph--artworks" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button>
         </div></div>
       <div class="filter-row archive-filters">
@@ -100,8 +106,8 @@
       <div class="panel table-scroll">
         <table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Anno / tecnica') }}</th><th>{{ tr('Misure') }}</th><th>{{ tr('Stato') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
           <tbody><tr *ngFor="let a of visibleArtworks">
-            <td><div class="work-cell"><div class="work-image"><img *ngIf="thumbnails[a.id]" [src]="thumbnails[a.id]" alt=""><span *ngIf="!thumbnails[a.id]">R</span></div>
-              <div><strong>{{ a.title }}</strong><span class="raw-badge" *ngIf="rawByArtwork[a.id]" [title]="rawByArtwork[a.id].original_name">RAW</span><small>{{ a.code }}</small></div></div></td>
+            <td><div class="work-cell"><button type="button" class="work-open" (click)="openViewer(a)" [attr.aria-label]="tr('Apri a schermo intero') + ': ' + a.title" [title]="tr('Apri a schermo intero')"><span class="work-image"><img *ngIf="thumbnails[a.id]" [src]="thumbnails[a.id]" alt=""><span *ngIf="!thumbnails[a.id]">R</span></span></button>
+              <div><button type="button" class="link-button work-title" (click)="openViewer(a)">{{ a.title }}</button><span class="raw-badge" *ngIf="rawByArtwork[a.id]" [title]="rawByArtwork[a.id].original_name">RAW</span><small>{{ a.code }}</small></div></div></td>
             <td>{{ a.year || '—' }}<small class="stacked">{{ a.technique || 'Tecnica non indicata' }}</small></td>
             <td>{{ dimensions(a) }}</td>
             <td><span class="status" [ngClass]="a.status">{{ tr(statusLabels[a.status]) }}</span></td>
@@ -125,8 +131,6 @@
     <section *ngIf="section === 'collectors'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Collezionisti e contatti') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('collectors')" [disabled]="busy || !initialized">{{ tr('Esporta collezionisti CSV') }}</button>
-              <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('collector_photos')" [disabled]="busy || !initialized">{{ tr('Esporta fotografie collezionisti CSV') }}</button>
           <button class="primary action-glyph action-glyph--collectors" type="button" (click)="newCollector()" [disabled]="!initialized">{{ tr('+ Nuovo contatto') }}</button>
         </div></div>
       <div class="filter-row"><input type="search" [placeholder]="tr('Nome, email, telefono o opera acquisita…')" [(ngModel)]="search" [attr.aria-label]="tr('Cerca collezionisti')">
@@ -169,10 +173,6 @@
     <section *ngIf="section === 'sales'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Registro vendite') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('receipts')" [disabled]="busy || !initialized">{{ tr('Esporta incassi CSV') }}</button>
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('balances')" [disabled]="busy || !initialized">{{ tr('Esporta saldi vendite CSV') }}</button>
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('installments')" [disabled]="busy || !initialized">{{ tr('Esporta piani rateali CSV') }}</button>
           <button class="primary action-glyph action-glyph--sales" type="button" (click)="newSale()" [disabled]="!initialized || !sellableArtworks.length || !collectors.length">{{ tr('+ Registra vendita') }}</button>
         </div></div>
       <p class="hint" *ngIf="!sellableArtworks.length || !collectors.length">{{ tr('Per registrare una vendita occorrono almeno un\'opera disponibile e un collezionista.') }}</p>
@@ -190,13 +190,13 @@
     <section *ngIf="section === 'certificates'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Certificati delle opere') }}</h2></div>
         <div class="finance-top-actions">
-          <button class="secondary action-glyph action-glyph--export" type="button" (click)="exportLedger('certificates')" [disabled]="busy || !initialized">{{ tr('Esporta certificati CSV') }}</button>
           <button class="primary action-glyph action-glyph--certificates" type="button" (click)="newCertificate()" [disabled]="!initialized || !artworks.length">{{ tr('+ Emissione certificato') }}</button>
         </div></div>
       <div class="hint">{{ tr('I certificati sono documenti da controllare e firmare dall\'artista; non costituiscono da soli una verifica indipendente di autenticità.') }}</div>
       <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Numero') }}</th><th>{{ tr('Opera') }}</th><th>{{ tr('Artista') }}</th><th>{{ tr('Emesso il') }}</th><th>{{ tr('Documento') }}</th></tr></thead>
         <tbody><tr *ngFor="let c of certificates"><td><strong>{{ c.serial }}</strong></td><td>{{ c.artwork_title }}</td><td>{{ c.artist_name }}</td>
-          <td>{{ date(c.issued_at) }}</td><td class="actions"><button class="small action-glyph action-glyph--print" type="button" (click)="printCertificate(c)">{{ tr('Stampa / PDF') }}</button></td></tr></tbody></table>
+          <td>{{ date(c.issued_at) }}</td><td class="actions"><button class="small" type="button" (click)="previewCertificate(c)">{{ tr('Anteprima') }}</button>
+            <button class="small action-glyph action-glyph--print" type="button" (click)="printCertificate(c)">{{ tr('Stampa / PDF') }}</button></td></tr></tbody></table>
         <div class="empty-state" *ngIf="!certificates.length"><strong>{{ tr('Non hai ancora emesso certificati.') }}</strong><p>{{ tr('Il certificato congela i dati dell’opera al momento dell’emissione e poi non si può più modificare: controlla la scheda prima di emetterlo.') }}</p></div></div>
     </section>
 
@@ -257,7 +257,7 @@
       </div>
       <div class="panel finance-summary">
         <div class="panel-heading"><div><h3>{{ tr('Saldi teorici') }}</h3><p>{{ tr('Distribuzione dei ricavi netti e spese assegnate ai fondi') }}</p></div>
-          <button type="button" class="secondary small action-glyph action-glyph--export" (click)="exportLedger('allocations')" [disabled]="busy || !initialized">{{ tr('Esporta ripartizioni CSV') }}</button></div>
+</div>
         <p class="hint" *ngIf="finances && !finances.allocation_enabled">{{ tr('La ripartizione delle vendite è disattivata: le nuove vendite non vengono suddivise.') }}</p>
         <div class="finance-balances" *ngIf="finances?.parts?.length">
           <div *ngFor="let part of finances!.parts" [class.inactive-part]="!part.active"><span>{{ partName(part.part_id, part.name) }}<small *ngIf="!part.active"> · {{ tr('non più attiva') }}</small></span>
@@ -273,7 +273,6 @@
       </div>
       <div class="section-tools expenses-heading"><div><h2>{{ tr('Acquisti e spese') }}</h2></div>
         <div class="finance-top-actions">
-          <button type="button" class="secondary action-glyph action-glyph--export" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
           <button type="button" class="secondary action-glyph action-glyph--finance" (click)="newExpense()">{{ tr('+ Registra spesa') }}</button>
         </div></div>
       <div class="panel table-scroll"><table>
@@ -306,6 +305,43 @@
               </li>
             </ul>
             <p *ngIf="audit.truncated">{{ tr('Sono visualizzati soltanto i primi 100 problemi.') }}</p>
+          </div>
+        </div>
+        <div class="backup-block artist-block">
+          <h3>{{ tr('Artista e certificati') }}</h3>
+          <p>{{ tr('Il nome dell’artista compare su tutti i certificati che emetti. Impostalo una volta sola qui.') }}</p>
+          <div class="artist-row">
+            <label class="settings-input"><span>{{ tr('Nome dell’artista') }}</span>
+              <input maxlength="240" [(ngModel)]="settingsDraft.artist_name" [placeholder]="tr('Nome e cognome')"></label>
+            <button type="button" class="primary" (click)="saveArtistName(settingsDraft.artist_name ?? '')" [disabled]="busy || !(settingsDraft.artist_name ?? '').trim() || (settingsDraft.artist_name ?? '').trim() === artistName">{{ tr('Salva') }}</button>
+          </div>
+        </div>
+        <div class="backup-block export-block">
+          <h3>{{ tr('Esportazioni') }}</h3>
+          <p>{{ tr('Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.') }}</p>
+          <div class="export-groups">
+            <div class="export-group"><h4>{{ tr('Archivio opere') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('raw_files')" [disabled]="busy || !initialized">{{ tr('Esporta metadati RAW CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Collezionisti') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('collectors')" [disabled]="busy || !initialized">{{ tr('Esporta collezionisti CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('collector_photos')" [disabled]="busy || !initialized">{{ tr('Esporta fotografie collezionisti CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Vendite e incassi') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('receipts')" [disabled]="busy || !initialized">{{ tr('Esporta incassi CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('balances')" [disabled]="busy || !initialized">{{ tr('Esporta saldi vendite CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('installments')" [disabled]="busy || !initialized">{{ tr('Esporta piani rateali CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('allocations')" [disabled]="busy || !initialized">{{ tr('Esporta ripartizioni CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Certificati') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('certificates')" [disabled]="busy || !initialized">{{ tr('Esporta certificati CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Spese') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
+            </div>
           </div>
         </div>
         <div class="backup-block update-block">
@@ -491,6 +527,9 @@
   </main>
 </div>
 
+<rp-artwork-viewer *ngIf="viewerIndex !== null" [artworks]="viewerArtworks" [startIndex]="viewerIndex" [language]="language" [buyers]="buyersByArtwork"
+  (closed)="viewerIndex = null" (edit)="viewerIndex = null; editArtwork($event)" (gallery)="viewerIndex = null; openGallery($event)"></rp-artwork-viewer>
+
 <div class="overlay" *ngIf="artworkDialog" role="dialog" aria-modal="true" aria-labelledby="artwork-title">
   <div class="dialog wide"><div class="dialog-top"><h2 id="artwork-title">{{ artworkDraft.id ? tr('Modifica opera') : tr('Nuova opera') }}</h2><button type="button" class="close" (click)="cancelArtworkDialog()" [attr.aria-label]="tr('Chiudi')">×</button></div>
     <fieldset class="dialog-section photo-top" *ngIf="!artworkDraft.id">
@@ -566,29 +605,56 @@
         </div>
       </div>
     </fieldset>
-    <div class="form-grid">
-      <div class="full code-field"><span>{{ tr('Codice archivio') }}</span>
-        <strong class="code-badge">{{ artworkDraft.id ? artworkDraft.code : (nextCode || '…') }}</strong>
-        <small *ngIf="!artworkDraft.id">{{ tr('Assegnato automaticamente al salvataggio') }}</small></div>
-      <label class="full"><span>{{ tr('Titolo *') }}</span><input [(ngModel)]="artworkDraft.title" maxlength="240" [placeholder]="tr('Titolo dell\'opera')"></label>
-      <label><span>{{ tr('Anno') }}</span><input [(ngModel)]="artworkDraft.year" maxlength="40" placeholder="2026" (change)="refreshNextCode()"></label>
-      <label><span>{{ tr('Stato') }}</span><select [(ngModel)]="artworkDraft.status" [disabled]="artworkDraft.status === 'sold' || withSale">
-        <option value="available">{{ tr('Disponibile') }}</option><option value="reserved">{{ tr('Riservata') }}</option><option value="archived">{{ tr('In archivio') }}</option><option value="sold" *ngIf="artworkDraft.status === 'sold' || withSale">{{ tr('Venduta') }}</option></select></label>
-      <label><span>{{ tr('Tecnica') }}</span><input [(ngModel)]="artworkDraft.technique" maxlength="300" [placeholder]="tr('Olio su tela')"></label>
-      <label><span>{{ tr('Supporto') }}</span><input [(ngModel)]="artworkDraft.support" maxlength="300" [placeholder]="tr('Tela, carta…')"></label>
-      <label><span>{{ tr('Altezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.height_cm"></label>
-      <label><span>{{ tr('Larghezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.width_cm"></label>
-      <label><span>{{ tr('Profondità (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.depth_cm"></label>
-      <div class="full artwork-flags" role="group" [attr.aria-label]="tr('Caratteristiche dell’opera')">
-        <label class="inline-check"><input type="checkbox" [(ngModel)]="artworkDraft.signed"> {{ tr('Opera firmata') }}</label>
-        <label class="inline-check"><input type="checkbox" [(ngModel)]="artworkDraft.final_varnish"> {{ tr('Vernice finale applicata') }}</label>
-        <label class="inline-check"><input type="checkbox" [(ngModel)]="artworkDraft.framed"> {{ tr('Incorniciata') }}</label>
+    <section class="form-card">
+      <h3>{{ tr('Identificazione') }}</h3>
+      <div class="form-grid">
+        <div class="full code-field"><span>{{ tr('Codice archivio') }}</span>
+          <strong class="code-badge">{{ artworkDraft.id ? artworkDraft.code : (nextCode || '…') }}</strong>
+          <small *ngIf="!artworkDraft.id">{{ tr('Assegnato automaticamente al salvataggio') }}</small></div>
+        <label class="full"><span>{{ tr('Titolo *') }}</span><input [(ngModel)]="artworkDraft.title" maxlength="240" [placeholder]="tr('Titolo dell\'opera')"></label>
+        <label><span>{{ tr('Anno') }}</span><input [(ngModel)]="artworkDraft.year" maxlength="40" placeholder="2026" (change)="refreshNextCode()"></label>
+        <label><span>{{ tr('Stato') }}</span><select [(ngModel)]="artworkDraft.status" [disabled]="artworkDraft.status === 'sold' || withSale">
+          <option value="available">{{ tr('Disponibile') }}</option><option value="reserved">{{ tr('Riservata') }}</option><option value="archived">{{ tr('In archivio') }}</option><option value="sold" *ngIf="artworkDraft.status === 'sold' || withSale">{{ tr('Venduta') }}</option></select></label>
       </div>
-      <label class="full"><span>{{ tr('Descrizione / note sull\'opera') }}</span><textarea rows="4" [(ngModel)]="artworkDraft.description"></textarea></label>
-    </div>
-    <div class="price-preview"><button type="button" class="secondary" (click)="previewPrice()" [disabled]="!artworkDraft.width_cm || !artworkDraft.height_cm">{{ tr('Calcola stima') }}</button>
-      <span *ngIf="estimateCents !== null">{{ tr('Prezzo indicativo:') }} <strong>{{ euros(estimateCents) }}</strong></span>
-    </div>
+    </section>
+    <section class="form-card">
+      <h3>{{ tr('Tecnica e misure') }}</h3>
+      <div class="form-grid">
+        <label><span>{{ tr('Tecnica') }}</span>
+          <select [ngModel]="techniqueMenu.choice" (ngModelChange)="setTechniqueChoice($event)">
+            <option value="">{{ tr('Seleziona…') }}</option>
+            <option *ngFor="let option of techniqueOptions" [value]="option">{{ tr(option) }}</option>
+            <option value="Altro">{{ tr('Altro…') }}</option></select>
+          <input *ngIf="techniqueMenu.choice === 'Altro'" [ngModel]="techniqueMenu.other" (ngModelChange)="setTechniqueOther($event)" maxlength="300" [placeholder]="tr('Specifica la tecnica')" [attr.aria-label]="tr('Specifica la tecnica')"></label>
+        <label><span>{{ tr('Supporto') }}</span>
+          <select [ngModel]="supportMenu.choice" (ngModelChange)="setSupportChoice($event)">
+            <option value="">{{ tr('Seleziona…') }}</option>
+            <option *ngFor="let option of supportOptions" [value]="option">{{ tr(option) }}</option>
+            <option value="Altro">{{ tr('Altro…') }}</option></select>
+          <input *ngIf="supportMenu.choice === 'Altro'" [ngModel]="supportMenu.other" (ngModelChange)="setSupportOther($event)" maxlength="300" [placeholder]="tr('Specifica il supporto')" [attr.aria-label]="tr('Specifica il supporto')"></label>
+        <div class="full measures" role="group" [attr.aria-label]="tr('Misure (cm)')">
+          <label><span>{{ tr('Altezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [ngModel]="artworkDraft.height_cm" (ngModelChange)="artworkDraft.height_cm = $event; scheduleEstimate()"></label>
+          <label><span>{{ tr('Larghezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [ngModel]="artworkDraft.width_cm" (ngModelChange)="artworkDraft.width_cm = $event; scheduleEstimate()"></label>
+          <label><span>{{ tr('Profondità (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.depth_cm"></label>
+          <div class="estimate" [class.on]="estimateCents !== null" role="status" aria-live="polite">
+            <span>{{ tr('Prezzo indicativo') }}</span>
+            <strong>{{ estimateCents !== null ? euros(estimateCents) : '—' }}</strong>
+            <small>{{ estimateCents !== null ? tr('Calcolato dalle misure') : tr('Inserisci altezza e larghezza') }}</small></div>
+        </div>
+      </div>
+    </section>
+    <section class="form-card">
+      <h3>{{ tr('Caratteristiche dell’opera') }}</h3>
+      <div class="chip-toggles" role="group" [attr.aria-label]="tr('Caratteristiche dell’opera')">
+        <label class="chip-toggle" [class.on]="artworkDraft.signed"><input type="checkbox" [(ngModel)]="artworkDraft.signed"><span class="chip-mark" aria-hidden="true"></span>{{ tr('Opera firmata') }}</label>
+        <label class="chip-toggle" [class.on]="artworkDraft.final_varnish"><input type="checkbox" [(ngModel)]="artworkDraft.final_varnish"><span class="chip-mark" aria-hidden="true"></span>{{ tr('Vernice finale applicata') }}</label>
+        <label class="chip-toggle" [class.on]="artworkDraft.framed"><input type="checkbox" [(ngModel)]="artworkDraft.framed"><span class="chip-mark" aria-hidden="true"></span>{{ tr('Incorniciata') }}</label>
+      </div>
+    </section>
+    <section class="form-card">
+      <h3>{{ tr('Descrizione') }}</h3>
+      <div class="form-grid"><label class="full"><span class="sr-only">{{ tr('Descrizione / note sull\'opera') }}</span><textarea rows="4" [(ngModel)]="artworkDraft.description" [placeholder]="tr('Descrizione / note sull\'opera')"></textarea></label></div>
+    </section>
     <fieldset class="dialog-section" *ngIf="!artworkDraft.id">
       <legend><label class="inline-check"><input type="checkbox" [(ngModel)]="withSale" (ngModelChange)="onWithSaleChange()"> {{ tr('Registra una vendita') }}</label></legend>
       <div class="form-grid" *ngIf="withSale">
@@ -845,11 +911,17 @@
   <div class="dialog"><div class="dialog-top"><h2 id="certificate-title">{{ tr('Emetti certificato') }}</h2><button type="button" class="close" (click)="certificateDialog=false" [attr.aria-label]="tr('Chiudi')">×</button></div>
     <div class="form-grid">
       <label class="full"><span>{{ tr('Opera *') }}</span><select [(ngModel)]="certificateDraft.artwork_id"><option *ngFor="let a of artworks" [value]="a.id">{{ a.code }} — {{ a.title }}</option></select></label>
-      <label class="full"><span>{{ tr('Nome dell\'artista che emette *') }}</span><input [(ngModel)]="certificateDraft.artist_name" maxlength="240"></label>
+      <div class="full code-field"><span>{{ tr('Artista che emette') }}</span>
+        <strong *ngIf="artistName; else noArtist">{{ artistName }}</strong>
+        <ng-template #noArtist><span class="warn-text">{{ tr('Non ancora impostato') }}</span>
+          <button type="button" class="small" (click)="certificateDialog = false; navigate('settings')">{{ tr('Imposta nelle Impostazioni') }}</button></ng-template></div>
+      <label><span>{{ tr('Lingua del certificato') }}</span><select [(ngModel)]="certificateDraft.language">
+        <option value="it">{{ tr('Italiano') }}</option><option value="en">{{ tr('Inglese') }}</option><option value="bilingual">{{ tr('Italiano e inglese') }}</option></select></label>
+      <label><span>{{ tr('Luogo di emissione') }}</span><input [(ngModel)]="certificateDraft.place" maxlength="240" [placeholder]="tr('Per esempio: Verona')"></label>
       <label class="full"><span>{{ tr('Intestatario (facoltativo)') }}</span><input [(ngModel)]="certificateDraft.collector_name" maxlength="240"></label>
       <label class="full"><span>{{ tr('Note / informazioni sull\'edizione') }}</span><textarea [(ngModel)]="certificateDraft.notes" rows="3"></textarea></label>
     </div><p class="form-note">{{ tr('Dopo l\'emissione il certificato rimane invariabile. Il documento deve essere verificato e firmato da chi lo emette.') }}</p>
-    <div class="dialog-bottom"><button class="secondary" type="button" (click)="certificateDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !certificateDraft.artwork_id || !certificateDraft.artist_name.trim()" (click)="saveCertificate()">{{ tr('Emetti certificato') }}</button></div>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="certificateDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !certificateDraft.artwork_id || !artistName" (click)="saveCertificate()">{{ tr('Emetti certificato') }}</button></div>
   </div>
 </div>
 
@@ -876,19 +948,16 @@
 </div>
 
 <div class="print-only" *ngIf="selectedCertificate && selectedSnapshot">
-  <article class="certificate-page">
-    <header><div class="certificate-wordmark">REPERTICA <small>STUDIO</small></div><span>{{ tr('ARCHIVIO D\'ARTISTA') }}</span></header>
-    <div class="certificate-main"><p>{{ tr('CERTIFICATO DELL\'OPERA') }}</p><h2>{{ selectedSnapshot.title }}</h2>
-      <p class="certificate-number">{{ selectedCertificate.serial }}</p>
-      <div class="certificate-details"><div><span>{{ tr('Codice opera') }}</span><strong>{{ selectedSnapshot.code }}</strong></div>
-        <div><span>{{ tr('Anno') }}</span><strong>{{ selectedSnapshot.year || 'Non indicato' }}</strong></div>
-        <div><span>{{ tr('Tecnica e supporto') }}</span><strong>{{ selectedSnapshot.technique || '—' }} · {{ selectedSnapshot.support || '—' }}</strong></div>
-        <div><span>{{ tr('Dimensioni') }}</span><strong>{{ dimensions(selectedSnapshot) }}</strong></div>
-        <div><span>{{ tr('Autore') }}</span><strong>{{ selectedCertificate.artist_name }}</strong></div>
-        <div *ngIf="selectedCertificate.collector_name"><span>{{ tr('Intestatario') }}</span><strong>{{ selectedCertificate.collector_name }}</strong></div>
-      </div>
-      <p class="certificate-notes">{{ selectedCertificate.notes }}</p>
-      <div class="certificate-sign"><div>Data: {{ date(selectedCertificate.issued_at) }}</div><div>{{ tr('Firma dell\'artista _________________________') }}</div></div>
-    </div><footer>{{ tr('Documento descrittivo generato da Repertica Studio · L\'autenticità richiede la verifica e firma dell\'emittente.') }}</footer>
-  </article>
+  <rp-certificate-sheet [certificate]="selectedCertificate" [snapshot]="selectedSnapshot" [image]="certificateImage"></rp-certificate-sheet>
+</div>
+
+<div class="overlay" *ngIf="certificatePreview && selectedCertificate && selectedSnapshot" role="dialog" aria-modal="true" aria-labelledby="certificate-preview-title">
+  <div class="dialog certificate-preview">
+    <div class="dialog-top"><h2 id="certificate-preview-title">{{ tr('Certificato') }} {{ selectedCertificate.serial }}</h2>
+      <button type="button" class="close" (click)="closeCertificatePreview()" [attr.aria-label]="tr('Chiudi')">×</button></div>
+    <div class="certificate-stage"><div class="certificate-zoom">
+      <rp-certificate-sheet [certificate]="selectedCertificate" [snapshot]="selectedSnapshot" [image]="certificateImage"></rp-certificate-sheet></div></div>
+    <div class="dialog-bottom"><button class="secondary" type="button" (click)="closeCertificatePreview()">{{ tr('Chiudi') }}</button>
+      <button class="primary action-glyph action-glyph--print" type="button" (click)="printCertificate(selectedCertificate)">{{ tr('Stampa / PDF') }}</button></div>
+  </div>
 </div>

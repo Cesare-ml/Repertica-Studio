@@ -13,10 +13,13 @@ import { MediaCenterComponent } from './media-center.component';
 import { MediaEditorComponent } from './media-editor.component';
 import { BrochuresComponent } from './brochures.component';
 import { BusinessMailComponent } from './business-mail.component';
+import { ArtworkViewerComponent } from './artwork-viewer.component';
+import { CertificateSheetComponent } from './certificate-sheet.component';
 import { emptyPayment, installmentRows, paymentToInput, toCents, type PaymentDraft } from './payments';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
 import type { ArtworkOrder, CollectorFilter } from './archive-filters';
 import { PHOTO_KINDS } from './models';
+import { ESTIMATE_DELAY_MS, MenuState, SUPPORTS, TECHNIQUES, canEstimate, menuStateFor, valueFor } from './artwork-options';
 import { FIRST_UPDATE_CHECK_DELAY_MS, UPDATE_CHECK_INTERVAL_MS, isQuietStatus, progressPercent, updateMessage } from './updates';
 import { getVersion } from '@tauri-apps/api/app';
 import type {
@@ -49,7 +52,7 @@ const statusLabels: Record<ArtworkStatus, string> = {
 @Component({
   selector: 'rp-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent, BusinessMailComponent],
+  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent, BusinessMailComponent, ArtworkViewerComponent, CertificateSheetComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -122,7 +125,7 @@ export class AppComponent implements OnInit {
   financeYears = Array.from({length: 8}, (_,i)=>new Date().getFullYear()-i);
   settings: StudioSettings = {
     artist_coefficient:1,base_price_cm2_cents:16,personal_bp:3334,activity_bp:3333,
-    savings_bp:3333,treasury_start_date:null,default_tax_bp:0,ui_language:null
+    savings_bp:3333,treasury_start_date:null,default_tax_bp:0,ui_language:null,artist_name:null
   };
   settingsDraft: StudioSettings = {...this.settings};
   rateEuro = .16;
@@ -140,6 +143,14 @@ export class AppComponent implements OnInit {
   allocationDraft = { enabled: true, parts: [] as { id?: string; name: string; percent: number; pays_expenses: boolean }[] };
   defaultTaxPercent = 0;
   estimateCents: number | null = null;
+  /** Index (in the filtered list) of the artwork shown in the full-screen viewer; null when closed. */
+  viewerIndex: number | null = null;
+  viewerArtworks: Artwork[] = [];
+  readonly techniqueOptions = TECHNIQUES;
+  readonly supportOptions = SUPPORTS;
+  techniqueMenu: MenuState = { choice: '', other: '' };
+  supportMenu: MenuState = { choice: '', other: '' };
+  private estimateTimer: ReturnType<typeof setTimeout> | null = null;
   expenseDialog = false;
   readonly expenseCategories = [
     {code:'painting-materials',label:'Materiali pittura'},
@@ -211,7 +222,11 @@ export class AppComponent implements OnInit {
   newCollectorPhotos: string[] = [];
   saleDraft = { artwork_id: '', collector_id: '', amount_eur: null as number | null,
     taxes_eur: 0, shipping_eur: 0, sold_at: today(), notes: null as string | null };
-  certificateDraft: CertificateInput = { artwork_id: '', artist_name: '', collector_name: null, notes: null };
+  certificateDraft: CertificateInput = { artwork_id: '', collector_name: null, notes: null, language: 'it', place: null };
+  certificatePreview = false;
+  certificateImage: string | null = null;
+  artistNameDraft = '';
+  private readonly placeKey = 'repertica-certificate-place';
   selectedCertificate: Certificate | null = null;
   selectedSnapshot: Artwork | null = null;
 
@@ -779,13 +794,49 @@ export class AppComponent implements OnInit {
     if(!window.confirm(this.tr('Elimina') + ': '+e.description+'?'))return;
     await this.run(()=>api.deleteExpense(e.id),this.tr('Elimina'));
   }
+  /** The estimate follows the measures: it is requested shortly after the user stops typing. */
+  scheduleEstimate(): void {
+    if (this.estimateTimer) clearTimeout(this.estimateTimer);
+    if (!canEstimate(this.artworkDraft.width_cm, this.artworkDraft.height_cm)) { this.estimateCents = null; return; }
+    this.estimateTimer = setTimeout(() => void this.previewPrice(), ESTIMATE_DELAY_MS);
+  }
+  openViewer(artwork: Artwork): void {
+    // A snapshot: the list getter builds a new array on every change detection.
+    const list = [...this.visibleArtworks];
+    const index = list.findIndex(a => a.id === artwork.id);
+    if (index >= 0) { this.viewerArtworks = list; this.viewerIndex = index; }
+  }
+  get buyersByArtwork(): Record<string, string> {
+    return Object.fromEntries(Object.entries(this.salesByArtwork).map(([id, sale]) => [id, sale.collector_name]));
+  }
   async previewPrice():Promise<void> {
+    if (!canEstimate(this.artworkDraft.width_cm, this.artworkDraft.height_cm)) { this.estimateCents = null; return; }
     try {
       this.estimateCents=await api.pricePreview(this.artworkDraft.width_cm??0,this.artworkDraft.height_cm??0);
-    } catch (error) {
-      this.errorMessage=this.error(error);
+    } catch {
+      this.estimateCents = null; // an estimate is only a convenience: never interrupt the form with an error
     }
     this.change.detectChanges();
+  }
+  private syncMenus(): void {
+    this.techniqueMenu = menuStateFor(TECHNIQUES, this.artworkDraft.technique);
+    this.supportMenu = menuStateFor(SUPPORTS, this.artworkDraft.support);
+  }
+  setTechniqueChoice(choice: string): void {
+    this.techniqueMenu = { choice, other: choice === 'Altro' ? this.techniqueMenu.other : '' };
+    this.artworkDraft.technique = valueFor(this.techniqueMenu.choice, this.techniqueMenu.other);
+  }
+  setTechniqueOther(text: string): void {
+    this.techniqueMenu = { ...this.techniqueMenu, other: text };
+    this.artworkDraft.technique = valueFor(this.techniqueMenu.choice, text);
+  }
+  setSupportChoice(choice: string): void {
+    this.supportMenu = { choice, other: choice === 'Altro' ? this.supportMenu.other : '' };
+    this.artworkDraft.support = valueFor(this.supportMenu.choice, this.supportMenu.other);
+  }
+  setSupportOther(text: string): void {
+    this.supportMenu = { ...this.supportMenu, other: text };
+    this.artworkDraft.support = valueFor(this.supportMenu.choice, text);
   }
   private freshNewSale() {
     return { collector_id: '', new_collector_name: null as string | null, amount_eur: null as number | null,
@@ -793,7 +844,7 @@ export class AppComponent implements OnInit {
   }
   fileName(path: string): string { return path.split(/[\\/]/).pop() ?? path; }
   async newArtwork(): Promise<void> {
-    this.estimateCents = null; this.artworkDraft = freshArtwork();
+    this.estimateCents = null; this.artworkDraft = freshArtwork(); this.syncMenus();
     this.newCover = null; this.newGallery = []; this.newRawPath = null; this.withSale = false; this.sessionImports.clear();
     this.newSaleDraft = this.freshNewSale(); this.newSalePayment = emptyPayment(today()); this.nextCode = '';
     this.artworkDialog = true;
@@ -1007,6 +1058,8 @@ export class AppComponent implements OnInit {
       depth_cm: a.depth_cm, description: a.description, location: a.location, status: a.status,
       signed: a.signed, final_varnish: a.final_varnish, framed: a.framed
     };
+    this.syncMenus();
+    this.scheduleEstimate();
     this.artworkDialog = true;
   }
   async saveArtwork(): Promise<void> {
@@ -1497,17 +1550,29 @@ export class AppComponent implements OnInit {
     }
   }
   newCertificate(): void {
+    let place: string | null = null;
+    try { place = localStorage.getItem(this.placeKey); } catch { /* optional convenience */ }
     this.certificateDraft = {
-      artwork_id: this.artworks[0]?.id ?? '', artist_name: '',
-      collector_name: null, notes: null
+      artwork_id: this.artworks[0]?.id ?? '', collector_name: null, notes: null, language: 'it', place
     };
     this.certificateDialog = true;
+  }
+  get artistName(): string { return (this.settings.artist_name ?? '').trim(); }
+  /** Save the name printed on certificates (settings, and the first-start card on the overview). */
+  async saveArtistName(value: string): Promise<void> {
+    const name = value.trim();
+    if (this.busy || !name) return;
+    const draft: StudioSettings = { ...this.settings, artist_name: name };
+    if (await this.run(async () => { this.settings = await api.saveSettings(draft); this.settingsDraft = { ...this.settingsDraft, artist_name: this.settings.artist_name }; }, this.tr('Nome dell’artista salvato'))) {
+      this.artistNameDraft = '';
+    }
   }
   async saveCertificate(): Promise<void> {
     const certificate = await this.captureCertificate();
     if (certificate) {
+      try { if (this.certificateDraft.place) localStorage.setItem(this.placeKey, this.certificateDraft.place); } catch { /* optional */ }
       this.certificateDialog = false;
-      this.showCertificate(certificate);
+      await this.previewCertificate(certificate);
     }
   }
   private async captureCertificate(): Promise<Certificate | null> {
@@ -1523,14 +1588,33 @@ export class AppComponent implements OnInit {
       return null;
     } finally { this.busy = false; this.change.detectChanges(); }
   }
-  showCertificate(c: Certificate): void {
+  /** Frozen picture of the certificate: the exact file recorded in the snapshot, even if the cover changed since. */
+  private async certificatePicture(path: string | null | undefined): Promise<string | null> {
+    if (!path) return null;
+    try {
+      const id = await api.mediaIdForPath(path);
+      if (!id) return null;
+      const revision = (await api.mediaDetail(id)).revisions.find(r => r.image_path === path);
+      return (await api.mediaPreview(id, 1600, null, revision?.id ?? null)).data_url;
+    } catch { return null; }
+  }
+  async showCertificate(c: Certificate): Promise<void> {
     this.selectedCertificate = c;
     try { this.selectedSnapshot = JSON.parse(c.snapshot_json) as Artwork; }
     catch { this.selectedSnapshot = null; }
+    this.certificateImage = null;
+    this.change.detectChanges();
+    this.certificateImage = await this.certificatePicture(this.selectedSnapshot?.image_path);
     this.change.detectChanges();
   }
-  printCertificate(c: Certificate): void {
-    this.showCertificate(c);
+  async previewCertificate(c: Certificate): Promise<void> {
+    await this.showCertificate(c);
+    this.certificatePreview = true;
+    this.change.detectChanges();
+  }
+  closeCertificatePreview(): void { this.certificatePreview = false; }
+  async printCertificate(c: Certificate): Promise<void> {
+    if (this.selectedCertificate?.id !== c.id || !this.selectedSnapshot) await this.showCertificate(c);
     window.setTimeout(() => window.print(), 150);
   }
 }

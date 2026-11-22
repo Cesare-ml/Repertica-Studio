@@ -198,9 +198,14 @@ export interface Certificate {
   id: string; artwork_id: string; serial: string; issued_at: string;
   artist_name: string; collector_name: string | null; notes: string | null;
   snapshot_json: string; artwork_title: string; created_at: string;
+  language: 'it' | 'en' | 'bilingual'; issued_place: string | null;
 }
 export interface CertificateInput {
-  artwork_id: string; artist_name: string; collector_name: string | null; notes: string | null;
+  artwork_id: string;
+  /** Left empty: the artist name saved in the settings is used. */
+  artist_name?: string | null;
+  collector_name: string | null; notes: string | null;
+  language: 'it' | 'en' | 'bilingual'; place: string | null;
 }
 export interface Overview {
   artworks: number; collectors: number; sales: number; certificates: number; revenue_cents: number;
@@ -222,6 +227,8 @@ export interface StudioSettings {
   treasury_start_date: string | null;
   default_tax_bp: number;
   ui_language: 'it' | 'en' | 'es' | 'fr' | 'de' | null;
+  /** Name printed on certificates as the issuing artist. */
+  artist_name: string | null;
 }
 export interface Expense {
   id:string; expense_date:string; category:string; description:string;

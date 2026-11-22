@@ -62,3 +62,5 @@ se occorre integrare file, importarli prima nell'archivio attivo e creare un
 nuovo backup da Impostazioni. L'archivio precedente resta preservato in
 caso di errore. Sono disponibili test automatici per file aggiuntivi non
 registrati e, su Unix, per una cartella media collegata all'esterno.
+
+Dalla versione con schema v17 il registro `certificates` termina con le colonne `language` (`it`, `en` o `bilingual`) e `issued_place`. Tutte le esportazioni CSV si trovano in **Impostazioni → Esportazioni**.

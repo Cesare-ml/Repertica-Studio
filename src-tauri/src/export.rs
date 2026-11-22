@@ -62,9 +62,9 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              ORDER BY a.code COLLATE NOCASE,a.id"
         ),
         "certificates" => (
-            "certificate_id;artwork_id;artwork_code;current_artwork_title;serial;issued_at;artist_name;collector_name;notes;snapshot_json;created_at",
+            "certificate_id;artwork_id;artwork_code;current_artwork_title;serial;issued_at;artist_name;collector_name;notes;snapshot_json;created_at;language;issued_place",
             "SELECT c.id,c.artwork_id,a.code,a.title,c.serial,c.issued_at,c.artist_name,
-                    c.collector_name,c.notes,c.snapshot_json,c.created_at
+                    c.collector_name,c.notes,c.snapshot_json,c.created_at,c.language,c.issued_place
              FROM certificates c JOIN artworks a ON a.id=c.artwork_id
              ORDER BY c.issued_at,c.serial,c.id"
         ),

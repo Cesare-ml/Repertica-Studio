@@ -30,11 +30,12 @@ test('mailbox remains independent from newsletter platform and server-side crede
 test('migration stores account configuration and local drafts but never a password column', () => {
   const db = read('src-tauri/src/db.rs');
   const rust = read('src-tauri/src/business_mail.rs');
-  assert.match(db, /SCHEMA_VERSION: i64 = 16/);
+  assert.match(db, /SCHEMA_VERSION: i64 = (1[6-9]|[2-9]\d)/, 'the mail tables exist from schema 16 on');
   assert.match(db, /CREATE TABLE IF NOT EXISTS mail_accounts/);
   assert.match(db, /CREATE TABLE IF NOT EXISTS mail_drafts/);
   assert.match(db, /references mail_accounts/i);
-  assert.doesNotMatch(db.slice(db.indexOf('if version < 16 {'),db.indexOf('// Certificates are append-only')), /password|secret/i);
+  const mailMigration = db.slice(db.indexOf('if version < 16 {'), db.indexOf('if version < 17 {') > 0 ? db.indexOf('if version < 17 {') : db.indexOf('// Certificates are append-only'));
+  assert.doesNotMatch(mailMigration, /password|secret/i);
   const accountBody = rust.slice(rust.indexOf('pub struct MailAccount {'),rust.indexOf('pub struct MailAccountInput'));
   assert.doesNotMatch(accountBody,/password|secret/i);
   assert.match(rust, /pub struct MailAccountInput/);
