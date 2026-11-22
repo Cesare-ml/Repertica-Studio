@@ -28,6 +28,11 @@ export function buildSaleIndexes(sales: Sale[]): SaleIndexes {
 /** Normalize Latin diacritics, case and whitespace for local search. */
 function foldSearch(value: string): string {
   return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    // Names and artwork titles often arrive from phones with typographic quotes/dashes.
+    // Normalize their punctuation consistently in queries and stored fields.
+    .replace(/[\u2018\u2019\u02bc]/gu, "'")
+    .replace(/[\u201c\u201d]/gu, '"')
+    .replace(/[\u2010-\u2015\u2212]/gu, '-')
     .replace(/\s+/gu, ' ').trim();
 }
 
@@ -126,7 +131,7 @@ export function filterCollectors(
 ): Collector[] {
   const base = filter === 'all' ? collectors : collectors.filter(c => filter === 'buyers'
     ? (indexes.byCollector[c.id]?.length ?? 0) > 0
-    : !c.email && !c.phone);
+    : !c.email?.trim() && !c.phone?.trim());
   const terms = searchTerms(query);
   if (terms.length === 0) return base;
   return base.filter(c =>
