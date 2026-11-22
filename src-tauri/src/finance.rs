@@ -206,14 +206,24 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
             .collect::<Result<Vec<_>,_>>().map_err(error)?;
         for (sale,part,bp) in rows {shares.entry(sale).or_default().push((part,bp));}
     }
-    let mut q=c.prepare("SELECT s.id,s.amount_cents,s.sold_at,COALESCE(sf.tax_cents,0),COALESCE(sf.shipping_cents,0)
-        FROM sales s LEFT JOIN sale_finances sf ON sf.sale_id=s.id WHERE substr(s.sold_at,1,4)=?1").map_err(error)?;
+    // SQLite files edited outside Studio can contain sales with broken foreign keys.
+    // Check owners alongside the monetary figures: a report must not silently
+    // count turnover for an artwork or collector that no longer exists.
+    let mut q=c.prepare("SELECT s.id,s.amount_cents,s.sold_at,COALESCE(sf.tax_cents,0),COALESCE(sf.shipping_cents,0),
+            a.id,co.id
+        FROM sales s
+        LEFT JOIN sale_finances sf ON sf.sale_id=s.id
+        LEFT JOIN artworks a ON a.id=s.artwork_id
+        LEFT JOIN collectors co ON co.id=s.collector_id
+        WHERE substr(s.sold_at,1,4)=?1").map_err(error)?;
     let rows=q.query_map(params![year.to_string()],|r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,
-        r.get::<_,i64>(3)?,r.get::<_,i64>(4)?))).map_err(error)?
+        r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<String>>(6)?))).map_err(error)?
         .collect::<Result<Vec<_>,_>>().map_err(error)?;
-    for (sale,gross,date,taxes,shipping) in rows {
+    for (sale,gross,date,taxes,shipping,artwork,collector) in rows {
         if settings.treasury_start_date.as_ref().is_some_and(|start|date.as_str()<start.as_str()){continue;}
         if !date_ok(&date) {return Err(format!("Invalid sale date in archive: {sale}"));}
+        if artwork.is_none() {return Err(format!("Archived sale has missing artwork: {sale}"));}
+        if collector.is_none() {return Err(format!("Archived sale has missing collector: {sale}"));}
         if gross<=0 || taxes<0 || shipping<0 {
             return Err(format!("Invalid sale finances in archive: {sale}"));
         }
@@ -466,6 +476,38 @@ mod tests{
         assert_eq!((overview.net_cents,overview.expense_cents,overview.margin_cents),
             (10_000,500,9_500));
         assert_eq!(overview.parts.iter().map(|p|p.expense_cents).sum::<i64>(),0);
+    }
+
+    #[test]
+    fn imported_sales_with_missing_artwork_or_collector_cannot_inflate_financial_reports(){
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().to_owned()).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        sale(&mut c,"s",10_000,"2026-04-11",0,0);
+        assert_eq!(finance_overview_core(&c,2026).unwrap().gross_cents,10_000);
+
+        // A third-party editor can bypass foreign keys without breaking SQLite
+        // page integrity. Do not count those records as valid studio turnover.
+        c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        c.execute("UPDATE sales SET artwork_id='removed-artwork' WHERE id='s'",[]).unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let message=finance_overview_core(&c,2026).err().expect("orphaned artwork must fail");
+        assert!(message.contains("missing artwork"), "{message}");
+        assert!(message.contains("s"), "{message}");
+
+        c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        c.execute("UPDATE sales SET artwork_id='s',collector_id='removed-collector' WHERE id='s'",[]).unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let message=finance_overview_core(&c,2026).err().expect("orphaned collector must fail");
+        assert!(message.contains("missing collector"), "{message}");
+
+        // Repairing the references restores the original report; no records
+        // are written or removed by the reporting path.
+        c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        c.execute("UPDATE sales SET collector_id='c' WHERE id='s'",[]).unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let overview=finance_overview_core(&c,2026).unwrap();
+        assert_eq!((overview.gross_cents,overview.net_cents),(10_000,10_000));
     }
 
     #[test]
