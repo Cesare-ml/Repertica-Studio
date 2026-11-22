@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **40 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **41 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -46,6 +46,15 @@ Data ricognizione: **2026-11-22** (trentasettesima ricognizione). Stato uniforme
 | [REPS-TECH-038](REPS-TECH-038-staging-media-backup-concorrenza-snapshot.md) | Media preparati fuori dal lock SQLite: studio della coerenza tra importazioni concorrenti e backup integrali, senza perdere gli orfani storici | P1–P2 solo se il rischio è riproducibile; altrimenti P3 | Proposta — da valutare |
 | [REPS-TECH-039](REPS-TECH-039-salvataggio-selettivo-email-eml-portabile.md) | Corrispondenza IMAP: esportazione su richiesta di un messaggio MIME integro in EML aperto, con sicurezza del file, identità UIDVALIDITY e avviso esplicito che il backup non include export esterni | P2–P3 condizionata al bisogno | Proposta — da valutare |
 | [REPS-TECH-040](REPS-TECH-040-scambio-contatti-vcard-offline.md) | Interoperabilità rubrica: esportazione selettiva dei recapiti dei collezionisti in vCard aperto, senza cloud o dati commerciali; import soltanto eventuale e con conflitti espliciti | P2–P3 condizionata al bisogno | Proposta — da valutare |
+| [REPS-TECH-041](REPS-TECH-041-checklist-identificazione-object-id-offline.md) | Checklist di identificazione delle opere secondo le nove categorie Object ID (ICOM): verifica delle lacune, eventuale scheda locale con immagini scelte e privacy prudente; nessuna attestazione automatica | P2 se bisogno documentato; P3 se basta modello esterno | Proposta — da valutare |
+
+## Trentottesima ricognizione — 22 novembre 2026 — REPS-TECH-041
+
+- **[REPS-TECH-041 — Checklist di identificazione delle opere secondo Object ID, offline](REPS-TECH-041-checklist-identificazione-object-id-offline.md):** ricontrollati `main`, [modelli delle opere](../../../src-tauri/src/models.rs), [Media Center](../../../src-tauri/src/media.rs), [MVP](../../MVP.md), [CSV/backup](../../DATA-PORTABILITY.md), [brochure](../../BROCHURES-OFFLINE.md), le **40 precedenti schede tecniche** e **45 idee Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Verificate le indicazioni di [ICOM](https://icom.museum/en/resources/standards-guidelines/objectid/) e [INTERPOL](https://www.interpol.int/en/Crimes/Cultural-heritage-crime/Object-ID): Object ID è una checklist descrittiva con nove categorie e fotografie, **non** un formato JSON ufficiale né certificazione di autenticità.
+- **Opportunità circoscritta:** la scheda dell'opera possiede titolo, tecnica, supporto, anno, misure, foto e firma booleana, ma non distingue in campi strutturati trascrizioni/posizioni di iscrizioni, segni particolari, soggetto e tipo di oggetto. Proposta prudente: **prima solo rapporto di completezza read-only**, poi eventualmente esportazione manuale con foto selezionate, avvertenze privacy e file locali non sovrascritti; nuovi campi/JSON soltanto se richiesti da professionisti reali.
+- **Anti-doppioni:** UX-007 prepara dossier editoriali, UX-004 rapporti di condizione, UX-016 documentazione di coperture, UX-020 etichette inventariali, UX-031 attribuzioni; TECH-001 portabilità globale, TECH-013 privacy delle fotografie e TECH-024 metadati delle fotografie. Qui **identificazione descrittiva del singolo oggetto fisico**, senza vendite, denuncia, assicurazione, autenticità, proprietà, cloud o integrazione con le autorità. Nessun file Gestione e UX modificato.
+- **Guardrail:** nessuna inferenza autore da `signed=true` o dall'account/profilo dell'artista; «dato mancante» diverso da «non applicabile»; foto del retro, segni distintivi e ubicazioni potenzialmente sensibili esclusi dalle copie esterne salvo scelta consapevole. Le esportazioni fuori dall'archivio non entrano automaticamente nei backup. Lingua OS e fallback inglese, testo utente non tradotto.
+- **Priorità P2 soltanto ipotetica** per archivi/gallerie che ne confermino l'uso, altrimenti P3 o nessun sviluppo se una checklist compilata manualmente basta. **41 schede**, tutte **«Proposta — da valutare»**. Solo questa scheda e indice Markdown in `docs/idee/strumenti-e-architettura/`; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) in bozza senza merge, approvazione o sviluppo.
 
 ## Trentasettesima ricognizione — 22 novembre 2026 — REPS-TECH-040
 
