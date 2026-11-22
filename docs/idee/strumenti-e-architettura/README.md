@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (ventottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **31 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (ventinovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **32 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -37,6 +37,14 @@ Data ricognizione: **2026-11-22** (ventottesima ricognizione). Stato uniforme: *
 | [REPS-TECH-029](REPS-TECH-029-scambio-selettivo-schede-opere-archivi-indipendenti.md) | Scambio selettivo e verificabile di schede-opera e foto scelte fra archivi indipendenti; prima export/consultazione, eventuale import assistito senza sincronizzazione o trasferimenti impliciti di proprietà | P2–P3 condizionata | Proposta — da valutare |
 | [REPS-TECH-030](REPS-TECH-030-vocabolari-locali-tecniche-supporti-interoperabili.md) | Vocabolari locali facoltativi per tecniche/supporti e corrispondenze semantiche confermate, con testi originali invariati, interoperabilità e lingue non obbligatorie | P2–P3 condizionata | Proposta — da valutare |
 | [REPS-TECH-031](REPS-TECH-031-allegati-bozze-posta-ripristinabili.md) | Bozze della posta: preflight dei riferimenti esterni e studio di copie locali gestite, verificabili e ripristinabili; invio sempre manuale | P2 condizionata | Proposta — da valutare |
+| [REPS-TECH-032](REPS-TECH-032-pdf-brochure-unicode-font-incorporati-offline.md) | Brochure PDF offline: preservazione di nomi/testi Unicode, diagnostica dei glifi non rappresentabili, font incorporabili con licenze verificate e impaginazione misurata; senza toccare il contenuto delle opere | P1–P2 condizionata | Proposta — da valutare |
+
+## Ventinovesima ricognizione — 22 novembre 2026 — REPS-TECH-032
+
+- **[REPS-TECH-032 — Brochure PDF offline con Unicode, font incorporati e layout affidabile](REPS-TECH-032-pdf-brochure-unicode-font-incorporati-offline.md):** la brochure esiste già, con lingua documento IT/EN/ES/FR/DE indipendente dalla lingua della UI. La documentazione [Brochure offline](../../BROCHURES-OFFLINE.md) segnala font Type1 WinAnsi e perdita di caratteri non rappresentabili; il renderer [Rust](../../../src-tauri/src/brochures.rs) usa una funzione `win_ansi` che converte tali caratteri in `?`, più un wrapping per conteggio di caratteri. Lo studio distingue **prima una diagnosi senza sostituzioni silenziose**, poi eventuali font ridistribuibili incorporati, mappatura del testo e metriche reali; shaping/BiDi solo dopo verifica d'uso. **P1–P2 ipotetica e condizionata**, non approvata.
+- **Confronto anti-doppione:** TECH-023 concerne i **certificati storici e la verifica PDF/A**, TECH-020 l'accessibilità delle operazioni UI, TECH-018 la coerenza delle esportazioni CSV. La [PR Gestione e UX #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), che raccoglie **36 idee**, comprende UX-007 (dossier: contenuti e condivisione), ma non l'encoding tipografico del PDF delle brochure attuali. Questa proposta **approfondisce una limitazione dichiarata** nella documentazione esistente: non crea un secondo sistema di brochure.
+- **Limiti e cautele:** font e dipendenze richiedono verifica di licenze, copertura dei glifi e sicurezza; font incorporati non comportano automaticamente PDF/A, PDF/UA o rappresentazione corretta di tutte le scritture. Offline, nessun download automatico, bozze/SQLite intatti, lingua di sistema con fallback inglese, esportazione solo su scelta, nessun dato inviato a terzi. Nessun test nativo né indagine utenti eseguiti.
+- **Esito:** **32 schede**, tutte **«Proposta — da valutare»**. Aggiunta soltanto una scheda Markdown e aggiornato questo indice **dentro `docs/idee/strumenti-e-architettura/`**. [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) da lasciare aperta e in bozza, senza merge. Non è stato modificato codice, configurazione, workflow, dipendenze, test, issue o documentazione Gestione e UX.
 
 ## Ventottesima ricognizione — 22 novembre 2026 — REPS-TECH-031
 
