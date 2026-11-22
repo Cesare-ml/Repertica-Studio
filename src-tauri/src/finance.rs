@@ -173,6 +173,15 @@ pub struct FinanceOverview {
     pub expense_cents:i64,pub margin_cents:i64,
     pub allocation_enabled:bool,pub parts:Vec<PartTotal>,
 }
+// Imported SQLite data may bypass database CHECK constraints. Report calculations
+// must return a recoverable error instead of panicking or silently wrapping cents.
+fn add_cents(total:&mut i64,value:i64,field:&str)->Result<(),String>{
+    *total=total.checked_add(value).ok_or_else(||format!("Financial summary overflow: {field}"))?;
+    Ok(())
+}
+fn subtract_cents(left:i64,right:i64,field:&str)->Result<i64,String>{
+    left.checked_sub(right).ok_or_else(||format!("Financial summary overflow: {field}"))
+}
 fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOverview,String>{
     use std::collections::HashMap;
     if !(1900..=2200).contains(&year) {return Err("Invalid year".into())}
@@ -201,14 +210,29 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
         .collect::<Result<Vec<_>,_>>().map_err(error)?;
     for (sale,gross,date,taxes,shipping) in rows {
         if settings.treasury_start_date.as_ref().is_some_and(|start|date.as_str()<start.as_str()){continue;}
-        let Some(index)=date.get(5..7).and_then(|m|m.parse::<usize>().ok()).filter(|m|(1..=12).contains(m)).map(|m|m-1) else {continue};
+        if !date_ok(&date) {return Err(format!("Invalid sale date in archive: {sale}"));}
+        if gross<=0 || taxes<0 || shipping<0 {
+            return Err(format!("Invalid sale finances in archive: {sale}"));
+        }
+        let net=subtract_cents(gross,taxes,"sale taxes")
+            .and_then(|v|subtract_cents(v,shipping,"sale shipping"))?;
+        if net<0 {return Err(format!("Sale deductions exceed the amount: {sale}"));}
+        let index=date[5..7].parse::<usize>().map_err(error)?-1;
         let month=&mut months[index];
-        let net=gross-taxes-shipping;
-        month.gross_cents+=gross;month.taxes_cents+=taxes;month.shipping_cents+=shipping;month.net_cents+=net;
+        add_cents(&mut month.gross_cents,gross,"monthly gross")?;
+        add_cents(&mut month.taxes_cents,taxes,"monthly taxes")?;
+        add_cents(&mut month.shipping_cents,shipping,"monthly shipping")?;
+        add_cents(&mut month.net_cents,net,"monthly net")?;
         if let Some(frozen)=shares.get(&sale) {
+            if frozen.iter().any(|(_,bp)|!(0..=10_000).contains(bp))
+                || frozen.iter().map(|(_,bp)|*bp).sum::<i64>() != 10_000 {
+                return Err(format!("Invalid frozen allocation percentages: {sale}"));
+            }
             let amounts=crate::allocations::split(net,&frozen.iter().map(|(_,bp)|*bp).collect::<Vec<_>>());
             for ((part,_),amount) in frozen.iter().zip(amounts) {
-                if let Some(&slot)=position.get(part.as_str()) {month.parts[slot].share_cents+=amount;}
+                if let Some(&slot)=position.get(part.as_str()) {
+                    add_cents(&mut month.parts[slot].share_cents,amount,"monthly allocation")?;
+                }
             }
         }
     }
@@ -217,29 +241,35 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
         .map_err(error)?.collect::<Result<Vec<_>,_>>().map_err(error)?;
     for (date,amount,fund) in rows {
         if settings.treasury_start_date.as_ref().is_some_and(|start|date.as_str()<start.as_str()){continue;}
-        let Some(index)=date.get(5..7).and_then(|m|m.parse::<usize>().ok()).filter(|m|(1..=12).contains(m)).map(|m|m-1) else {continue};
+        if !date_ok(&date) {return Err(format!("Invalid expense date in archive: {date}"));}
+        if amount<=0 {return Err(format!("Invalid expense amount in archive: {date}"));}
+        let index=date[5..7].parse::<usize>().map_err(error)?-1;
         let month=&mut months[index];
-        month.expense_cents+=amount;
-        if let Some(&slot)=fund.as_deref().and_then(|f|position.get(f)) {month.parts[slot].expense_cents+=amount;}
+        add_cents(&mut month.expense_cents,amount,"monthly expenses")?;
+        if let Some(&slot)=fund.as_deref().and_then(|f|position.get(f)) {
+            add_cents(&mut month.parts[slot].expense_cents,amount,"monthly allocated expenses")?;
+        }
     }
     let mut summary=FinanceOverview{year,months,gross_cents:0,net_cents:0,expense_cents:0,margin_cents:0,
         allocation_enabled:crate::allocations::enabled(c)?,parts:vec![]};
     let mut totals:Vec<PartTotal>=parts.iter().map(|p|PartTotal{part_id:p.id.clone(),name:p.name.clone(),active:p.active,
         pays_expenses:p.pays_expenses,share_cents:0,expense_cents:0,balance_cents:0}).collect();
     for m in &mut summary.months {
-        m.margin_cents=m.net_cents-m.expense_cents;
-        summary.gross_cents+=m.gross_cents;
-        summary.net_cents+=m.net_cents;
-        summary.expense_cents+=m.expense_cents;
+        m.margin_cents=subtract_cents(m.net_cents,m.expense_cents,"monthly margin")?;
+        add_cents(&mut summary.gross_cents,m.gross_cents,"annual gross")?;
+        add_cents(&mut summary.net_cents,m.net_cents,"annual net")?;
+        add_cents(&mut summary.expense_cents,m.expense_cents,"annual expenses")?;
         for (slot,amount) in m.parts.iter().enumerate() {
-            totals[slot].share_cents+=amount.share_cents;
-            totals[slot].expense_cents+=amount.expense_cents;
+            add_cents(&mut totals[slot].share_cents,amount.share_cents,"annual allocation")?;
+            add_cents(&mut totals[slot].expense_cents,amount.expense_cents,"annual allocated expenses")?;
         }
     }
-    for t in &mut totals {t.balance_cents=t.share_cents-t.expense_cents;}
+    for t in &mut totals {
+        t.balance_cents=subtract_cents(t.share_cents,t.expense_cents,"allocation balance")?;
+    }
     // Inactive parts appear only while they still carry figures for the year.
     summary.parts=totals.into_iter().filter(|t|t.active||t.share_cents!=0||t.expense_cents!=0).collect();
-    summary.margin_cents=summary.net_cents-summary.expense_cents;
+    summary.margin_cents=subtract_cents(summary.net_cents,summary.expense_cents,"annual margin")?;
     Ok(summary)
 }
 #[tauri::command]
@@ -355,6 +385,44 @@ mod tests{
         assert!(!o.allocation_enabled);
         assert_eq!((o.gross_cents,o.net_cents,o.expense_cents,o.margin_cents),(20_000,18_500,700,17_800));
         assert!(o.parts.iter().all(|p|p.share_cents==0&&p.expense_cents==0));
+    }
+
+    #[test]
+    fn imported_sales_with_invalid_dates_deductions_or_shares_are_not_silently_reported(){
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().to_owned()).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        sale(&mut c,"s",10_000,"2026-02-15",0,0);
+        c.execute("UPDATE sales SET sold_at='2026-02-31' WHERE id='s'",[]).unwrap();
+        assert!(finance_overview_core(&c,2026).unwrap_err().contains("Invalid sale date"));
+        c.execute("UPDATE sales SET sold_at='2026-02-15' WHERE id='s'",[]).unwrap();
+        c.execute("UPDATE sale_finances SET tax_cents=10001 WHERE sale_id='s'",[]).unwrap();
+        assert!(finance_overview_core(&c,2026).unwrap_err().contains("deductions exceed"));
+        c.execute("UPDATE sale_finances SET tax_cents=0 WHERE sale_id='s'",[]).unwrap();
+        c.execute("UPDATE sale_allocations SET share_bp=3332 WHERE sale_id='s' AND part_id='savings'",[]).unwrap();
+        assert!(finance_overview_core(&c,2026).unwrap_err().contains("frozen allocation"));
+    }
+    #[test]
+    fn financial_report_rejects_overflow_in_imported_sale_totals(){
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().to_owned()).unwrap();
+        let c=db.conn.lock().unwrap();
+        c.execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Collector','t','t')",[]).unwrap();
+        for id in ["a","b"] {
+            c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES(?1,?1,?1,'t','t')",params![id]).unwrap();
+            c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES(?1,?1,'c',?2,'2026-03-01','t')",params![id,i64::MAX]).unwrap();
+        }
+        assert!(finance_overview_core(&c,2026).unwrap_err().contains("overflow"));
+    }
+    #[test]
+    fn financial_report_rejects_invalid_imported_expense_dates(){
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().to_owned()).unwrap();
+        let c=db.conn.lock().unwrap();
+        c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
+            VALUES('e','2026-02-31','materials','Paint',500,'t','t')",[]).unwrap();
+        assert!(finance_overview_core(&c,2026).unwrap_err().contains("Invalid expense date"));
     }
     #[test]
     fn migration_moves_historical_shares_and_expense_funds_into_the_new_model(){
