@@ -409,7 +409,7 @@ export class AppComponent implements OnInit {
   }
   get visibleCollectors(): Collector[] {
     return filterCollectors(this.collectors, this.search,
-      { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork }, this.collectorFilter);
+      { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork }, this.collectorFilter, this.artworks);
   }
   showCollectorArtworks(collectorId: string): void {
     this.navigate('artworks');
