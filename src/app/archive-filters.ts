@@ -33,6 +33,12 @@ function foldSearch(value: string): string {
     .replace(/[\u2018\u2019\u02bc]/gu, "'")
     .replace(/[\u201c\u201d]/gu, '"')
     .replace(/[\u2010-\u2015\u2212]/gu, '-')
+    // Dimensions can be entered with decimal commas and the multiplication
+    // sign commonly used in artwork catalogues (e.g. 30,5 × 40 cm).
+    .replace(/(\d),(\d)/gu, '$1.$2')
+    .replace(/(\d)\s*[x×]\s*(?=\d)/giu, '$1x')
+    // The unit is implicit in the stored dimensions, but may be typed by a user.
+    .replace(/(\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?){1,2})\s*cm\b/giu, '$1')
     .replace(/\s+/gu, ' ').trim();
 }
 
@@ -90,6 +96,18 @@ function matchesTerms(
   });
 }
 
+/** Add human-sized cm measurements to artwork search without rounding stored values. */
+function artworkDimensionFields(artwork: Artwork): string[] {
+  const cm = (value: number | null): string | null =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? String(value) : null;
+  const width = cm(artwork.width_cm);
+  const height = cm(artwork.height_cm);
+  const depth = cm(artwork.depth_cm);
+  const pair = width !== null && height !== null ? `${width}x${height}` : null;
+  const triple = pair !== null && depth !== null ? `${pair}x${depth}` : null;
+  return [width, height, depth, pair, triple].filter((value): value is string => value !== null);
+}
+
 export function filterArtworks(
   artworks: Artwork[],
   filters: ArtworkFilters,
@@ -102,7 +120,8 @@ export function filterArtworks(
     (filters.status === 'all' || a.status === filters.status) &&
     (acquiredIds === null || acquiredIds.has(a.id)) &&
     matchesTerms(terms, [a.title, a.code, a.year, a.technique, a.support,
-      a.description, indexes.byArtwork[a.id]?.collector_name]));
+      a.description, indexes.byArtwork[a.id]?.collector_name,
+      ...artworkDimensionFields(a)]));
 
   if (filters.order === 'title') {
     return visible.sort((a, b) =>
