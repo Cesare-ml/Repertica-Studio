@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **43 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **44 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -49,6 +49,14 @@ Data ricognizione: **2026-11-22** (quarantesima ricognizione). Stato uniforme: *
 | [REPS-TECH-041](REPS-TECH-041-checklist-identificazione-object-id-offline.md) | Checklist di identificazione delle opere secondo le nove categorie Object ID (ICOM): verifica delle lacune, eventuale scheda locale con immagini scelte e privacy prudente; nessuna attestazione automatica | P2 se bisogno documentato; P3 se basta modello esterno | Proposta — da valutare |
 | [REPS-TECH-042](REPS-TECH-042-compatibilita-aggiornamenti-recupero-versione-offline.md) | Aggiornamenti: contratto di compatibilità fra versione software e schema SQLite, procedura di recupero offline senza downgrade automatico dei dati né falso rollback dell'installer | P1–P2 (QA/release), P2–P3 (guida eventuale) | Proposta — da valutare |
 | [REPS-TECH-043](REPS-TECH-043-provenienza-verificabile-build-installatori-offline.md) | Provenienza verificabile degli installer ufficiali e delle build: manifest per artifact, hash e attestazioni opzionali verificabili anche offline, senza confondere firma updater, firma OS e sicurezza dell'app | P2 (documentazione e provenienza); P3 (UI eventuale) | Proposta — da valutare |
+| [REPS-TECH-044](REPS-TECH-044-esportazione-scadenze-rate-icalendar-offline.md) | Esportazione manuale delle scadenze rateali esistenti in iCalendar .ics, senza sincronizzazione o nuovi pagamenti; privacy minima e attenzione a UUID instabili dopo modifiche dei piani | P2–P3 condizionata; nessuno sviluppo se CSV/agenda manuale bastano | Proposta — da valutare |
+
+## Quarantunesima ricognizione — 22 novembre 2026 — REPS-TECH-044
+
+- **[REPS-TECH-044 — Esportazione manuale delle scadenze rateali in iCalendar, senza sincronizzazione obbligatoria](REPS-TECH-044-esportazione-scadenze-rate-icalendar-offline.md):** analizzati `main`, [`installments.rs`](../../../src-tauri/src/installments.rs), [MVP](../../MVP.md), [incassi](../../SALE-RECEIPTS.md), [portabilità](../../DATA-PORTABILITY.md), i **43 studi tecnici precedenti** e le **48 proposte Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Repertica dispone già di rate con date e stati calcolati da incassi registrati; **non emerge un esportatore .ics**. Opportunità: generare su richiesta un file di calendario aperto e locale con giorni di scadenza, **senza pretendere** che il calendario esterno attesti pagamenti o mantenga aggiornamenti.
+- **Confini anti-doppioni:** UX-024 riguarda i piani rateali (già in `main`) ed eventuali revisioni degli accordi; UX-037 scadenze di spese ricorrenti ancora proposte. TECH-001/018/025/040 trattano export di altri tipi, TECH-002 automazioni locali. Qui **solo copia statica iCalendar di rate già esistenti**, senza notifiche, cloud, provider account, inviti o modifiche dei registri. `replace_plan` ricrea gli UUID delle rate: il file deve avvisare su esportazioni ripetute e possibili duplicati; **nessuna sincronizzazione simulata**.
+- **Privacy e qualità:** default titoli generici senza cliente, opera, importo o note; scelta esplicita per campi aggiuntivi; `CLASS:PRIVATE` non cifra; `DTSTART;VALUE=DATE` evita orari/fusi inventati; verifiche RFC 5545, importatori reali e backup intatti. [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545). La proposta resta **P2–P3 ipotetica** o nessuno sviluppo se soluzione manuale sufficiente.
+- **Esito:** **44 schede**, tutte **«Proposta — da valutare»**. Aggiunti esclusivamente la scheda e l'indice Markdown di questa cartella. [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta soltanto documentale, aperta e in bozza; niente approvazione, assegnazione, codice, merge o sviluppo.
 
 ## Quarantesima ricognizione — 22 novembre 2026 — REPS-TECH-043
 
