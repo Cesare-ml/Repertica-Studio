@@ -33,6 +33,17 @@ sono trattati in modo conservativo: non autorizzano cancellazioni di file.
 Restano possibili file orfani dopo un errore I/O di cancellazione, ma un errore
 viene mostrato e il backup li conserva.
 
+**Protezione delle prove alterate:** prima di cancellare un documento non
+condiviso, il backend verifica sul file effettivamente presente tipo regolare,
+dimensione, firma MIME e SHA-256 registrato in SQLite. Se qualcuno ha
+sostituito o modificato la copia nell'archivio, la rimozione fallisce
+**prima** di cancellare il collegamento SQLite: né il documento né il
+riferimento vengono persi. Anche un link simbolico sul percorso del file
+viene rifiutato. Se invece il documento è già davvero mancante, si può
+eliminare il solo collegamento rimasto per riparare la scheda. La verifica
+non costituisce protezione contro modifiche simultanee di un altro processo
+tra controllo e rimozione: usare i backup verificati come ulteriore difesa.
+
 Se la copia del file riesce ma l'inserimento SQLite fallisce, il nuovo file
 viene rimosso. Nessun servizio remoto, account o libreria di upload cloud.
 
