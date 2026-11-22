@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **46 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (quarantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **47 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -52,6 +52,14 @@ Aggiornato: **2026-11-22** (trentanovesima ricognizione). Stato delle proposte: 
 | [REPS-UX-044](REPS-UX-044-attrezzature-studio-manutenzioni-garanzie.md) | Registro facoltativo di attrezzature durevoli dello studio: identificazione del singolo bene, verifiche e manutenzioni dichiarate, senza creare spese o certificazioni di sicurezza | P2* per laboratori attrezzati; P3 se bastano note | Proposta — da valutare |
 | [REPS-UX-045](REPS-UX-045-rettifica-sostituzione-certificati-opere.md) | Annotazioni documentali e collegamento esplicito dei certificati sostitutivi: originali e seriali immutabili, nessuna revoca o consegna presunta | P1–P2* solo con casi verificati; altrimenti P2–P3 | Proposta — da valutare |
 | [REPS-UX-046](REPS-UX-046-consegne-spedizioni-post-vendita-checklist.md) | Consegne post-vendita: checklist facoltativa, ritiri e spedizioni con eventi dichiarati, destinatario separato dall'acquirente e nessuna consegna presunta | P2* solo con frequenza verificata; P3 se bastano note | Proposta — da valutare |
+| [REPS-UX-047](REPS-UX-047-budget-consuntivo-mostre-fiere-spese-collegate.md) | Budget e consuntivo economico per mostre e fiere, con collegamenti a spese esistenti senza duplicare i registri | P2* se validato; P3 o nessuno sviluppo se basta Calc | Proposta — da valutare |
+
+## Quarantesima ricognizione — 22 novembre 2026 — REPS-UX-047
+
+- **[REPS-UX-047 — Budget e consuntivo di mostre e fiere senza duplicare le spese](REPS-UX-047-budget-consuntivo-mostre-fiere-spese-collegate.md):** riesaminati `main`, `README.md`, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/models.rs` e `commands.rs`; confrontati **46 studi Gestione e UX** preesistenti e **42 schede tecniche** del filone [Strumenti e architettura — PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16).
+- **Lacuna ipotetica:** il budget e le spese di una **singola mostra/fiera**, anche se attraversa più mesi, non emergono come dimensione analitica nel prodotto. Una spesa va **collegata** al progetto, non ricreata; importi in centesimi, quote per evento che non superano la spesa, consuntivo dichiarato diverso da pagamento e nessuna vendita attribuita dalla sola data.
+- **Confini anti-doppioni:** UX-009 progetta attività espositive e deve restare **fonte unica dell'identità evento** se adottata; UX-032 imposta budget **mensili**; UX-003 attribuisce costi **alle opere**; UX-012 segue il conto-vendita. TECH-001/025 definiscono portabilità/esportazioni, non il dominio economico; **non sono stati modificati file dell'altro filone**. Nessun effetto sui totali delle spese, sugli incassi, sulle quote congelate o sui certificati.
+- **Alternativa minima prima di sviluppare:** foglio **LibreOffice Calc offline** con CSV esportati manualmente; raccogliere esempi anonimi di consuntivi presso artisti/gallerie. **Priorità ipotetica P2 condizionata**, P3 o nessuna implementazione se il caso è raro. Scheda completa con UX, dati, backup, privacy, lingue, rischi, test e domande al proprietario. Totale **47 schede**, tutte **«Proposta — da valutare»**; [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta in bozza e senza merge.
 
 ## Trentanovesima ricognizione — 22 novembre 2026 — REPS-UX-046
 
