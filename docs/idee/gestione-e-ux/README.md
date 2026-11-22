@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (quarantaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **51 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (quarantacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **52 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -57,6 +57,15 @@ Aggiornato: **2026-11-22** (quarantaquattresima ricognizione). Stato delle propo
 | [REPS-UX-049](REPS-UX-049-percorso-professionale-artista-cv-portabile.md) | Percorso professionale dell'artista: riconoscimenti, formazione e residenze per un curriculum portabile, senza duplicare mostre e bibliografie delle opere | P2* condizionata; P3 o nessuno sviluppo se basta ODT | Proposta — da valutare |
 | [REPS-UX-050](REPS-UX-050-rendiconto-mensile-snapshot-verifiche.md) | Rendiconto mensile datato con verifica delle registrazioni gestionali e possibile confronto non distruttivo fra istantanee, senza chiusura fiscale | P2 se validato; P3 o nessuno sviluppo se basta Calc | Proposta — da valutare |
 | [REPS-UX-051](REPS-UX-051-anzianita-disponibilita-opere.md) | Revisione delle opere attualmente disponibili e, solo con data di prima offerta dichiarata, tempo trascorso; mai stimare giacenza da anno di produzione o data di catalogazione | P2 se validato; P3 o nessuno sviluppo se bastano filtri/CSV | Proposta — da valutare |
+| [REPS-UX-052](REPS-UX-052-contesto-dichiarato-vendite-canali.md) | Modalità dichiarata di conclusione delle vendite, separata dall'eventuale origine della richiesta; nessuna attribuzione o tracciamento automatico | P2 se validato, P3 o nessuno sviluppo se bastano note/CSV | Proposta — da valutare |
+
+## Quarantacinquesima ricognizione — 22 novembre 2026 — REPS-UX-052
+
+- **[REPS-UX-052 — Contesto dichiarato delle vendite: conclusione e origine della richiesta](REPS-UX-052-contesto-dichiarato-vendite-canali.md):** riesaminati su main README, MVP, ECONOMY-I18N, DATA-PORTABILITY, modelli Rust, comandi vendite ed export, **51 schede UX precedenti** e **47 schede tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). La vendita registra data, importi, cliente e note, ma non il contesto strutturato; la proposta distingue rigorosamente **come/dove si è conclusa** dalla **provenienza dichiarata del primo contatto**, che non va inferita dal calendario, dal luogo dell'opera o dal cliente.
+- **Anti-doppioni:** UX-034 analizza tecnica/supporto/anno; UX-002 le trattative; UX-009/047 eventi e spese; UX-012 consignment; UX-014/035 contatti e preferenze. TECH-008/001/025 restano invariati: nessun nuovo motore di filtri/export e nessun file tecnico toccato. Un eventuale rapporto mostra solo **vendite registrate**, non pagamenti, margini verificati, pubblicità, conversioni o ricavi causalmente attribuiti.
+- **Prima alternativa obbligatoria:** interviste e prova di **note esistenti + CSV + LibreOffice Calc**. Soltanto se insufficienti, valutare un campo opzionale e poi una tabella aggregata privata; origine del contatto e collegamento a evento in fase ulteriore e mai automatici. **P2 solo con bisogno confermato**, altrimenti P3 o nessuno sviluppo.
+- **Esito:** **52 schede**, tutte «Proposta — da valutare». Solo una scheda Markdown e questo indice nella cartella autorizzata; PR #14 in bozza, senza merge, approvazione o incarico di sviluppo. Tutto offline, senza account o cloud, backup nella cartella scelta, lingua OS con fallback EN.
+
 
 ## Quarantaquattresima ricognizione — 22 novembre 2026 — REPS-UX-051
 
