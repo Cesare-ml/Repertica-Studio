@@ -37,7 +37,7 @@ test('a PDF must be exported instead of weakening the desktop CSP', () => {
   assert.match(html, /Esporta documento/);
   assert.doesNotMatch(html, /<iframe|<object/);
   const native = get('src-tauri/src/receipt_attachments.rs');
-  assert.match(native, /let url = data_core\(db, receipt_id\)\?/);
+  // The native export must write bytes verified against SQLite's stored digest.\n  // Preview images may still use base64; exporting must not round-trip through it.\n  const exportSource = native.split('fn export_core(')[1]?.split('#[tauri::command]')[0];\n  assert.ok(exportSource, 'native export function exists');\n  assert.match(exportSource, /let \\(attachment, bytes\\) = verified_receipt_core\\(db, receipt_id\\)\\?/);\n  assert.match(exportSource, /write_all\\(&bytes\\)/);\n  assert.doesNotMatch(exportSource, /STANDARD\\.decode|split_once\\(\";base64,\"\\)/);
   assert.match(native, /\.create_new\(true\)/);
   assert.match(native, /Non esportare documenti all'interno dell'archivio attivo/);
 });
