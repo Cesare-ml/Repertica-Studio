@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (ventiquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **31 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (venticinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **32 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -37,6 +37,15 @@ Aggiornato: **2026-11-22** (ventiquattresima ricognizione). Stato delle proposte
 | [REPS-UX-029](REPS-UX-029-dismissione-documentata-opere-senza-cancellazione.md) | Dismissione deliberata e documentata (distruzione/donazione/trasferimento), con storia dell'opera e decisione separate da movimento fisico, vendite e perdita non accertata | P2* | Proposta — da valutare |
 | [REPS-UX-030](REPS-UX-030-quadratura-facoltativa-estratti-conto-locali.md) | Quadratura facoltativa **solo locale** di incassi/spese con movimenti da CSV bancario selezionato dall'utente, anteprima e collegamenti manuali; nessun nuovo incasso automatico né collegamento online | P2–P3* | Proposta — da valutare |
 | [REPS-UX-031](REPS-UX-031-autorialita-opere-attribuzioni-collaborazioni.md) | Autorialità delle opere: attribuzioni anche incerte, più autori e identità distinte da proprietà, diritti, fotografia e vendite; prima verificare se basta un campo testuale opzionale | P2* (P1 solo se validato) | Proposta — da valutare |
+| [REPS-UX-032](REPS-UX-032-budget-mensili-categorie-spesa-scostamenti.md) | Budget mensili facoltativi per categorie di spesa, confronto preventivato/registrato e spese fuori budget ben visibili; senza creare movimenti né alterare le statistiche esistenti | P2* | Proposta — da valutare |
+
+## Venticinquesima ricognizione (22 novembre 2026) — REPS-UX-032
+
+- **[REPS-UX-032 — Budget mensili facoltativi per categoria di spesa e scostamenti leggibili](REPS-UX-032-budget-mensili-categorie-spesa-scostamenti.md):** studio di un budget **preventivo** locale per mese e categoria, con confronto rispetto alle **spese già registrate**. Zero di budget e assenza di budget sono stati distinti, e ogni spesa non preventivata resta visibile. Il budget non genera né duplica uscite, non modifica fondi, percentuali di guadagno, incassi o margini esistenti.
+- **Riscontro su `main`:** `finance.rs` e `models.ts` mostrano spese con categoria libera e riepiloghi mensili consuntivi; non emerge un target mensile per categoria. Questo è un possibile bisogno professionale, **non un difetto dimostrato con utenti**. Il punto difficile è la qualità dei raggruppamenti: nessuna fusione implicita di «Cornici» e «cornici» e nessuna falsa copertura del budget quando esistono altre spese.
+- **Perimetro e anti-doppione:** UX-003 riguarda costi attribuiti alle **opere**, UX-008 le **scorte fisiche**, UX-009 progetti e checklist; UX-030 la **quadratura bancaria**. [TECH-002](https://github.com/Cesare-ml/Repertica-Studio/blob/docs/idee-strumenti-architettura-20261121/docs/idee/strumenti-e-architettura/REPS-TECH-002-automazioni-locali-consapevoli.md) ipotizza un **motore di regole** e TECH-025 esportazioni minimizzate, senza budget di studio. Nessun file dell'altro filone modificato.
+- **Alternativa minima prima di qualsiasi decisione:** un solo obiettivo mensile totale, o un foglio locale con CSV, da confrontare con un piccolo campione di artisti. Nessuna contabilità fiscale né disponibilità bancaria dedotta: nel prodotto «registrato» non significa «pagato». Il tutto rimane offline, con export aperto, backup integrale in cartella scelta, lingua di sistema e fallback inglese.
+- **Priorità P2 ipotetica, 32 schede.** Tutte le idee restano **«Proposta — da valutare»**; nessuna approvazione, implementazione, assegnazione o merge.
 
 ## Ventiquattresima ricognizione (22 novembre 2026) — REPS-UX-031
 
