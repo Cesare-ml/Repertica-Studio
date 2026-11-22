@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **38 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **39 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -44,6 +44,14 @@ Data ricognizione: **2026-11-22** (trentacinquesima ricognizione). Stato uniform
 | [REPS-TECH-036](REPS-TECH-036-mcp-archivi-grandi-paginazione-limiti-risorse.md) | MCP locale con elenchi continuabili e limiti di risorse misurati per archivi grandi, senza nuova rete né dati sensibili esposti | P2 condizionata; P3 se gli archivi sono piccoli | Proposta — da valutare |
 | [REPS-TECH-037](REPS-TECH-037-recupero-ripristino-interrotto-avvio-protetto.md) | Ripristino interrotto: avvio protetto e recupero assistito di rollback e archivi precedenti, senza inizializzazione o scelta implicita | P1–P2 condizionata (guardia); P2–P3 modalità guidata | Proposta — da valutare |
 | [REPS-TECH-038](REPS-TECH-038-staging-media-backup-concorrenza-snapshot.md) | Media preparati fuori dal lock SQLite: studio della coerenza tra importazioni concorrenti e backup integrali, senza perdere gli orfani storici | P1–P2 solo se il rischio è riproducibile; altrimenti P3 | Proposta — da valutare |
+| [REPS-TECH-039](REPS-TECH-039-salvataggio-selettivo-email-eml-portabile.md) | Corrispondenza IMAP: esportazione su richiesta di un messaggio MIME integro in EML aperto, con sicurezza del file, identità UIDVALIDITY e avviso esplicito che il backup non include export esterni | P2–P3 condizionata al bisogno | Proposta — da valutare |
+
+## Trentaseiesima ricognizione — 22 novembre 2026 — REPS-TECH-039
+
+- **[REPS-TECH-039 — Esportazione selettiva della corrispondenza email in formato EML](REPS-TECH-039-salvataggio-selettivo-email-eml-portabile.md):** ricontrollati `main`, [Posta professionale](../../BUSINESS-MAIL-DESKTOP.md), [business_mail.rs](../../../src-tauri/src/business_mail.rs), [backup.rs](../../../src-tauri/src/backup.rs), [portabilità](../../DATA-PORTABILITY.md), le precedenti 38 schede e [43 idee Gestione e UX — PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il client IMAP legge un messaggio tramite UID + UIDVALIDITY e `BODY.PEEK[]`, ma attualmente fornisce alla UI **solo testo estratto**, fino a 1 MiB, senza esportazione dell'originale MIME in un formato indipendente dal provider.
+- **Opportunità circoscritta, non bug riprodotto:** consentire, **solo su richiesta dell'utente**, una copia integra `.eml` in una cartella liberamente scelta, senza modificare flag IMAP, senza sovrascrivere file e con controlli su dimensioni, identità e scrittura completa. La consultazione di email non ancora acquisite continua a richiedere rete; **il file salvato diventa leggibile offline** con software compatibile. L'app non deduce autenticità o valore probatorio dal semplice formato EML.
+- **Confini e privacy:** non è caching o sincronizzazione dell'intera casella, non è esportazione delle bozze con allegati (TECH-031), non è archivio documentale multi-entità (TECH-016), né gestione dei rapporti professionali (UX-014/035/043). Un file esportato fuori dal database **non** rientra automaticamente nei backup Repertica; nessun invio, associazione, indicizzazione, lettura MCP o cloud impliciti.
+- **Priorità ipotetica P2–P3:** prima interviste utenti e confronto con client esterni già in grado di salvare messaggi; se l'esigenza è rara, **nessuno sviluppo**. Aggiunti esclusivamente questa scheda e la voce nell'indice, solo Markdown sotto `docs/idee/strumenti-e-architettura/`. Tutto resta **Proposta — da valutare**; PR [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) aperta, in bozza e senza merge.
 
 ## Trentacinquesima ricognizione — 22 novembre 2026 — REPS-TECH-038
 
