@@ -95,28 +95,52 @@ pub fn add_artwork_gallery_image_from_path(db: State<'_, Database>, artwork_id: 
     add_gallery_bytes(&db, &artwork_id, &bytes, caption)
 }
 fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Option<String>) -> Result<GalleryImage, String> {
-    if bytes.is_empty() || bytes.len() > crate::commands::MAX_IMAGE_BYTES { return Err("Immagine vuota o troppo grande".into()); }
+    add_gallery_bytes_with_stage(db, artwork_id, bytes, caption, |temp, target, bytes| {
+        fs::write(temp, bytes).map_err(err)?;
+        fs::rename(temp, target).map_err(err)
+    })
+}
+
+// Staging can involve a slow or removable disk. Never hold the shared SQLite
+// mutex during that I/O. The transaction below re-checks both the artwork and
+// the gallery limit, since either may have changed while the file was written.
+// The injected writer allows a deterministic lock-order regression test.
+fn add_gallery_bytes_with_stage<F>(
+    db: &Database, artwork_id: &str, bytes: &[u8], caption: Option<String>, stage: F,
+) -> Result<GalleryImage, String>
+where
+    F: FnOnce(&Path, &Path, &[u8]) -> Result<(), String>,
+{
+    if bytes.is_empty() || bytes.len() > crate::commands::MAX_IMAGE_BYTES {
+        return Err("Immagine vuota o troppo grande".into());
+    }
     let (ext, _) = mime(bytes).ok_or("Sono consentite solo immagini JPEG, PNG o WebP")?;
     let caption = normalize_caption(caption)?;
     require_regular_media_dir(db)?;
-    let mut conn = db.conn.lock().map_err(err)?;
-    let count: i64 = conn.query_row("SELECT count(*) FROM artwork_images WHERE artwork_id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
-    if count >= 20 { return Err("Massimo 20 fotografie aggiuntive per opera".into()); }
-    let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)", params![artwork_id], |r| r.get(0)).map_err(err)?;
-    if !exists { return Err("Opera non trovata".into()); }
     let id = Uuid::new_v4().to_string();
     let relative = format!("media/{}.{}", Uuid::new_v4(), ext);
     let target = db.directory.join(&relative);
     let temp = db.directory.join(format!("{relative}.tmp"));
-    fs::write(&temp, bytes).map_err(err)?;
-    if let Err(e) = fs::rename(&temp, &target) { let _ = fs::remove_file(&temp); return Err(err(e)); }
-    let stamp = Utc::now().to_rfc3339();
-    // Imported archives may contain duplicate positions or i64::MAX. SQLite
-    // promotes MAX(sort_order)+1 to REAL at that limit, which cannot be read
-    // back as an integer. Compact just this artwork's visible order before
-    // appending, and commit all position updates and the new row together.
+
+    if let Err(error) = stage(&temp, &target, bytes) {
+        // fs::write may leave a partial .tmp on a full/disconnected disk.
+        let _ = fs::remove_file(&temp);
+        let _ = fs::remove_file(&target);
+        return Err(error);
+    }
+
     let inserted = (|| -> Result<GalleryImage, String> {
+        let mut conn = db.conn.lock().map_err(err)?;
         let tx = conn.transaction().map_err(err)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",
+            params![artwork_id], |r| r.get(0),
+        ).map_err(err)?;
+        if !exists { return Err("Opera non trovata".into()); }
+
+        // This query also provides the count, so a concurrent addition cannot
+        // bypass the limit. Compact imported, duplicated or overflowing sort
+        // positions in the same transaction as the insertion.
         let ordered_ids: Vec<String> = {
             let mut query = tx.prepare(
                 "SELECT id FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order,id"
@@ -124,6 +148,9 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
             let rows = query.query_map(params![artwork_id], |r| r.get::<_, String>(0)).map_err(err)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(err)?
         };
+        if ordered_ids.len() >= 20 {
+            return Err("Massimo 20 fotografie aggiuntive per opera".into());
+        }
         for (index, existing_id) in ordered_ids.iter().enumerate() {
             let position = i64::try_from(index + 1).map_err(|_| "Troppe fotografie per l'ordinamento")?;
             tx.execute(
@@ -133,6 +160,7 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
         }
         let next_position = i64::try_from(ordered_ids.len() + 1)
             .map_err(|_| "Troppe fotografie per l'ordinamento")?;
+        let stamp = Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
              VALUES(?1,?2,?3,?4,?5,?6)",
@@ -143,8 +171,8 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
         tx.commit().map_err(err)?;
         Ok(image)
     })();
-    // A failed SQLite transaction must not strand an imported photograph on
-    // disk; rollback restores any positions that were being normalized.
+    // If the artwork disappeared, the gallery filled up or SQLite rejected
+    // the transaction, remove the staged file; original data stays untouched.
     if inserted.is_err() { let _ = fs::remove_file(&target); }
     inserted
 }
@@ -373,6 +401,47 @@ pub fn delete_artwork_gallery_image(db: State<'_, Database>, image_id: String) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gallery_upload_stages_without_sqlite_mutex_and_cleans_rejected_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        let jpeg = [0xff, 0xd8, 0xff, 0x01];
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','ART','Artwork','t','t')", []).unwrap();
+        }
+        let stage = |temp: &Path, target: &Path, bytes: &[u8]| {
+            assert!(db.conn.try_lock().is_ok(), "media writes must not hold the SQLite mutex");
+            fs::write(temp, bytes).map_err(err)?;
+            fs::rename(temp, target).map_err(err)
+        };
+        let saved = add_gallery_bytes_with_stage(&db, "art", &jpeg, Some("Detail".into()), stage)
+            .unwrap();
+        assert_eq!(saved.sort_order, 1);
+        assert_eq!(saved.caption.as_deref(), Some("Detail"));
+        assert_eq!(fs::read(db.directory.join(&saved.image_path)).unwrap(), jpeg);
+        let before = fs::read_dir(db.directory.join("media")).unwrap().count();
+
+        // A deleted / unknown artwork must not leave a new file behind.
+        let missing = add_gallery_bytes_with_stage(&db, "missing", &jpeg, None, |temp, target, bytes| {
+            assert!(db.conn.try_lock().is_ok());
+            fs::write(temp, bytes).map_err(err)?;
+            fs::rename(temp, target).map_err(err)
+        });
+        assert!(missing.unwrap_err().contains("Opera non trovata"));
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), before);
+        assert_eq!(list_core(&db, "art").unwrap().len(), 1);
+
+        // Even a partial write that fails must not strand .tmp files.
+        let failed = add_gallery_bytes_with_stage(&db, "art", &jpeg, None, |temp, _, _| {
+            fs::write(temp, b"partial").map_err(err)?;
+            Err("Unità di destinazione non disponibile".into())
+        });
+        assert!(failed.unwrap_err().contains("destinazione"));
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), before);
+    }
+
     #[test]
     fn reorder_is_scoped_persistent_and_preserves_metadata() {
         let tmp = tempfile::tempdir().unwrap();
