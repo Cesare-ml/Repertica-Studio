@@ -323,8 +323,12 @@ pub async fn attach_artwork_raw(app: tauri::AppHandle, artwork_id: String, sourc
 }
 
 #[tauri::command]
-pub fn remove_artwork_raw(db: State<'_, Database>, artwork_id: String) -> Result<(), String> {
-    remove_core(&db, &artwork_id)
+pub async fn remove_artwork_raw(app: tauri::AppHandle, artwork_id: String) -> Result<(), String> {
+    // Reading and hashing a RAW can take time; never block the Tauri UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<Database>();
+        remove_core(&db, &artwork_id)
+    }).await.map_err(err)?
 }
 
 #[tauri::command]
