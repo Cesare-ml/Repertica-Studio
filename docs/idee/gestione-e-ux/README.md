@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (quarantatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **50 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (quarantaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **51 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -56,6 +56,15 @@ Aggiornato: **2026-11-22** (quarantatreesima ricognizione). Stato delle proposte
 | [REPS-UX-048](REPS-UX-048-identificativi-storici-riferimenti-esterni-opere.md) | Codici storici e identificativi usati da gallerie/archivi terzi, qualificati per fonte, ricercabili senza alterare l'UUID o il codice corrente | P2* per archivi legacy; P3 se bastano note | Proposta — da valutare |
 | [REPS-UX-049](REPS-UX-049-percorso-professionale-artista-cv-portabile.md) | Percorso professionale dell'artista: riconoscimenti, formazione e residenze per un curriculum portabile, senza duplicare mostre e bibliografie delle opere | P2* condizionata; P3 o nessuno sviluppo se basta ODT | Proposta — da valutare |
 | [REPS-UX-050](REPS-UX-050-rendiconto-mensile-snapshot-verifiche.md) | Rendiconto mensile datato con verifica delle registrazioni gestionali e possibile confronto non distruttivo fra istantanee, senza chiusura fiscale | P2 se validato; P3 o nessuno sviluppo se basta Calc | Proposta — da valutare |
+| [REPS-UX-051](REPS-UX-051-anzianita-disponibilita-opere.md) | Revisione delle opere attualmente disponibili e, solo con data di prima offerta dichiarata, tempo trascorso; mai stimare giacenza da anno di produzione o data di catalogazione | P2 se validato; P3 o nessuno sviluppo se bastano filtri/CSV | Proposta — da valutare |
+
+## Quarantaquattresima ricognizione — 22 novembre 2026 — REPS-UX-051
+
+- **[REPS-UX-051 — Opere disponibili da tempo: revisione del catalogo senza falsi tempi di giacenza](REPS-UX-051-anzianita-disponibilita-opere.md):** riesaminati `main`, `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/models.rs`, `src/app/models.ts` e `src/app/archive-filters.ts`, oltre alle **50 schede UX** precedenti e alle **46 proposte tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). L'app filtra già per `status` e anno e offre CSV. Non emerge tuttavia una data distinta di **prima effettiva disponibilità commerciale**: `created_at` misura il momento di **catalogazione**; `year` descrive l'opera, non quando è stata posta in vendita. L'opportunità è **ipotetica**, non una richiesta verificata né un bug riprodotto.
+- **Proposta:** prima provare con professionisti una **lista privata di revisione** delle opere `available` mediante filtri esistenti e CSV/LibreOffice Calc. Solo se davvero utile, valutare una data di disponibilità **facoltativa, dichiarata e qualificata dalla fonte**. Nessuna durata in assenza di data; le date parziali non diventano un numero preciso di giorni. Il tempo dalla prima data dichiarata **non** equivale a esposizione continuativa sul mercato; sospensioni/prenotazioni richiederebbero una cronologia separata, fuori fase minima.
+- **Anti-doppioni:** UX-015 verifica **presenza fisica**, UX-001/046 trattano **movimentazioni e consegne**, UX-023 il **listino**, UX-002 le **trattative** e UX-034 analizza le **vendite per caratteristiche**: non si duplicano registri, non si creano sconti e non si altera lo status. TECH-008/025 descrivono infrastrutture di filtri/export e restano intatti.
+- **Priorità ipotetica P2 solo dopo validazione** con 5–8 professionisti; **P3 o nessuno sviluppo** se bastano funzioni correnti e Calc. Offline, nessun account/cloud, backup locale in cartella scelta, lingua OS con fallback inglese, export privacy-by-default. Stato **«Proposta — da valutare»**, senza approvazione o assegnazione.
+- **Perimetro di questa ricognizione:** soltanto nuova scheda e indice Markdown in `docs/idee/gestione-e-ux/`. PR #14 esclusivamente documentale, in bozza, senza merge; nessun codice, test, workflow, dipendenza, configurazione, issue o file del filone tecnico modificato.
 
 ## Quarantatreesima ricognizione — 22 novembre 2026 — REPS-UX-050
 
