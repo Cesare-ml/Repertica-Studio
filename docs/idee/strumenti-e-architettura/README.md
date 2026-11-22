@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (venticinquesima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-22** (ventiseiesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -34,6 +34,15 @@ Data ricognizione: **2026-11-22** (venticinquesima ricognizione). Stato uniforme
 | [REPS-TECH-026](REPS-TECH-026-backup-compatti-snapshot-verificabili.md) | Studio di backup compatti **opt-in** per archivi multimediali grandi, con snapshot logici verificabili, copia integrale indipendente sempre esportabile e nessuna cancellazione implicita | P3; P2 solo con bisogno misurato | Proposta — da valutare |
 | [REPS-TECH-027](REPS-TECH-027-importazione-fotografie-heic-heif-offline.md) | Importazione facoltativa di fotografie HEIC/HEIF da smartphone con originale preservato, derivati dichiarati, sicurezza codec e funzionamento offline | P2 condizionata; P3 se workaround sufficiente | Proposta — da valutare |
 | [REPS-TECH-028](REPS-TECH-028-ricerca-testo-pdf-allegati-offline.md) | Ricerca testuale offline nei PDF già allegati agli incassi: selezione esplicita, parsing sicuro e indice locale facoltativo ed eliminabile, senza OCR automatico | P2–P3 condizionata | Proposta — da valutare |
+| [REPS-TECH-029](REPS-TECH-029-scambio-selettivo-schede-opere-archivi-indipendenti.md) | Scambio selettivo e verificabile di schede-opera e foto scelte fra archivi indipendenti; prima export/consultazione, eventuale import assistito senza sincronizzazione o trasferimenti impliciti di proprietà | P2–P3 condizionata | Proposta — da valutare |
+
+## Ventiseiesima ricognizione — 22 novembre 2026 — REPS-TECH-029
+
+- **[REPS-TECH-029 — Scambio selettivo di schede-opera fra archivi indipendenti](REPS-TECH-029-scambio-selettivo-schede-opere-archivi-indipendenti.md):** studio di un pacchetto **aperto, locale e verificabile** per consegnare solo le opere e le fotografie scelte a una galleria/archivio distinto. L'eventuale importazione in un archivio già popolato sarebbe una **fase separata** con anteprima, nuovi UUID e codici locali, senza merge o stati commerciali presunti. **P2–P3 condizionata** a bisogni reali, non approvata.
+- **Verifica su `main`:** [modelli Angular](../../../src/app/models.ts), [galleria](../../../src-tauri/src/gallery.rs), [Media Center](../../../src-tauri/src/media.rs), [RAW](../../../src-tauri/src/raw_files.rs), [backup](../../../src-tauri/src/backup.rs) e [portabilità](../../DATA-PORTABILITY.md): dati e media già locali, **12 CSV integrali** senza file, backup completo che **sostituisce** l'archivio al ripristino. Dai percorsi letti non emerge uno scambio di schede selezionate con media scelti e import non distruttivo; nessuna prova utente o runtime.
+- **Distinzione dai doppioni:** TECH-001 = portabilità completa/reimport in archivio vuoto e futuro merge generale; TECH-025 = CSV minimizzati **senza** media; TECH-013 = privacy delle copie fotografiche; TECH-004/011 = consultazione/profili senza trasferimento; TECH-019 = import CSV esterni. Le **33 schede Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), specialmente UX-001/007/012/021/031, sono state confrontate e **non modificate**.
+- **Tutele:** per default niente dati personali, ubicazioni, vendite, certificati, prezzi o foto; ogni foto richiede scelta esplicita. SHA-256 prova integrità dei file, **non** autenticità o diritti. Nessun cloud, account, sync, MCP o upload; cartella scelta liberamente; lingua di sistema/fallback inglese; ispezione sicura e controlli su conflitti e formati.
+- **Esito:** **29 schede** tutte **«Proposta — da valutare»**; solo la nuova scheda e questo indice Markdown dentro `docs/idee/strumenti-e-architettura/`. [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) lasciata aperta e in bozza, **senza merge o autorizzazione allo sviluppo**.
 
 ## Venticinquesima ricognizione — 22 novembre 2026 — REPS-TECH-028
 
