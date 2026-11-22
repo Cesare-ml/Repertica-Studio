@@ -40,14 +40,13 @@ test('text search includes metadata and related collector, case-insensitively', 
     artwork('b', { title: 'Paesaggio', support: 'Carta', location: 'MILANO', status: 'sold' })
   ];
   const indexes = buildSaleIndexes([sale('b', 'c-1', 'Paesaggio', 'Elena Verdi')]);
-  // The location field is no longer part of the interface, so it is not searched.
-  for (const term of ['carta', 'ELENA']) {
+  // Artwork location remains searchable alongside technique and buyer.
+  for (const term of ['carta', 'ELENA', 'milano']) {
     assert.deepEqual(filterArtworks(artworks, options({ query: term }), indexes)
       .map(a => a.id), ['b']);
   }
   assert.deepEqual(filterArtworks(artworks, options({ query: 'OLIO' }), indexes)
     .map(a => a.id), ['a']);
-  assert.deepEqual(filterArtworks(artworks, options({ query: 'milano' }), indexes), []);
 });
 
 test('title/year sorting is stable for missing years and does not mutate source array', () => {
@@ -261,4 +260,23 @@ test('collector search uses the archive codes of purchased artworks, never unrel
   assert.deepEqual(found('art-0042 bruno'), []);
   assert.deepEqual(found('UNSOLD-0001'), []);
   assert.deepEqual(filterCollectors(people, 'ART-0042', indexes), []); // Existing callers remain compatible.
+});
+
+test('artwork location search combines phrases with status, collector and metadata', () => {
+  const works = [
+    artwork('a', { title: 'Marea', location: 'Studio di Venezia' }),
+    artwork('b', { title: 'Marea', location: 'Deposito a Venezia', status: 'sold' }),
+    artwork('c', { title: 'Cielo', location: null })
+  ];
+  const indexes = buildSaleIndexes([sale('b', 'buyer', 'Marea', 'Élodie')]);
+  const found = (query, extra = {}) =>
+    filterArtworks(works, options({ query, ...extra }), indexes).map(a => a.id);
+
+  assert.deepEqual(found('venezia'), ['a', 'b']);
+  assert.deepEqual(found('"studio di venezia"'), ['a']);
+  assert.deepEqual(found('VENEZIA ÉLODIE'), ['b']);
+  assert.deepEqual(found('venezia', { status: 'sold' }), ['b']);
+  assert.deepEqual(found('venezia', { collectorId: 'buyer' }), ['b']);
+  assert.deepEqual(found('deposito marea'), ['b']);
+  assert.deepEqual(found('padova'), []);
 });
