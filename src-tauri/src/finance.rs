@@ -197,8 +197,11 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
     // Shares frozen on each sale, in display order of the parts.
     let mut shares:HashMap<String,Vec<(String,i64)>>=HashMap::new();
     {
+        // LEFT JOIN is intentional: an imported database may contain an orphaned
+        // frozen allocation if a third-party tool bypassed SQLite foreign keys.
+        // An inner join would silently discard its share and understate balances.
         let mut q=c.prepare("SELECT a.sale_id,a.part_id,a.share_bp FROM sale_allocations a
-            JOIN allocation_parts p ON p.id=a.part_id ORDER BY a.sale_id,p.position,p.id").map_err(error)?;
+            LEFT JOIN allocation_parts p ON p.id=a.part_id ORDER BY a.sale_id,p.position,p.id").map_err(error)?;
         let rows=q.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?))).map_err(error)?
             .collect::<Result<Vec<_>,_>>().map_err(error)?;
         for (sale,part,bp) in rows {shares.entry(sale).or_default().push((part,bp));}
@@ -230,9 +233,10 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
             }
             let amounts=crate::allocations::split(net,&frozen.iter().map(|(_,bp)|*bp).collect::<Vec<_>>());
             for ((part,_),amount) in frozen.iter().zip(amounts) {
-                if let Some(&slot)=position.get(part.as_str()) {
-                    add_cents(&mut month.parts[slot].share_cents,amount,"monthly allocation")?;
-                }
+                let slot=position.get(part.as_str()).ok_or_else(||format!(
+                    "Unknown allocation part in archived sale {sale}: {part}"
+                ))?;
+                add_cents(&mut month.parts[*slot].share_cents,amount,"monthly allocation")?;
             }
         }
     }
@@ -246,8 +250,11 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
         let index=date[5..7].parse::<usize>().map_err(error)?-1;
         let month=&mut months[index];
         add_cents(&mut month.expense_cents,amount,"monthly expenses")?;
-        if let Some(&slot)=fund.as_deref().and_then(|f|position.get(f)) {
-            add_cents(&mut month.parts[slot].expense_cents,amount,"monthly allocated expenses")?;
+        if let Some(fund)=fund.as_deref() {
+            let slot=position.get(fund).ok_or_else(||format!(
+                "Unknown expense fund in archived record ({date}): {fund}"
+            ))?;
+            add_cents(&mut month.parts[*slot].expense_cents,amount,"monthly allocated expenses")?;
         }
     }
     let mut summary=FinanceOverview{year,months,gross_cents:0,net_cents:0,expense_cents:0,margin_cents:0,
@@ -424,6 +431,43 @@ mod tests{
             VALUES('e','2026-02-31','materials','Paint',500,'t','t')",[]).unwrap();
         assert!(finance_overview_core(&c,2026).err().unwrap().contains("Invalid expense date"));
     }
+    #[test]
+    fn imported_orphaned_allocation_and_expense_funds_are_not_silently_ignored(){
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().to_owned()).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        sale(&mut c,"s",10_000,"2026-04-11",0,0);
+        assert_eq!(finance_overview_core(&c,2026).unwrap().net_cents,10_000);
+
+        // Simulate an externally edited SQLite archive with foreign keys disabled.
+        // Frozen shares still sum to 100%, so aggregate-only checks miss this.
+        c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        c.execute("UPDATE sale_allocations SET part_id='missing-part'
+            WHERE sale_id='s' AND part_id='savings'",[]).unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let message=finance_overview_core(&c,2026).err().expect("corrupt archive must fail");
+        assert!(message.contains("Unknown allocation part"), "{message}");
+        assert!(message.contains("missing-part"), "{message}");
+
+        c.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        c.execute("UPDATE sale_allocations SET part_id='savings'
+            WHERE sale_id='s' AND part_id='missing-part'",[]).unwrap();
+        c.execute("INSERT INTO expenses
+            (id,expense_date,category,description,amount_cents,fund,created_at,updated_at)
+            VALUES('e','2026-04-12','materials','Paint',500,'missing-fund','t','t')",[]).unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let message=finance_overview_core(&c,2026).err().expect("corrupt archive must fail");
+        assert!(message.contains("Unknown expense fund"), "{message}");
+        assert!(message.contains("missing-fund"), "{message}");
+
+        // An intentionally unallocated expense is valid and remains in the total.
+        c.execute("UPDATE expenses SET fund=NULL WHERE id='e'",[]).unwrap();
+        let overview=finance_overview_core(&c,2026).unwrap();
+        assert_eq!((overview.net_cents,overview.expense_cents,overview.margin_cents),
+            (10_000,500,9_500));
+        assert_eq!(overview.parts.iter().map(|p|p.expense_cents).sum::<i64>(),0);
+    }
+
     #[test]
     fn migration_moves_historical_shares_and_expense_funds_into_the_new_model(){
         let dir=tempfile::tempdir().unwrap();
