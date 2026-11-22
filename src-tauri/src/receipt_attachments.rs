@@ -427,14 +427,14 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db = crate::db::open(tmp.path().join("active")).unwrap();
         setup(&db);
-        let original = b"%PDF-1.7\\nproof-A";
+        let original = b"%PDF-1.7\nproof-A";
         let source = tmp.path().join("proof.pdf");
         fs::write(&source, original).unwrap();
         let attachment = attach_core(&db, "r", &source).unwrap();
         let stored = db.directory.join(&attachment.media_path);
 
         // Same size and same PDF signature: only the SHA-256 detects this edit.
-        fs::write(&stored, b"%PDF-1.7\\nproof-B").unwrap();
+        fs::write(&stored, b"%PDF-1.7\nproof-B").unwrap();
         let error = detach_core(&db, "r").unwrap_err();
         assert!(error.contains("SHA-256"), "{error}");
         assert!(get_core(&db, "r").unwrap().is_some(), "retain DB reference on mismatch");
@@ -453,18 +453,18 @@ mod tests {
         let db = crate::db::open(tmp.path().join("active")).unwrap();
         setup(&db);
         let source = tmp.path().join("proof.pdf");
-        fs::write(&source, b"%PDF-1.7\\nproof").unwrap();
+        fs::write(&source, b"%PDF-1.7\nproof").unwrap();
         let attachment = attach_core(&db, "r", &source).unwrap();
         let stored = db.directory.join(&attachment.media_path);
         fs::remove_file(&stored).unwrap();
         let external = tmp.path().join("external.pdf");
-        fs::write(&external, b"%PDF-1.7\\nproof").unwrap();
+        fs::write(&external, b"%PDF-1.7\nproof").unwrap();
         std::os::unix::fs::symlink(&external, &stored).unwrap();
 
         assert!(detach_core(&db, "r").is_err());
         assert!(get_core(&db, "r").unwrap().is_some());
         assert!(fs::symlink_metadata(&stored).unwrap().file_type().is_symlink());
-        assert_eq!(fs::read(&external).unwrap(), b"%PDF-1.7\\nproof");
+        assert_eq!(fs::read(&external).unwrap(), b"%PDF-1.7\nproof");
     }
 
     #[test]
@@ -473,7 +473,7 @@ mod tests {
         let db = crate::db::open(tmp.path().join("active")).unwrap();
         setup(&db);
         let source = tmp.path().join("proof.pdf");
-        fs::write(&source, b"%PDF-1.7\\nproof").unwrap();
+        fs::write(&source, b"%PDF-1.7\nproof").unwrap();
         let attachment = attach_core(&db, "r", &source).unwrap();
         let stored = db.directory.join(&attachment.media_path);
         fs::remove_file(&stored).unwrap();
