@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **41 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **42 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -47,6 +47,13 @@ Data ricognizione: **2026-11-22** (trentottesima ricognizione). Stato uniforme: 
 | [REPS-TECH-039](REPS-TECH-039-salvataggio-selettivo-email-eml-portabile.md) | Corrispondenza IMAP: esportazione su richiesta di un messaggio MIME integro in EML aperto, con sicurezza del file, identità UIDVALIDITY e avviso esplicito che il backup non include export esterni | P2–P3 condizionata al bisogno | Proposta — da valutare |
 | [REPS-TECH-040](REPS-TECH-040-scambio-contatti-vcard-offline.md) | Interoperabilità rubrica: esportazione selettiva dei recapiti dei collezionisti in vCard aperto, senza cloud o dati commerciali; import soltanto eventuale e con conflitti espliciti | P2–P3 condizionata al bisogno | Proposta — da valutare |
 | [REPS-TECH-041](REPS-TECH-041-checklist-identificazione-object-id-offline.md) | Checklist di identificazione delle opere secondo le nove categorie Object ID (ICOM): verifica delle lacune, eventuale scheda locale con immagini scelte e privacy prudente; nessuna attestazione automatica | P2 se bisogno documentato; P3 se basta modello esterno | Proposta — da valutare |
+| [REPS-TECH-042](REPS-TECH-042-compatibilita-aggiornamenti-recupero-versione-offline.md) | Aggiornamenti: contratto di compatibilità fra versione software e schema SQLite, procedura di recupero offline senza downgrade automatico dei dati né falso rollback dell'installer | P1–P2 (QA/release), P2–P3 (guida eventuale) | Proposta — da valutare |
+
+## Trentanovesima ricognizione — 22 novembre 2026 — REPS-TECH-042
+
+- **[REPS-TECH-042 — Compatibilità degli aggiornamenti e recupero offline della versione applicativa](REPS-TECH-042-compatibilita-aggiornamenti-recupero-versione-offline.md):** riesaminati `main`, [updater.rs](../../../src-tauri/src/updater.rs), [db.rs](../../../src-tauri/src/db.rs) (schema 18), [lib.rs](../../../src-tauri/src/lib.rs), [RELEASING](../../RELEASING.md), [MVP](../../MVP.md), i **41 studi tecnici precedenti** e le **46 proposte Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il download firmato e l'installazione sono già previsti: lo studio riguarda la **continuità fra versioni dell'app e del database**, non un nuovo updater. In assenza di backup automatico configurato, il percorso esistente non produce una copia preventiva durante l'installazione; un vecchio programma rifiuta schemi SQLite successivi. Non è stata riprodotta alcuna perdita dati.
+- **Confini anti-doppioni:** [TECH-012](REPS-TECH-012-migrazioni-archivio-preflight-copia-sicurezza.md) tratta il checkpoint **dei dati prima della migrazione**, [TECH-037](REPS-TECH-037-recupero-ripristino-interrotto-avvio-protetto.md) il recupero **da restore interrotto**, [TECH-009](REPS-TECH-009-catalogo-verifiche-conservazione-backup.md) il catalogo delle copie. Qui si studiano **matrice di compatibilità release/schema, disponibilità di installer ufficiali offline e istruzioni verificabili**: nessuna migrazione all'indietro, rollback automatico dei dati o installer parallelo.
+- **Alternativa minima preferita:** guida locale e matrice release/schema collaudate su installatori firmati; eventuale recupero guidato soltanto dopo richiesta dimostrata. **Priorità ipotetica P1–P2** per controlli di release, **P2–P3** per una UI di recupero. Modificati esclusivamente nuova scheda e indice Markdown di questa cartella, senza codice né altri documenti. Nessuna proposta approvata, assegnata o implementata. [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta in bozza senza merge.
 
 ## Trentottesima ricognizione — 22 novembre 2026 — REPS-TECH-041
 
