@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (ventinovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **36 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **37 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -42,6 +42,15 @@ Aggiornato: **2026-11-22** (ventinovesima ricognizione). Stato delle proposte: *
 | [REPS-UX-034](REPS-UX-034-analisi-vendite-caratteristiche-opere.md) | Analisi aggregata delle **vendite registrate** per tecnica, supporto o anno delle opere: gruppi con metadati mancanti, definizioni verificabili e nessuna inferenza su incassi, utili o classificazioni storiche | P2* (P3 se bastano CSV; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-035](REPS-UX-035-preferenze-contatto-comunicazioni-individuali.md) | Preferenze di contatto dichiarate e avvisi contestuali per le comunicazioni individuali ai collezionisti, distinguendo inviti promozionali e comunicazioni su vendite senza presunzioni di consenso | P2*; P3 se bastano note/etichette | Proposta — da valutare |
 | [REPS-UX-036](REPS-UX-036-misure-opere-non-rettangolari.md) | Misure speciali dichiarate (diametro, ingombro, dimensioni variabili), senza alterare campi cm o stime rettangolari; prima valutare nota facoltativa | P2* (P3 se bastano note) | Proposta — da valutare |
+| [REPS-UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) | Scadenze di uscite ricorrenti (affitto studio, assicurazioni, canoni) **distinte dalle spese effettivamente registrate**; prima validare promemoria semplice, senza generare movimenti | P2* (P3 se basta calendario esterno) | Proposta — da valutare |
+
+## Trentesima ricognizione — 22 novembre 2026 — REPS-UX-037
+
+- **[REPS-UX-037 — Scadenze delle spese ricorrenti, senza registrazioni presunte](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md):** proposta per artisti e piccoli studi con affitti, assicurazioni, depositi o canoni periodici. L'utente può vedere **obbligazioni future dichiarate** e, solo con conferma esplicita, preparare o collegare una **spesa realmente registrata**. La data prevista non crea una spesa, non prova un pagamento e non modifica margini, quote o vendite. Prima alternativa: **elenco minimale di promemoria**, e persino calendario esterno se il bisogno è modesto. **Priorità solo ipotetica P2/P3**.
+- **Riscontro su `main` del 22/11/2026:** [`finance.rs`](../../../src-tauri/src/finance.rs) e [`ECONOMY-I18N.md`](../../ECONOMY-I18N.md) registrano spese in centesimi, con data/categoria/fornitore e dashboard consuntive per mese; [`DATA-PORTABILITY.md`](../../DATA-PORTABILITY.md) documenta l'export `expenses`, non un registro di impegni futuri ricorrenti. Nei file esaminati non emerge il dominio delle scadenze periodiche in uscita. Non è stato eseguito un test desktop né intervistato un utente: opportunità da verificare, **non bug accertato**.
+- **Anti-doppione:** UX-032 = *obiettivo complessivo di budget per categoria/mese*, UX-024 = *scadenze di incasso sulle vendite*, UX-028 = *giustificativi di spese annotate*, UX-030 = *confronto bancario manuale*. Nel filone tecnico [TECH-002 — Automazioni locali](https://github.com/Cesare-ml/Repertica-Studio/blob/docs/idee-strumenti-architettura-20261121/docs/idee/strumenti-e-architettura/REPS-TECH-002-automazioni-locali-consapevoli.md) è uno studio di motore genericamente autorizzato, **non richiesto** per promemoria e collegamenti manuali di questa proposta. Confrontate le 32 idee della [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16); **nessun file tecnico modificato**.
+- **Cautele:** separazione visibile tra *previsto*, *registrato* e *pagato non verificabile*; niente scritture schedulate, addebiti, email o notifiche nascoste, né generazione arretrati dopo backup/ripristino. Calendario civile con casi 29/30/31, annullamenti e cambi di importo senza riscrivere lo storico. Offline, dati locali e backup a cartella scelta, esportazione eventuale separata dai dodici CSV esistenti, UI accessibile, lingua OS con fallback inglese.
+- **Esito:** **37 proposte**, tutte **«Proposta — da valutare»**. Aggiunta una scheda e aggiornato solo questo indice Markdown nella cartella Gestione e UX; [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) aperta, in bozza e senza merge. Nessuna approvazione, implementazione, issue operativa o modifica a codice e configurazioni.
 
 ## Ventinovesima ricognizione — 22 novembre 2026 — REPS-UX-036
 
