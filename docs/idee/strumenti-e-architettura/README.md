@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **39 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **40 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -45,6 +45,15 @@ Data ricognizione: **2026-11-22** (trentaseiesima ricognizione). Stato uniforme:
 | [REPS-TECH-037](REPS-TECH-037-recupero-ripristino-interrotto-avvio-protetto.md) | Ripristino interrotto: avvio protetto e recupero assistito di rollback e archivi precedenti, senza inizializzazione o scelta implicita | P1–P2 condizionata (guardia); P2–P3 modalità guidata | Proposta — da valutare |
 | [REPS-TECH-038](REPS-TECH-038-staging-media-backup-concorrenza-snapshot.md) | Media preparati fuori dal lock SQLite: studio della coerenza tra importazioni concorrenti e backup integrali, senza perdere gli orfani storici | P1–P2 solo se il rischio è riproducibile; altrimenti P3 | Proposta — da valutare |
 | [REPS-TECH-039](REPS-TECH-039-salvataggio-selettivo-email-eml-portabile.md) | Corrispondenza IMAP: esportazione su richiesta di un messaggio MIME integro in EML aperto, con sicurezza del file, identità UIDVALIDITY e avviso esplicito che il backup non include export esterni | P2–P3 condizionata al bisogno | Proposta — da valutare |
+| [REPS-TECH-040](REPS-TECH-040-scambio-contatti-vcard-offline.md) | Interoperabilità rubrica: esportazione selettiva dei recapiti dei collezionisti in vCard aperto, senza cloud o dati commerciali; import soltanto eventuale e con conflitti espliciti | P2–P3 condizionata al bisogno | Proposta — da valutare |
+
+## Trentasettesima ricognizione — 22 novembre 2026 — REPS-TECH-040
+
+- **[REPS-TECH-040 — Rubrica portabile, esportazione selettiva vCard dei collezionisti](REPS-TECH-040-scambio-contatti-vcard-offline.md):** esaminati `main`, [`collectors.rs`](../../../src-tauri/src/collectors.rs), [`export.rs`](../../../src-tauri/src/export.rs), [`DATA-PORTABILITY.md`](../../DATA-PORTABILITY.md), [`MCP.md`](../../MCP.md) e gli indici delle **39 proposte tecniche precedenti** e delle **44 idee Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il registro dei collezionisti possiede già nome, email, telefono, indirizzo libero, profili social e dati più riservati; i CSV esistenti li esportano integralmente, ma non emerge un formato standard `.vcf` per trasferire **soli recapiti deliberatamente scelti** a rubriche esterne. Opportunità di interoperabilità, **non** difetto o bisogno convalidato da utenti.
+- **Proposta circoscritta:** esportazione manuale di **un contatto per volta** nella prima fase, eventuale selezione multipla esplicita poi; anteprima dei campi, esclusione di note, nascita, fotografie, vendite, quote, preferenze e UUID interni. vCard 4.0 (RFC 6350) con UTF-8, CRLF, escaping e folding corretti da verificare con client reali; v3 solo se supportata da prove. Indirizzi testuali e profili social **non** sono convertiti in dati strutturati o URL inventati.
+- **Anti-doppioni:** TECH-001 è portabilità integrale del database; TECH-019 import CSV tabellare; TECH-025 CSV selettivi; TECH-039 esportazione EML di email ricevute. UX-014 riguarda un'eventuale rubrica relazionale e UX-035 le preferenze dichiarate di contatto: **nessuna** delle due è un trasferimento vCard. Nessun file della PR UX modificato. Nessuna sincronizzazione CardDAV/cloud, campagne o invii automatici; MCP continua a non esporre recapiti.
+- **Guardrail:** solo file locale fuori dall'archivio attivo, senza sovrascrivere, con avviso che il `.vcf` esterno **non entra automaticamente nei backup**. Un import vCard richiederebbe progetto separato con preflight, decisioni sui duplicati e nessun merge silenzioso. **P2–P3 soltanto ipotetica**, preceduta da raccolta di casi reali e confronto con l'alternativa CSV. UI lingua OS/fallback inglese, accessibilità, dati locali e backup completi invariati.
+- **Esito:** **40 schede**, tutte **«Proposta — da valutare»**. Solo nuova scheda e questo indice Markdown in `docs/idee/strumenti-e-architettura/`; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) aperta e in bozza, senza merge, approvazioni, assegnazioni o sviluppo.
 
 ## Trentaseiesima ricognizione — 22 novembre 2026 — REPS-TECH-039
 
