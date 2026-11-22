@@ -180,9 +180,18 @@ pub fn save_core(db: &Database, input: ScheduleInput, now: NaiveDateTime) -> Res
 /// Entries in other directories (e.g. an old external disk) and invalid/tampered
 /// entries must not count toward the quota or cause legitimate copies to be deleted.
 fn apply_retention(db: &Database, destination: &Path, keep: i64) -> Result<(), String> {
+    apply_retention_with(db, destination, keep, |path| backup::inspect_backup_core(path).is_ok())
+}
+
+// Inspecting an entire backup can hash gigabytes on an external drive or NAS.
+// The SQLite mutex is needed to read the log and prune its rows, but must not
+// remain locked during that potentially slow disk scan.
+fn apply_retention_with(
+    db: &Database, destination: &Path, keep: i64, mut verified: impl FnMut(&Path) -> bool,
+) -> Result<(), String> {
     if keep <= 0 { return Ok(()); }
-    let conn = db.conn.lock().map_err(err)?;
     let entries: Vec<(String, String)> = {
+        let conn = db.conn.lock().map_err(err)?;
         let mut statement = conn.prepare("SELECT directory,created_at FROM auto_backup_log ORDER BY created_at DESC,directory DESC").map_err(err)?;
         let rows = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?
             .collect::<Result<Vec<_>, _>>().map_err(err)?;
@@ -209,12 +218,23 @@ fn apply_retention(db: &Database, destination: &Path, keep: i64) -> Result<(), S
         // files: otherwise a damaged recent copy could evict the last valid one.
         if name_ok && plain_directory && directly_inside
             && regular_file("manifest.json") && regular_file("repertica.sqlite")
-            && backup::inspect_backup_core(path).is_ok() {
+            && verified(path) {
             Some(directory)
         } else {
             None // Keep suspicious, damaged and unavailable copies untouched.
         }
     }).collect();
+    // The artist may change the destination or quota while verification runs.
+    // Check again under the lock before removing any files, so stale settings
+    // cannot prune backups after retention has been disabled or expanded.
+    let conn = db.conn.lock().map_err(err)?;
+    let (current_destination, current_keep): (Option<String>, i64) = conn.query_row(
+        "SELECT destination,keep_last FROM backup_schedule WHERE singleton=1", [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(err)?;
+    if current_keep != keep || current_destination.as_deref().map(Path::new) != Some(destination) {
+        return Ok(());
+    }
     for directory in eligible.into_iter().skip(keep as usize) {
         if fs::remove_dir_all(&directory).is_err() { continue; }
         conn.execute("DELETE FROM auto_backup_log WHERE directory=?1", params![directory]).map_err(err)?;
@@ -550,6 +570,32 @@ mod tests {
         assert!(!Path::new(&oldest_valid).exists(), "oldest verified copy may be pruned");
         assert!(Path::new(&next).is_dir() && Path::new(&newest).is_dir(),
             "the two newest verified copies must be preserved");
+    }
+
+    #[test]
+    fn retention_rechecks_settings_after_verifying_backups_without_locking_sqlite() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-10 08:00")).unwrap();
+        let first = run_core(&db, at("2026-11-11 09:00")).unwrap().last_directory.unwrap();
+        let second = run_core(&db, at("2026-11-12 09:00")).unwrap().last_directory.unwrap();
+        save_core(&db, input(&destination, 1), at("2026-11-12 11:00")).unwrap();
+
+        let mut changed = false;
+        apply_retention_with(&db, &destination, 1, |path| {
+            // try_lock avoids a hanging test if a future refactor holds the
+            // archive mutex while hashing the external backup contents.
+            let conn = db.conn.try_lock().expect("SQLite should be unlocked during backup inspection");
+            if !changed {
+                conn.execute("UPDATE backup_schedule SET keep_last=0 WHERE singleton=1", []).unwrap();
+                changed = true;
+            }
+            drop(conn);
+            backup::inspect_backup_core(path).is_ok()
+        }).unwrap();
+
+        assert!(changed, "the verified backup scanner must run");
+        assert!(Path::new(&first).is_dir() && Path::new(&second).is_dir(),
+            "disabling retention during an external-disk scan must preserve all backups");
     }
 
     #[test]
