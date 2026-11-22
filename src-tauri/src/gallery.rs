@@ -99,7 +99,7 @@ fn add_gallery_bytes(db: &Database, artwork_id: &str, bytes: &[u8], caption: Opt
     let (ext, _) = mime(bytes).ok_or("Sono consentite solo immagini JPEG, PNG o WebP")?;
     let caption = normalize_caption(caption)?;
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
+    let mut conn = db.conn.lock().map_err(err)?;
     let count: i64 = conn.query_row("SELECT count(*) FROM artwork_images WHERE artwork_id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
     if count >= 20 { return Err("Massimo 20 fotografie aggiuntive per opera".into()); }
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)", params![artwork_id], |r| r.get(0)).map_err(err)?;
