@@ -14,6 +14,15 @@ const MAX_PARTS: usize = 12;
 
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 
+// SQLite may silently skip writes when an externally imported database defines
+// a BEFORE INSERT/UPDATE/DELETE trigger with RAISE(IGNORE). Treat that as an
+// error so the transaction rolls back instead of reporting a partial plan save.
+fn require_plan_write(rows: usize, operation: &str) -> Result<(), String> {
+    if rows == 1 { Ok(()) } else {
+        Err(format!("SQLite did not apply the allocation plan change ({operation}); reload the settings and retry"))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Part {
     pub id: String,
@@ -33,7 +42,7 @@ pub struct PartInput {
     pub pays_expenses: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Plan {
     pub enabled: bool,
     /// Active parts in display order.
@@ -139,12 +148,13 @@ pub fn save_plan_core(db: &Database, input: PlanInput) -> Result<Plan, String> {
             None => Uuid::new_v4().to_string(),
         };
         // Parts of a disabled plan are stored too, so the artist's configuration is never lost.
-        tx.execute(
+        let changed = tx.execute(
             "INSERT INTO allocation_parts(id,name,share_bp,pays_expenses,position,active) VALUES(?1,?2,?3,?4,?5,1)
              ON CONFLICT(id) DO UPDATE SET name=excluded.name,share_bp=excluded.share_bp,
                 pays_expenses=excluded.pays_expenses,position=excluded.position,active=1",
             params![id, name, part.share_bp, i64::from(part.pays_expenses), position as i64 + 1],
         ).map_err(err)?;
+        require_plan_write(changed, "save part")?;
         kept.push(id);
     }
     for id in existing.iter().filter(|id| !kept.contains(id)) {
@@ -153,12 +163,15 @@ pub fn save_plan_core(db: &Database, input: PlanInput) -> Result<Plan, String> {
             params![id], |r| r.get(0)).map_err(err)?;
         if used {
             // History keeps pointing at the part; it just stops being offered.
-            tx.execute("UPDATE allocation_parts SET active=0 WHERE id=?1", params![id]).map_err(err)?;
+            let changed = tx.execute("UPDATE allocation_parts SET active=0 WHERE id=?1", params![id]).map_err(err)?;
+            require_plan_write(changed, "deactivate historical part")?;
         } else {
-            tx.execute("DELETE FROM allocation_parts WHERE id=?1", params![id]).map_err(err)?;
+            let changed = tx.execute("DELETE FROM allocation_parts WHERE id=?1", params![id]).map_err(err)?;
+            require_plan_write(changed, "remove unused part")?;
         }
     }
-    tx.execute("UPDATE allocation_settings SET enabled=?1 WHERE singleton=1", params![i64::from(input.enabled)]).map_err(err)?;
+    let changed = tx.execute("UPDATE allocation_settings SET enabled=?1 WHERE singleton=1", params![i64::from(input.enabled)]).map_err(err)?;
+    require_plan_write(changed, "save enabled state")?;
     let plan = load_plan(&tx)?;
     tx.commit().map_err(err)?;
     Ok(plan)
@@ -300,6 +313,75 @@ mod tests {
         drop(tx);
         let count: i64 = c.query_row("SELECT COUNT(*) FROM sale_finances WHERE sale_id='s'", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn ignored_part_updates_are_rejected_without_changing_the_saved_plan() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        let edited = || PlanInput {
+            enabled: true,
+            parts: before.parts.iter().map(|p| PartInput {
+                id: Some(p.id.clone()),
+                name: if p.id == "personal" { "Nuovo nome".into() } else { p.name.clone() },
+                share_bp: p.share_bp,
+                pays_expenses: p.pays_expenses,
+            }).collect(),
+        };
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("CREATE TRIGGER ignore_part_edit BEFORE UPDATE ON allocation_parts
+                WHEN OLD.id='personal' BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("SQLite did not apply"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER ignore_part_edit").unwrap();
+        let updated = save_plan_core(&db, edited()).unwrap();
+        assert_eq!(updated.parts[0].name, "Nuovo nome");
+    }
+
+    #[test]
+    fn ignored_settings_update_rolls_back_earlier_part_changes() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        let edited = || PlanInput {
+            enabled: false,
+            parts: before.parts.iter().map(|p| PartInput {
+                id: Some(p.id.clone()),
+                name: format!("Modificato {}", p.name),
+                share_bp: p.share_bp,
+                pays_expenses: p.pays_expenses,
+            }).collect(),
+        };
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_plan_setting BEFORE UPDATE ON allocation_settings
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("save enabled state"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before,
+            "both the enabled flag and the earlier part changes must roll back");
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER ignore_plan_setting").unwrap();
+        let updated = save_plan_core(&db, edited()).unwrap();
+        assert!(!updated.enabled);
+        assert!(updated.parts[0].name.starts_with("Modificato"));
+    }
+
+    #[test]
+    fn silently_ignored_new_part_does_not_delete_the_old_configuration() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_new_part BEFORE INSERT ON allocation_parts
+             WHEN NEW.name='Nuovo' BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        let message = save_plan_core(&db, PlanInput {
+            enabled: true,
+            parts: vec![part("Nuovo", 10_000, true)],
+        }).unwrap_err();
+        assert!(message.contains("save part"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before);
     }
 
     #[test]
