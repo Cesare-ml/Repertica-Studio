@@ -2,7 +2,7 @@
 //! CSV exports are for inspection/analysis, NOT a restore format or verified cash receipts.
 //! All money is exported as integer cents to avoid rounding or locale ambiguity.
 use crate::db::Database;
-use rusqlite::{types::ValueRef, Connection};
+use rusqlite::{types::ValueRef, Connection, OptionalExtension};
 use std::{fs::{self, OpenOptions}, io::Write, path::Path};
 use tauri::State;
 
@@ -21,6 +21,36 @@ fn append_text_cell(output: &mut String, value: &str) {
         output.push(ch);
     }
     output.push('"');
+}
+
+// CSV must not silently lose records when foreign keys were disabled during
+// an external SQLite import. INNER JOIN would otherwise omit orphaned rows.
+fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String> {
+    let broken: Option<(String, Option<i64>, String)> = conn.query_row(
+        "SELECT \"table\", rowid, parent FROM pragma_foreign_key_check LIMIT 1",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).optional().map_err(error)?;
+    if let Some((table, rowid, parent)) = broken {
+        return Err(format!(
+            "Esportazione annullata: relazione SQLite non valida nella tabella {table} (riga {rowid:?}, riferimento a {parent}). Verifica o ripristina l'archivio prima di esportare."
+        ));
+    }
+    // Missing dependent sale_finances rows do not violate foreign keys. Do not
+    // use COALESCE to invent taxes and shipping in financial exports.
+    if matches!(kind, "sales" | "allocations") {
+        let missing_sale: Option<String> = conn.query_row(
+            "SELECT s.id FROM sales s WHERE NOT EXISTS
+                (SELECT 1 FROM sale_finances f WHERE f.sale_id=s.id)
+             ORDER BY s.id LIMIT 1",
+            [], |row| row.get(0)
+        ).optional().map_err(error)?;
+        if let Some(id) = missing_sale {
+            return Err(format!(
+                "Esportazione annullata: dati finanziari mancanti per la vendita {id}. Nessuna imposta o spedizione è stata stimata."
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
@@ -132,6 +162,7 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
         ),
         _ => return Err("Tipo di registro CSV non riconosciuto".into()),
     };
+    validate_export_relations(conn, kind)?;
     let mut out = String::from("\u{feff}"); // UTF-8 BOM for Excel
     out.push_str(header);
     out.push_str("\r\n");
@@ -201,6 +232,59 @@ mod tests {
     use super::*;
     use crate::db;
 
+
+    #[test]
+    fn csv_rejects_orphaned_sale_instead_of_omitting_it_from_joined_registers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            // Simulate third-party SQLite changes made with FK checks disabled.
+            conn.execute_batch(r#"
+                PRAGMA foreign_keys=OFF;
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','A-1','Opera','t','t');
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','missing-collector',4200,'2026-11-01','t');
+                PRAGMA foreign_keys=ON;
+            "#).unwrap();
+            let failure = render_csv(&conn, "balances").unwrap_err();
+            assert!(failure.contains("relazione SQLite non valida"), "{failure}");
+        }
+        let output = dir.path().join("balances.csv");
+        assert!(export_file(&db, "balances", &output).is_err());
+        assert!(!output.exists(), "do not create a misleading partial CSV");
+        let conn = db.conn.lock().unwrap();
+        conn.execute("INSERT INTO collectors(id,name,created_at,updated_at)
+            VALUES('missing-collector','Anna','t','t')", []).unwrap();
+        let restored = render_csv(&conn, "balances").unwrap();
+        assert!(restored.contains("\"s\";\"2026-11-01\";\"a\";"), "{restored}");
+    }
+
+    #[test]
+    fn financial_csv_does_not_invent_zero_taxes_when_sale_finances_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A-1','Opera','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Anna','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',4200,'2026-11-01','t');
+        "#).unwrap();
+        for kind in ["sales", "allocations"] {
+            let failure = render_csv(&conn, kind).unwrap_err();
+            assert!(failure.contains("vendita s"), "{kind}: {failure}");
+        }
+        // Genuine zero tax/shipping values are allowed once the row exists.
+        conn.execute("INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+            VALUES('s',3334,3333,3333)", []).unwrap();
+        assert!(render_csv(&conn, "sales").unwrap().contains(";4200;0;0;4200;"));
+        assert!(render_csv(&conn, "allocations").is_ok());
+    }
+
     #[test]
     fn receipts_csv_is_distinct_from_sales_and_preserves_references_and_exact_cents() {
         let dir = tempfile::tempdir().unwrap();
@@ -217,6 +301,9 @@ mod tests {
         conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,reference,created_at)
             VALUES('r2','sale','2026-11-12',2001,'cash','cash-02','t')", []).unwrap();
 
+        // Finance metadata must also exist for this test's sales export.
+        conn.execute("INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+            VALUES('sale',3334,3333,3333)", []).unwrap();
         let csv = render_csv(&conn, "receipts").unwrap();
         assert!(csv.starts_with("\u{feff}receipt_id;sale_id;received_at;artwork_id;"));
         assert!(csv.contains("\"r1\";\"sale\";\"2026-11-10\";\"art\";\"ART-1\";\"Landscape\";\"buyer\";\"Client\";1500;\"EUR\";\"bank_transfer\";\"'  =2+3\";\"comment;line\";"));
