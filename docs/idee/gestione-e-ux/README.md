@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentaduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **39 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **40 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -45,6 +45,14 @@ Aggiornato: **2026-11-22** (trentaduesima ricognizione). Stato delle proposte: *
 | [REPS-UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) | Scadenze di uscite ricorrenti (affitto studio, assicurazioni, canoni) **distinte dalle spese effettivamente registrate**; prima validare promemoria semplice, senza generare movimenti | P2* (P3 se basta calendario esterno) | Proposta — da valutare |
 | [REPS-UX-038](REPS-UX-038-interessi-dichiarati-collezionisti-richieste-opere.md) | Interessi **dichiarati**, non inferiti: richieste di opere simili o caratteristiche desiderate; nessuna riserva, vendita, profilazione o consenso alle comunicazioni | P2* (P3 se bastano note) | Proposta — da valutare |
 | [REPS-UX-039](REPS-UX-039-ripartizione-informativa-incassi-dichiarati.md) | Vista informativa delle **quote per fondo sugli incassi manualmente dichiarati**, distinta dalle quote sul venduto e senza affermare liquidità effettivamente disponibile | P1–P2* per vendite rateali; P3 se bastano avvisi | Proposta — da valutare |
+| [REPS-UX-040](REPS-UX-040-rimborsi-rettifiche-spese-acquisti.md) | Rimborsi, note di credito e rettifiche dichiarate collegate alle spese, senza cancellare l'acquisto né inventare incassi | P2* (P3 se bastano note; P1–P2 solo dopo validazione) | Proposta — da valutare |
+
+## Trentatreesima ricognizione — 22 novembre 2026 — REPS-UX-040
+
+- **[REPS-UX-040 — Rimborsi e rettifiche delle spese](REPS-UX-040-rimborsi-rettifiche-spese-acquisti.md):** `main` mantiene le spese come righe con importo positivo, modificabili/cancellabili, e ne somma gli importi nei rendiconti. Non emerge un registro collegato per rimborsi parziali di materiali o servizi, note di credito attese e buoni acquisto. La proposta preserva la spesa originale, separa rimborsi **dichiarati ricevuti** da importi solo attesi o crediti non monetari, e chiarisce date e limiti dei riepiloghi: **nessun flusso bancario o movimento automatico**. È un bisogno professionale plausibile, non validato con utenti né osservato come bug in uso.
+- **Anti-doppioni:** UX-013 tratta i resi **delle vendite**, UX-028 i documenti delle **spese**, UX-030 la quadratura con estratti conti, UX-033 entrate **extra-vendita**, UX-037 spese **ricorrenti future**. TECH-001/018/019/025 (PR tecnica #16) studiano strumenti di scambio dati, non la semantica dei rimborsi. Nessun file dell'altro filone modificato.
+- **Alternativa iniziale:** usare solo note e lasciare invariati i report, oppure campo singolo se resi rarissimi; evitare di introdurre un registro complesso senza necessità. Priorità **P2 esclusivamente ipotetica**, riducibile a P3. Distinti requisiti certi, ipotesi e domande al proprietario.
+- **Esito:** **40 schede** tutte «Proposta — da valutare». Una sola scheda e indice Markdown sotto `docs/idee/gestione-e-ux/`; PR #14 mantenuta aperta e in bozza senza merge, nessuna approvazione, assegnazione, modifica al codice o autorizzazione allo sviluppo.
 
 ## Trentaduesima ricognizione — 22 novembre 2026 — REPS-UX-039
 
