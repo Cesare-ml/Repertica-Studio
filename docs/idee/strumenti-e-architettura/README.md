@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentesima ricognizione). Stato uniforme: **Proposta — da valutare**. **33 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **34 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -39,6 +39,15 @@ Data ricognizione: **2026-11-22** (trentesima ricognizione). Stato uniforme: **P
 | [REPS-TECH-031](REPS-TECH-031-allegati-bozze-posta-ripristinabili.md) | Bozze della posta: preflight dei riferimenti esterni e studio di copie locali gestite, verificabili e ripristinabili; invio sempre manuale | P2 condizionata | Proposta — da valutare |
 | [REPS-TECH-032](REPS-TECH-032-pdf-brochure-unicode-font-incorporati-offline.md) | Brochure PDF offline: preservazione di nomi/testi Unicode, diagnostica dei glifi non rappresentabili, font incorporabili con licenze verificate e impaginazione misurata; senza toccare il contenuto delle opere | P1–P2 condizionata | Proposta — da valutare |
 | [REPS-TECH-033](REPS-TECH-033-salvataggio-condizionale-schede-obsolete.md) | Salvataggio condizionale di schede obsolete: impedire sovrascritture silenziose di opere e collezionisti; senza cronologia obbligatoria o cloud | P1–P2 condizionata | Proposta — da valutare |
+| [REPS-TECH-034](REPS-TECH-034-esportazione-brochure-pdf-atomica-senza-sovrascrittura.md) | Esportazione PDF brochure senza sovrascrittura di documenti esistenti, con eventuale pubblicazione finale sicura e gestione conservativa di errori/temporanei | P1 protezione file; P2 pubblicazione sicura (ipotetiche) | Proposta — da valutare |
+
+## Trentunesima ricognizione — 22 novembre 2026 — REPS-TECH-034
+
+- **[REPS-TECH-034 — Esportazione PDF brochure senza sovrascritture e con pubblicazione sicura](REPS-TECH-034-esportazione-brochure-pdf-atomica-senza-sovrascrittura.md):** ricognizione specifica sul salvataggio delle brochure **già implementate**. Dal codice di [`src-tauri/src/brochures.rs`](../../../src-tauri/src/brochures.rs) emerge che `validate_output` permette la destinazione se è un file ordinario già esistente, mentre `export_brochure_pdf` conclude con `fs::write(&destination, &pdf)`, operazione che può troncare/sostituire il file precedente. **Riscontro statico nel codice, senza test runtime o perdita reale attestata.**
+- **Proposta P1 soltanto ipotetica:** rifiutare sempre i nomi già occupati, compresi casi concorrenti, e preservare i PDF esistenti. **P2 eventuale:** usare una pubblicazione no-clobber da output completo, con temporanei identificabili, gestione errori, verifiche su USB/NAS e test multipiattaforma. Nessun comportamento di replace è stato approvato.
+- **Distinzione e coordinamento:** [TECH-018](REPS-TECH-018-esportazioni-csv-scalabili-atomiche.md) studia streaming/snapshot e sicurezza degli export **CSV**; [TECH-032](REPS-TECH-032-pdf-brochure-unicode-font-incorporati-offline.md) riguarda Unicode, font e impaginazione dei **PDF**; [UX-007 — PR #14](https://github.com/Cesare-ml/Repertica-Studio/blob/docs/idee-gestione-ux-20261121/docs/idee/gestione-e-ux/REPS-UX-007-dossier-presentazione-opere.md) riguarda il **contenuto condivisibile** dei dossier, non l'integrità filesystem del comando di salvataggio. Nessun file dell'altro filone modificato.
+- **Alternative e vincoli:** minimo rifiuto esclusivo della destinazione oppure pubblicazione completa da temporaneo; quest'ultima non deve promettere atomicità universale su filesystem remoti. Tutto offline, cartella libera, nessun nuovo account/abbonamento, bozza SQLite e media originali invariati, lingua sistema e fallback inglese.
+- **Esito:** **34 schede**, tutte **«Proposta — da valutare»**. Modificati esclusivamente questa scheda Markdown e l'indice nella cartella tecnica; la [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta in bozza e senza merge. Nessuna decisione di implementazione.
 
 ## Trentesima ricognizione — 22 novembre 2026 — REPS-TECH-033
 
