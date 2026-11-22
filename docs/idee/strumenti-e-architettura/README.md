@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **44 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **45 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -50,6 +50,14 @@ Data ricognizione: **2026-11-22** (quarantunesima ricognizione). Stato uniforme:
 | [REPS-TECH-042](REPS-TECH-042-compatibilita-aggiornamenti-recupero-versione-offline.md) | Aggiornamenti: contratto di compatibilità fra versione software e schema SQLite, procedura di recupero offline senza downgrade automatico dei dati né falso rollback dell'installer | P1–P2 (QA/release), P2–P3 (guida eventuale) | Proposta — da valutare |
 | [REPS-TECH-043](REPS-TECH-043-provenienza-verificabile-build-installatori-offline.md) | Provenienza verificabile degli installer ufficiali e delle build: manifest per artifact, hash e attestazioni opzionali verificabili anche offline, senza confondere firma updater, firma OS e sicurezza dell'app | P2 (documentazione e provenienza); P3 (UI eventuale) | Proposta — da valutare |
 | [REPS-TECH-044](REPS-TECH-044-esportazione-scadenze-rate-icalendar-offline.md) | Esportazione manuale delle scadenze rateali esistenti in iCalendar .ics, senza sincronizzazione o nuovi pagamenti; privacy minima e attenzione a UUID instabili dopo modifiche dei piani | P2–P3 condizionata; nessuno sviluppo se CSV/agenda manuale bastano | Proposta — da valutare |
+| [REPS-TECH-045](REPS-TECH-045-associazione-guidata-foto-importate-opere.md) | Associazione guidata delle fotografie già importate nel Media Center alle opere esistenti: anteprima, revisione umana per riga e collegamento protetto; nessun matching automatico né nuova importazione multipla | P2 se casi frequenti; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+
+## Quarantaduesima ricognizione — 22 novembre 2026 — REPS-TECH-045
+
+- **[REPS-TECH-045 — Associazione guidata di fotografie già importate alle opere](REPS-TECH-045-associazione-guidata-foto-importate-opere.md):** ricontrollati sul branch `main` [README](../../../README.md), [MVP](../../MVP.md), [portabilità](../../DATA-PORTABILITY.md), [Media Center Rust](../../../src-tauri/src/media.rs), [interfaccia Media Center](../../../src/app/media-center.component.ts), [galleria](../../../src-tauri/src/gallery.rs) e gli studi precedenti; confronto con le **49 schede Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). L'importazione di **più immagini è già presente**: l'opportunità è soltanto *rivedere in gruppo e confermare esplicitamente le associazioni* di media già importati a schede-opera esistenti, soprattutto quando il nome del file contiene il codice d'archivio. Non risulta una vista batch di abbinamento nei percorsi analizzati. È un bisogno **ipotetico**, non un bug riprodotto né una richiesta verificata.
+- **Anti-doppioni e vincoli:** TECH-019 importa **dati tabellari** di nuove schede; TECH-024/027 trattano **metadati e codec**; TECH-003/038 integrità/concorrenza; TECH-029 **scambio fra archivi**; UX-018 è catalogazione **seriale di nuove opere**, UX-048 codici storici qualificati. Nessun nuovo import, riconoscimento IA, matching certo dal titolo, modifica automatica della copertina o sostituzione delle operazioni Media Center già presenti. La prima fase sarebbe solo galleria, fino a 20 immagini, validazione nel commit, nessuna cancellazione di originali/media in uso e nessuna alterazione di certificati.
+- **Alternative e priorità:** prima osservare sessioni reali e verificare se bastano raccolte Media Center e collegamento manuale. **P2 solo se molti media da assegnare frequentemente**; P3 o nessuna funzione se non ricorre. Linguaggio locale OS/fallback EN, backup completo in cartella scelta, nessun account/cloud. Tutto resta **«Proposta — da valutare»**, senza approvazioni o assegnazioni.
+- **Esito:** **45 schede** tecniche. Modificati **soltanto** la nuova scheda e questo indice sotto `docs/idee/strumenti-e-architettura/`; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) documentale e in bozza, senza merge.
 
 ## Quarantunesima ricognizione — 22 novembre 2026 — REPS-TECH-044
 
