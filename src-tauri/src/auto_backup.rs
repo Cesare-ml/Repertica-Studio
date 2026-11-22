@@ -228,11 +228,13 @@ fn apply_retention_with(
     // Check again under the lock before removing any files, so stale settings
     // cannot prune backups after retention has been disabled or expanded.
     let conn = db.conn.lock().map_err(err)?;
-    let (current_destination, current_keep): (Option<String>, i64) = conn.query_row(
-        "SELECT destination,keep_last FROM backup_schedule WHERE singleton=1", [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+    let (enabled, current_destination, current_keep): (bool, Option<String>, i64) = conn.query_row(
+        "SELECT enabled,destination,keep_last FROM backup_schedule WHERE singleton=1", [],
+        |row| Ok((row.get::<_, i64>(0)? == 1, row.get(1)?, row.get(2)?)),
     ).map_err(err)?;
-    if current_keep != keep || current_destination.as_deref().map(Path::new) != Some(destination) {
+    // Disabling automatic backups while an external disk is being scanned must
+    // also cancel pending automatic deletions, even if the quota is unchanged.
+    if !enabled || current_keep != keep || current_destination.as_deref().map(Path::new) != Some(destination) {
         return Ok(());
     }
     for directory in eligible.into_iter().skip(keep as usize) {
@@ -242,15 +244,51 @@ fn apply_retention_with(
     Ok(())
 }
 
+/// Only results from the *current* configuration can advance its scheduling
+/// state. A backup on a slow/removable disk may finish after the user changes
+/// the destination or the schedule. The old backup remains valid and logged,
+/// but must not suppress the next backup to the new destination.
+fn same_configuration(a: &ScheduleStatus, b: &ScheduleStatus) -> bool {
+    a.enabled == b.enabled && a.frequency == b.frequency && a.time_of_day == b.time_of_day
+        && a.weekday == b.weekday && a.day_of_month == b.day_of_month
+        && a.destination == b.destination
+}
+
+fn record_outcome(
+    conn: &Connection, started: &ScheduleStatus, now: NaiveDateTime,
+    outcome: &Result<backup::BackupSummary, String>,
+) -> Result<(), String> {
+    let stamp = now.format(STAMP).to_string();
+    if let Ok(summary) = outcome {
+        // The backup exists even if its original settings changed in flight:
+        // retain its provenance for later inspection and quota management.
+        conn.execute("INSERT OR REPLACE INTO auto_backup_log(directory,created_at) VALUES(?1,?2)",
+            params![summary.directory, stamp]).map_err(err)?;
+    }
+    if !same_configuration(started, &status(conn, now)?) {
+        return Ok(());
+    }
+    match outcome {
+        Ok(summary) => {
+            conn.execute("UPDATE backup_schedule SET last_attempt_at=?1,last_success_at=?1,last_status='OK',last_message=NULL,last_directory=?2 WHERE singleton=1",
+                params![stamp, summary.directory]).map_err(err)?;
+        }
+        Err(message) => {
+            conn.execute("UPDATE backup_schedule SET last_attempt_at=?1,last_status='ERROR',last_message=?2 WHERE singleton=1",
+                params![stamp, message]).map_err(err)?;
+        }
+    }
+    Ok(())
+}
+
 /// Run a backup now and record the outcome. Used by the timer and by "Run now".
 pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
-    let (destination, keep) = {
+    let started = {
         let conn = db.conn.lock().map_err(err)?;
-        let s = status(&conn, now)?;
-        (s.destination, s.keep_last)
+        status(&conn, now)?
     };
-    let stamp = now.format(STAMP).to_string();
-    let destination = destination.filter(|d| !d.trim().is_empty());
+    let keep = started.keep_last;
+    let destination = started.destination.clone().filter(|d| !d.trim().is_empty());
     let outcome: Result<backup::BackupSummary, String> = match &destination {
         None => Err("Nessuna cartella di destinazione scelta".into()),
         Some(d) if !Path::new(d).is_dir() => Err(format!(
@@ -259,17 +297,7 @@ pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, Str
     };
     {
         let conn = db.conn.lock().map_err(err)?;
-        match &outcome {
-            Ok(summary) => {
-                conn.execute("UPDATE backup_schedule SET last_attempt_at=?1,last_success_at=?1,last_status='OK',last_message=NULL,last_directory=?2 WHERE singleton=1",
-                    params![stamp, summary.directory]).map_err(err)?;
-                conn.execute("INSERT OR REPLACE INTO auto_backup_log(directory,created_at) VALUES(?1,?2)", params![summary.directory, stamp]).map_err(err)?;
-            }
-            Err(message) => {
-                conn.execute("UPDATE backup_schedule SET last_attempt_at=?1,last_status='ERROR',last_message=?2 WHERE singleton=1",
-                    params![stamp, message]).map_err(err)?;
-            }
-        }
+        record_outcome(&conn, &started, now, &outcome)?;
     }
     if outcome.is_ok() {
         if let Some(d) = &destination { let _ = apply_retention(db, Path::new(d), keep); }
@@ -596,6 +624,82 @@ mod tests {
         assert!(changed, "the verified backup scanner must run");
         assert!(Path::new(&first).is_dir() && Path::new(&second).is_dir(),
             "disabling retention during an external-disk scan must preserve all backups");
+    }
+
+
+    #[test]
+    fn a_completed_backup_does_not_mark_a_new_destination_as_backed_up() {
+        let (dir, db, first) = setup();
+        let second = dir.path().join("new-external-disk");
+        fs::create_dir(&second).unwrap();
+        save_core(&db, input(&first, 0), at("2026-11-19 10:00")).unwrap();
+        let started = status(&db.conn.lock().unwrap(), at("2026-11-21 09:05")).unwrap();
+        // Simulate a slow backup finishing *after* the artist switches disks.
+        let completed = backup::create_backup_core(&db, &first).unwrap();
+        save_core(&db, input(&second, 0), at("2026-11-21 09:05")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            record_outcome(&conn, &started, at("2026-11-21 09:05"), &Ok(completed.clone())).unwrap();
+            let logged: i64 = conn.query_row(
+                "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
+                params![completed.directory], |r| r.get(0)).unwrap();
+            assert_eq!(logged, 1, "the valid backup on the first disk is still tracked");
+        }
+        let unchanged = status(&db.conn.lock().unwrap(), at("2026-11-21 09:06")).unwrap();
+        assert!(unchanged.last_success_at.is_none(), "an old disk must not satisfy the new schedule");
+        assert!(unchanged.last_directory.is_none());
+        let new_run = tick(&db, at("2026-11-21 09:06")).unwrap().expect("new destination is still due");
+        // Windows can return a verbatim (\\\\?\\) path for the temporary directory,
+        // while the backup API deliberately returns a user-facing path without it.
+        // Compare resolved filesystem locations rather than their display spelling.
+        let created = fs::canonicalize(new_run.last_directory.unwrap()).unwrap();
+        let selected = fs::canonicalize(&second).unwrap();
+        assert!(created.starts_with(&selected),
+            "the new backup must be inside the newly selected destination");
+    }
+
+    #[test]
+    fn an_obsolete_backup_failure_does_not_replace_new_schedule_status() {
+        let (dir, db, first) = setup();
+        let second = dir.path().join("second-disk");
+        fs::create_dir(&second).unwrap();
+        save_core(&db, input(&first, 0), at("2026-11-19 10:00")).unwrap();
+        let started = status(&db.conn.lock().unwrap(), at("2026-11-21 09:05")).unwrap();
+        save_core(&db, input(&second, 0), at("2026-11-21 09:05")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            record_outcome(&conn, &started, at("2026-11-21 09:05"),
+                &Err("Unità precedente scollegata".into())).unwrap();
+        }
+        let state = status(&db.conn.lock().unwrap(), at("2026-11-21 09:06")).unwrap();
+        assert!(state.last_attempt_at.is_none() && state.last_status.is_none());
+        assert!(tick(&db, at("2026-11-21 09:06")).unwrap().is_some(),
+            "an old failure must not impose a 30-minute retry delay on the new disk");
+    }
+
+    #[test]
+    fn turning_off_auto_backup_during_verification_cancels_pruning() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-10 08:00")).unwrap();
+        let oldest = run_core(&db, at("2026-11-11 09:00")).unwrap().last_directory.unwrap();
+        let newest = run_core(&db, at("2026-11-12 09:00")).unwrap().last_directory.unwrap();
+        save_core(&db, input(&destination, 1), at("2026-11-12 11:00")).unwrap();
+        let mut disabled = false;
+        apply_retention_with(&db, &destination, 1, |path| {
+            let conn = db.conn.try_lock().expect("SQLite must remain unlocked during SHA verification");
+            if !disabled {
+                conn.execute("UPDATE backup_schedule SET enabled=0 WHERE singleton=1", []).unwrap();
+                disabled = true;
+            }
+            drop(conn);
+            backup::inspect_backup_core(path).is_ok()
+        }).unwrap();
+        assert!(disabled);
+        assert!(Path::new(&oldest).is_dir() && Path::new(&newest).is_dir(),
+            "disabling automatic backups must not remove old copies");
+        let count: i64 = db.conn.lock().unwrap()
+            .query_row("SELECT count(*) FROM auto_backup_log", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 2);
     }
 
     #[test]
