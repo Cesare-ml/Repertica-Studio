@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (quarantasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **54 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (quarantottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **55 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -62,6 +62,15 @@ Aggiornato: **2026-11-22** (quarantasettesima ricognizione). Stato delle propost
 | [REPS-UX-053](REPS-UX-053-didascalie-sala-cartellini-espositivi.md) | Cartellini pubblici di sala generati da opere selezionate, revisionati prima di PDF/stampa, senza etichette QR interne o divulgazione dei dati privati | P2 se usati spesso; P3 o nessuno sviluppo se basta un modello LibreOffice | Proposta — da valutare |
 
 | [REPS-UX-054](REPS-UX-054-vista-presentazione-riservata-in-studio.md) | Vista temporanea per presentare opere a schermo con soli campi deliberatamente visibili, senza fingere protezione dell'archivio | P2 se validata; P3 o nessuno sviluppo se bastano viewer e PDF | Proposta — da valutare |
+
+| [REPS-UX-055](REPS-UX-055-revisione-possibili-doppioni-schede-opera.md) | Revisione volontaria di possibili schede-opera duplicate con indizi spiegabili e confronto, senza fusione né modifiche ai record | P2 se validata; P3 o nessuno sviluppo se bastano ricerca e CSV | Proposta — da valutare |
+
+## Quarantottesima ricognizione — 23 novembre 2026 — REPS-UX-055
+
+- **[REPS-UX-055 — Revisione dei possibili doppioni di schede-opera](REPS-UX-055-revisione-possibili-doppioni-schede-opera.md):** riesaminati `main`, `README.md`, `docs/MVP.md`, modelli Rust/Angular, schema SQLite, ricerca delle opere e capacità del Media Center; confrontate le **54 idee UX** precedenti e le **50 TECH** del [filone tecnico, PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). Il codice univoco impedisce due codici uguali, non due schede con codici differenti per lo stesso oggetto. **Nessun duplicato reale osservato**: è un rischio catalografico da convalidare, non un bug confermato.
+- **Confine anti-doppioni:** UX-005 tutela esemplari/varianti correttamente distinti; UX-018 gestisce inserimento seriale; UX-048 riferimenti storici; TECH-019 conflitti durante import; la ricerca di duplicati del **Media Center è riferita ai file immagine**, non alle opere. Questa proposta si limita a **revisione umana di coppie di schede già registrate**, con spiegazione dei segnali e **nessuna fusione, cancellazione, correzione o modifica di vendite/certificati**.
+- **Alternativa prima dello sviluppo:** prova manuale su ricerca corrente e CSV/LibreOffice Calc con 3–5 utenti e casi anonimizzati; se basta, **nessuno sviluppo**. Solo con esigenza confermata, valutare vista di confronto volontaria, offline, accessibile e con priorità P2 condizionata; altrimenti P3.
+- **Esito:** **55 proposte**, tutte nello stato «Proposta — da valutare». Solo Markdown nella cartella Gestione e UX; nessun intervento su codice, configurazioni, file TECH o `main`. [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta in bozza e senza merge.
 
 ## Quarantasettesima ricognizione — 22 novembre 2026 — REPS-UX-054
 
