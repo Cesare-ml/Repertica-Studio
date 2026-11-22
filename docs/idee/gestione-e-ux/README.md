@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (ventiseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **33 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (ventisettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **34 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -39,6 +39,15 @@ Aggiornato: **2026-11-22** (ventiseiesima ricognizione). Stato delle proposte: *
 | [REPS-UX-031](REPS-UX-031-autorialita-opere-attribuzioni-collaborazioni.md) | Autorialità delle opere: attribuzioni anche incerte, più autori e identità distinte da proprietà, diritti, fotografia e vendite; prima verificare se basta un campo testuale opzionale | P2* (P1 solo se validato) | Proposta — da valutare |
 | [REPS-UX-032](REPS-UX-032-budget-mensili-categorie-spesa-scostamenti.md) | Budget mensili facoltativi per categorie di spesa, confronto preventivato/registrato e spese fuori budget ben visibili; senza creare movimenti né alterare le statistiche esistenti | P2* | Proposta — da valutare |
 | [REPS-UX-033](REPS-UX-033-entrate-professionali-non-vendita-opere.md) | Registro locale e facoltativo dei **compensi professionali extra-vendita** (didattica, licenze, servizi), distinti da vendite, incassi e quote congelate; nessun ricavo o pagamento presunto | P2* (P1–P2 solo se validato) | Proposta — da valutare |
+| [REPS-UX-034](REPS-UX-034-analisi-vendite-caratteristiche-opere.md) | Analisi aggregata delle **vendite registrate** per tecnica, supporto o anno delle opere: gruppi con metadati mancanti, definizioni verificabili e nessuna inferenza su incassi, utili o classificazioni storiche | P2* (P3 se bastano CSV; P1–P2 solo dopo validazione) | Proposta — da valutare |
+
+## Ventisettesima ricognizione — 22 novembre 2026 — REPS-UX-034
+
+- **[REPS-UX-034 — Analisi delle vendite per caratteristiche delle opere](REPS-UX-034-analisi-vendite-caratteristiche-opere.md):** proposta di una vista aggregata **in sola lettura** su vendite esistenti, per tecnica (eventualmente supporto/anno opera), periodo di vendita, gruppo «Non specificato» e somma lorda controllabile. Obiettivo: aiutare artisti e gallerie a interpretare il proprio storico **senza** confondere venduto, incassato o utile e senza attribuire significato di merito ai gruppi.
+- **Riscontro su `main`:** [`models.ts`](../../../src/app/models.ts) espone tecnica/supporto/anno della scheda-opera e vendita collegata per `artwork_id`; [`finance.rs`](../../../src-tauri/src/finance.rs) fornisce totali economici **mensili**, non il raggruppamento per caratteristiche delle opere nei percorsi consultati. Il dato di tecnica attuale può cambiare dopo una vendita: la UI/il CSV devono dichiarare «classificazione corrente», **non** inventare una fotografia storica. Nessun difetto runtime o bisogno utente è stato dimostrato.
+- **Anti-doppione:** UX-003 = costi per opera; UX-017 = vendita multiopera; UX-023 = listini/prezzi richiesti; UX-032 = budget di spesa; UX-014 = rubrica e relazioni. La [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) studia con TECH-008 filtri/visti salvate delle *schede* e con TECH-025 export tabellari minimizzati: la nuova scheda riguarda il **significato gestionale di aggregati sulle vendite**, non i relativi motori o export generici. Nessun file dell'altro filone modificato.
+- **Confini:** niente score dei compratori, previsioni, modifiche a vendite, rate, quote congelate, certificati o prezzi; niente etichette commerciali auto-normalizzate. Un'analisi minima può persino evitare nuovi dati persistiti e migrazioni, mantenendo offline, backup completo selezionabile, export leggibile e lingua OS con fallback inglese. Confrontare prima con la semplice consultazione dei CSV.
+- **Priorità P2 solo ipotetica;** P3 se i CSV bastano, P1–P2 solo con utenti e dati reali. **34 proposte** totali, tutte **«Proposta — da valutare»**. Una scheda e un indice Markdown aggiornati; [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) da mantenere in bozza, non unire. Nessuna approvazione, assegnazione o implementazione.
 
 ## Ventiseiesima ricognizione — 22 novembre 2026 — REPS-UX-033
 
