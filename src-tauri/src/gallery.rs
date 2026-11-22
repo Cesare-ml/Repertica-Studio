@@ -386,7 +386,11 @@ pub(crate) fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result
     if !relative_media_path(&relative) { return Err("Percorso media non valido".into()); }
     // Preserve bytes also referenced elsewhere; do not scope this to one artwork.
     let preserve = gallery_media_has_other_references(&conn, image_id, &relative)?;
-    conn.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+    // Imported archives can contain a BEFORE DELETE trigger using RAISE(IGNORE).
+    // SQLite then returns Ok(0): never unlink the actual photo while its row
+    // still exists, and never report a deletion that did not happen.
+    let deleted = conn.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+    if deleted != 1 { return Err("Eliminazione fotografia non riuscita: il collegamento non è stato rimosso".into()); }
     if !preserve {
         // A failed unlink leaves an unreferenced file, never a broken DB link.
         crate::media::remove_file_unless_catalogued(&conn, &db.directory, &relative);
@@ -624,6 +628,41 @@ mod tests {
         assert!(!db.directory.join(relative).exists());
     }
 
+
+    #[test]
+    fn gallery_deletion_rejected_by_imported_trigger_preserves_photo_and_reference() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        let relative = "media/blocked.jpg";
+        let file = db.directory.join(relative);
+        let jpeg = [0xff, 0xd8, 0xff, 0x01];
+        fs::write(&file, jpeg).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','ART','Artwork','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('photo','art',?1,'t')", params![relative]).unwrap();
+            // Some externally edited SQLite archives suppress a deletion
+            // without producing an SQL error.
+            conn.execute_batch("CREATE TRIGGER block_gallery_photo
+                BEFORE DELETE ON artwork_images WHEN OLD.id='photo'
+                BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+
+        let error = delete_gallery_image_core(&db, "photo").unwrap_err();
+        assert!(error.contains("non riuscita"));
+        assert_eq!(fs::read(&file).unwrap(), jpeg);
+        assert_eq!(list_core(&db, "art").unwrap().len(), 1);
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("DROP TRIGGER block_gallery_photo").unwrap();
+        }
+        delete_gallery_image_core(&db, "photo").unwrap();
+        assert!(!file.exists());
+        assert!(list_core(&db, "art").unwrap().is_empty());
+    }
 
     #[test]
     fn gallery_deletion_keeps_shared_covers_and_other_artworks_historical_photos() {
