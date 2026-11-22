@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **45 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **46 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -51,6 +51,15 @@ Data ricognizione: **2026-11-22** (quarantaduesima ricognizione). Stato uniforme
 | [REPS-TECH-043](REPS-TECH-043-provenienza-verificabile-build-installatori-offline.md) | Provenienza verificabile degli installer ufficiali e delle build: manifest per artifact, hash e attestazioni opzionali verificabili anche offline, senza confondere firma updater, firma OS e sicurezza dell'app | P2 (documentazione e provenienza); P3 (UI eventuale) | Proposta — da valutare |
 | [REPS-TECH-044](REPS-TECH-044-esportazione-scadenze-rate-icalendar-offline.md) | Esportazione manuale delle scadenze rateali esistenti in iCalendar .ics, senza sincronizzazione o nuovi pagamenti; privacy minima e attenzione a UUID instabili dopo modifiche dei piani | P2–P3 condizionata; nessuno sviluppo se CSV/agenda manuale bastano | Proposta — da valutare |
 | [REPS-TECH-045](REPS-TECH-045-associazione-guidata-foto-importate-opere.md) | Associazione guidata delle fotografie già importate nel Media Center alle opere esistenti: anteprima, revisione umana per riga e collegamento protetto; nessun matching automatico né nuova importazione multipla | P2 se casi frequenti; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+| [REPS-TECH-046](REPS-TECH-046-master-fotografici-tiff-bigtiff-offline.md) | Master fotografici TIFF/BigTIFF conservabili come originali offline con hash, backup integrale ed eventuali preview derivate dichiarate; fase iniziale senza obbligo di decoder | P2 condizionata a casi reali; P3/nessuno sviluppo se non utile | Proposta — da valutare |
+
+## Quarantatreesima ricognizione — 22 novembre 2026 — REPS-TECH-046
+
+- **[REPS-TECH-046 — Master fotografici TIFF e BigTIFF preservati offline](REPS-TECH-046-master-fotografici-tiff-bigtiff-offline.md):** verificati su `main` [README](../../../README.md), [MVP](../../MVP.md), [portabilità](../../DATA-PORTABILITY.md), [Cargo.toml](../../../src-tauri/Cargo.toml), [lettura immagini](../../../src-tauri/src/commands.rs), [Media Center](../../../src-tauri/src/media.rs), [motore immagini](../../../src-tauri/src/imaging.rs), [allegati RAW](../../../src-tauri/src/raw_files.rs) e backup; confrontati gli studi TECH-003/005/007/016/021/024/026/027/029 e le **50 schede UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Repertica accetta oggi JPEG/PNG/WebP fino a 12 MiB e ha già un allegato RAW separato fino a 1 GiB. Non emerge una funzione dedicata per conservare **master TIFF di scansione** con collegamento all'opera e derivati esplicitamente distinti. Opportunità **da validare** con archivi reali, non bug riprodotto.
+- **Scopo e confini:** prima valutare soltanto **copia streaming byte-identica, SHA-256, backup e riesportazione del master**, conservando la copertina/preview esistenti. Solo eventualmente decodifica locale e derivati con gestione colore coordinata a TECH-021/005/024; **BigTIFF oltre 4 GiB** è uno studio di fase ulteriore, non supporto promesso. Nessun decoder o conversione imposto, nessuna riscrittura di originali, certificati, RAW o record commerciali, nessun file UX modificato. Fonti di contesto: [Library of Congress — formati fotografici](https://www.loc.gov/preservation/resources/rfs/stillimg.html) e [LibTIFF — BigTIFF](https://libtiff.gitlab.io/libtiff/specification/bigtiff.html).
+- **Fattibilità e priorità:** raccogliere **5–10 master TIFF** autorizzati da professionisti e misurarne varianti, uso, pesi, tempi di backup e limiti di USB/NAS; alternativa minima: archivio TIFF separato, oppure eventuale allegato generico TECH-016 senza nuovo modulo. **P2 soltanto se il bisogno è reale**; P3 o **nessuno sviluppo** se i flussi attuali bastano. Tutto offline, lingua OS/fallback EN, nessun account, SaaS o telemetria.
+- **Esito:** **46 schede** tecniche, tutte **«Proposta — da valutare»**. Modificati solo la nuova scheda e questo indice Markdown sotto `docs/idee/strumenti-e-architettura/`. [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) documentale in bozza, senza merge, approvazioni o incarichi di sviluppo.
+
 
 ## Quarantaduesima ricognizione — 22 novembre 2026 — REPS-TECH-045
 
