@@ -263,43 +263,66 @@ fn remove_media_file(conn: &Connection, db: &Database, relative: &str) {
 /// Add a photograph. A new profile photograph replaces the previous one, whose file is
 /// removed only after the database change has been committed.
 fn add_image_core(db: &Database, collector_id: &str, source_path: &str, kind: &str) -> Result<CollectorImage, String> {
+    add_image_core_with_stage(db, collector_id, source_path, kind, store_media)
+}
+
+// Stage the picture before taking the SQLite mutex: writing a 12 MiB file to a
+// slow external archive must not block other artwork, collector or sale queries.
+// The injected stager also lets the test assert the lock order deterministically.
+fn add_image_core_with_stage<F>(
+    db: &Database, collector_id: &str, source_path: &str, kind: &str, stage: F,
+) -> Result<CollectorImage, String>
+where
+    F: FnOnce(&Path, &[u8], &str) -> Result<String, String>,
+{
     if !["PROFILE", "PHOTO"].contains(&kind) { return Err("Tipo di fotografia non valido".into()); }
     require_regular_media_dir(db)?;
     let bytes = read_image_file(source_path)?;
     let (extension, _) = image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
-    let mut conn = db.conn.lock().map_err(err)?;
-    let tx = conn.transaction().map_err(err)?;
-    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)", params![collector_id], |r| r.get(0)).map_err(err)?;
-    if !exists { return Err("Collezionista non trovato".into()); }
-    let mut replaced: Option<String> = None;
-    if kind == "PROFILE" {
-        replaced = tx.query_row("SELECT image_path FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
-            params![collector_id], |r| r.get(0)).optional().map_err(err)?;
-        tx.execute("DELETE FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'", params![collector_id]).map_err(err)?;
-    } else {
-        let count: i64 = tx.query_row("SELECT count(*) FROM collector_images WHERE collector_id=?1 AND kind='PHOTO'",
-            params![collector_id], |r| r.get(0)).map_err(err)?;
-        if count >= MAX_PHOTOS { return Err(format!("Massimo {MAX_PHOTOS} fotografie per collezionista")); }
-    }
-    let relative = store_media(&db.directory, &bytes, extension)?;
-    let id = Uuid::new_v4().to_string();
-    // Any error after staging the file (not just INSERT/COMMIT) must remove it.
-    // The transaction is dropped/rolled back before the file is unlinked, so an
-    // existing profile photograph and its database reference remain unchanged.
+    let relative = stage(&db.directory, &bytes, extension)?;
+    // A deleted collector, full gallery, SQLite error or failing trigger must
+    // roll the transaction back and remove the staged file. The old profile is
+    // not unlinked until the replacement transaction has committed.
     let outcome = (|| -> Result<CollectorImage, String> {
-        tx.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
-            params![id, collector_id, kind, relative, now()]).map_err(err)?;
+        let mut conn = db.conn.lock().map_err(err)?;
+        let tx = conn.transaction().map_err(err)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)",
+            params![collector_id], |r| r.get(0),
+        ).map_err(err)?;
+        if !exists { return Err("Collezionista non trovato".into()); }
+        let mut replaced: Option<String> = None;
+        if kind == "PROFILE" {
+            replaced = tx.query_row(
+                "SELECT image_path FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
+                params![collector_id], |r| r.get(0),
+            ).optional().map_err(err)?;
+            tx.execute(
+                "DELETE FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
+                params![collector_id],
+            ).map_err(err)?;
+        } else {
+            let count: i64 = tx.query_row(
+                "SELECT count(*) FROM collector_images WHERE collector_id=?1 AND kind='PHOTO'",
+                params![collector_id], |r| r.get(0),
+            ).map_err(err)?;
+            if count >= MAX_PHOTOS { return Err(format!("Massimo {MAX_PHOTOS} fotografie per collezionista")); }
+        }
+        let id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
+            params![id, collector_id, kind, relative, now()],
+        ).map_err(err)?;
         let image = tx.query_row(
             &format!("SELECT {IMAGE_FIELDS} FROM collector_images WHERE id=?1"),
             params![id], image_row,
         ).map_err(err)?;
         tx.commit().map_err(err)?;
+        if let Some(old) = replaced { remove_media_file(&conn, db, &old); }
         Ok(image)
     })();
     if outcome.is_err() {
         let _ = fs::remove_file(db.directory.join(&relative));
-    } else if let Some(old) = replaced {
-        remove_media_file(&conn, db, &old);
     }
     outcome
 }
@@ -518,6 +541,34 @@ mod tests {
         assert!(add_image_core(&db, &collector.id, text.to_str().unwrap(), "PHOTO").is_err());
         assert!(add_image_core(&db, "inesistente", &picture(dir.path(), "y.jpg", 5), "PHOTO").is_err());
         assert_eq!(media_count(&db), 1, "rejected photographs leave no files behind");
+    }
+
+    #[test]
+    fn photo_staging_runs_without_sqlite_lock_and_failed_links_leave_no_media() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        let source = picture(dir.path(), "portrait.jpg", 1);
+        let unlocked_stage = |directory: &Path, bytes: &[u8], extension: &str| {
+            assert!(db.conn.try_lock().is_ok(), "SQLite must remain available while copying media");
+            store_media(directory, bytes, extension)
+        };
+        let first = add_image_core_with_stage(
+            &db, &collector.id, &source, "PROFILE", unlocked_stage,
+        ).unwrap();
+        assert_eq!(media_count(&db), 1);
+        assert!(db.directory.join(&first.image_path).is_file());
+
+        let rejected = add_image_core_with_stage(
+            &db, "missing-collector", &source, "PROFILE",
+            |directory, bytes, extension| {
+                assert!(db.conn.try_lock().is_ok(), "even rejected uploads stage without locking SQLite");
+                store_media(directory, bytes, extension)
+            },
+        ).unwrap_err();
+        assert!(rejected.contains("non trovato"));
+        assert_eq!(media_count(&db), 1, "failed post-staging validation must remove the new file");
+        let saved = by_id(&db.conn.lock().unwrap(), &collector.id).unwrap();
+        assert_eq!(saved.profile_image_id.as_deref(), Some(first.id.as_str()));
     }
 
     #[test]
