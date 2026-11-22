@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use std::{error::Error, fs, path::PathBuf, sync::Mutex};
+use std::{error::Error, fs, path::PathBuf, sync::{atomic::AtomicU64, Mutex}};
 
 /// Version written by this build (`PRAGMA user_version`).
 pub const SCHEMA_VERSION: i64 = 18;
@@ -7,6 +7,10 @@ pub const SCHEMA_VERSION: i64 = 18;
 pub struct Database {
     pub conn: Mutex<Connection>,
     pub directory: PathBuf,
+    // Process-local ordering of simultaneous automatic/manual backup attempts.
+    // No persisted migration is needed; historical scheduling timestamps remain in SQLite.
+    pub(crate) auto_backup_next_run: AtomicU64,
+    pub(crate) auto_backup_last_recorded: AtomicU64,
 }
 
 pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
@@ -568,7 +572,8 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
         BEFORE UPDATE ON certificates BEGIN SELECT RAISE(ABORT, 'certificate_immutable'); END;
         CREATE TRIGGER IF NOT EXISTS certificates_no_delete
         BEFORE DELETE ON certificates BEGIN SELECT RAISE(ABORT, 'certificate_immutable'); END;")?;
-    Ok(Database { conn: Mutex::new(conn), directory })
+    Ok(Database { conn: Mutex::new(conn), directory,
+        auto_backup_next_run: AtomicU64::new(0), auto_backup_last_recorded: AtomicU64::new(0) })
 }
 
 #[cfg(test)]

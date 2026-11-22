@@ -12,7 +12,7 @@ use crate::{backup, db::Database, util::display_path};
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::atomic::{AtomicU64, Ordering}};
 use tauri::{Emitter, Manager, State};
 
 const STAMP: &str = "%Y-%m-%dT%H:%M:%S";
@@ -264,6 +264,9 @@ fn same_configuration(a: &ScheduleStatus, b: &ScheduleStatus) -> bool {
 fn record_outcome(
     conn: &Connection, started: &ScheduleStatus, now: NaiveDateTime,
     outcome: &Result<backup::BackupSummary, String>,
+    // The in-process sequence breaks ties when two attempts started in the same second.
+    // `None` is reserved for deterministic historical-timestamp regression tests.
+    run_order: Option<(u64, &AtomicU64)>,
 ) -> Result<(), String> {
     let stamp = now.format(STAMP).to_string();
     if let Ok(summary) = outcome {
@@ -286,6 +289,12 @@ fn record_outcome(
     if parse_stamp(&latest_attempt).is_some_and(|latest| latest > now) {
         return Ok(());
     }
+    // SQLite calls are serialized by Database.conn, so compare and advance the
+    // sequence while holding that same lock. An older completion cannot replace
+    // a newer completion, even when their timestamps are identical to the second.
+    if run_order.is_some_and(|(run_id, latest)| latest.load(Ordering::Relaxed) > run_id) {
+        return Ok(());
+    }
     match outcome {
         Ok(summary) => {
             conn.execute("UPDATE backup_schedule SET last_attempt_at=?1,last_success_at=?1,last_status='OK',last_message=NULL,last_directory=?2 WHERE singleton=1",
@@ -296,14 +305,20 @@ fn record_outcome(
                 params![stamp, message]).map_err(err)?;
         }
     }
+    if let Some((run_id, latest)) = run_order {
+        latest.fetch_max(run_id, Ordering::Relaxed);
+    }
     Ok(())
 }
 
 /// Run a backup now and record the outcome. Used by the timer and by "Run now".
 pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
-    let started = {
+    let (started, run_id) = {
         let conn = db.conn.lock().map_err(err)?;
-        status(&conn, now)?
+        let snapshot = status(&conn, now)?;
+        // Allocate while the SQLite mutex is held, preserving snapshot/start order.
+        let id = db.auto_backup_next_run.fetch_add(1, Ordering::Relaxed) + 1;
+        (snapshot, id)
     };
     let keep = started.keep_last;
     let destination = started.destination.clone().filter(|d| !d.trim().is_empty());
@@ -315,7 +330,8 @@ pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, Str
     };
     {
         let conn = db.conn.lock().map_err(err)?;
-        record_outcome(&conn, &started, now, &outcome)?;
+        record_outcome(&conn, &started, now, &outcome,
+            Some((run_id, &db.auto_backup_last_recorded)))?;
     }
     if outcome.is_ok() {
         if let Some(d) = &destination { let _ = apply_retention(db, Path::new(d), keep); }
@@ -703,7 +719,7 @@ mod tests {
         save_core(&db, input(&second, 0), at("2026-11-21 09:05")).unwrap();
         {
             let conn = db.conn.lock().unwrap();
-            record_outcome(&conn, &started, at("2026-11-21 09:05"), &Ok(completed.clone())).unwrap();
+            record_outcome(&conn, &started, at("2026-11-21 09:05"), &Ok(completed.clone()), None).unwrap();
             let logged: i64 = conn.query_row(
                 "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
                 params![completed.directory], |r| r.get(0)).unwrap();
@@ -733,7 +749,7 @@ mod tests {
         {
             let conn = db.conn.lock().unwrap();
             record_outcome(&conn, &started, at("2026-11-21 09:05"),
-                &Err("Unità precedente scollegata".into())).unwrap();
+                &Err("Unità precedente scollegata".into()), None).unwrap();
         }
         let state = status(&db.conn.lock().unwrap(), at("2026-11-21 09:06")).unwrap();
         assert!(state.last_attempt_at.is_none() && state.last_status.is_none());
@@ -752,9 +768,9 @@ mod tests {
         let newer_copy = backup::create_backup_core(&db, &destination).unwrap();
         let conn = db.conn.lock().unwrap();
 
-        record_outcome(&conn, &started, at("2026-11-21 09:06"), &Ok(newer_copy.clone())).unwrap();
+        record_outcome(&conn, &started, at("2026-11-21 09:06"), &Ok(newer_copy.clone()), None).unwrap();
         record_outcome(&conn, &started, at("2026-11-21 09:05"),
-            &Err("Older disk error arrived late".into())).unwrap();
+            &Err("Older disk error arrived late".into()), None).unwrap();
         let after_success = status(&conn, at("2026-11-21 09:07")).unwrap();
         assert_eq!(after_success.last_attempt_at.as_deref(), Some("2026-11-21T09:06:00"));
         assert_eq!(after_success.last_success_at.as_deref(), Some("2026-11-21T09:06:00"));
@@ -762,8 +778,8 @@ mod tests {
         assert_eq!(after_success.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
 
         record_outcome(&conn, &started, at("2026-11-21 09:10"),
-            &Err("Latest disk error".into())).unwrap();
-        record_outcome(&conn, &started, at("2026-11-21 09:07"), &Ok(older_copy.clone())).unwrap();
+            &Err("Latest disk error".into()), None).unwrap();
+        record_outcome(&conn, &started, at("2026-11-21 09:07"), &Ok(older_copy.clone()), None).unwrap();
         let after_error = status(&conn, at("2026-11-21 09:11")).unwrap();
         assert_eq!(after_error.last_attempt_at.as_deref(), Some("2026-11-21T09:10:00"));
         assert_eq!(after_error.last_success_at.as_deref(), Some("2026-11-21T09:06:00"));
@@ -775,6 +791,45 @@ mod tests {
             params![older_copy.directory], |row| row.get(0),
         ).unwrap();
         assert_eq!(logged, 1, "the valid older backup remains registered for recovery");
+    }
+
+
+    #[test]
+    fn overlapping_attempts_in_the_same_second_do_not_rewind_the_result() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-20 08:00")).unwrap();
+        let now = at("2026-11-21 09:05");
+        let started = status(&db.conn.lock().unwrap(), now).unwrap();
+        let newer_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let older_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let latest = AtomicU64::new(0);
+
+        // The newer success finishes before the older error, but their coarse
+        // persisted timestamps are exactly equal.
+        record_outcome(&conn, &started, now, &Ok(newer_copy.clone()), Some((2, &latest))).unwrap();
+        record_outcome(&conn, &started, now,
+            &Err("Old disk error completed late".into()), Some((1, &latest))).unwrap();
+        let after_success = status(&conn, now).unwrap();
+        assert_eq!(after_success.last_status.as_deref(), Some("OK"));
+        assert_eq!(after_success.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+        assert_eq!(latest.load(Ordering::Relaxed), 2);
+
+        // The reverse ordering is also protected: an older successful copy is
+        // registered in history, but cannot replace the newer failure/retry.
+        record_outcome(&conn, &started, now,
+            &Err("Latest disk failure".into()), Some((4, &latest))).unwrap();
+        record_outcome(&conn, &started, now, &Ok(older_copy.clone()), Some((3, &latest))).unwrap();
+        let after_error = status(&conn, now).unwrap();
+        assert_eq!(after_error.last_status.as_deref(), Some("ERROR"));
+        assert_eq!(after_error.last_message.as_deref(), Some("Latest disk failure"));
+        assert_eq!(after_error.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+        assert_eq!(latest.load(Ordering::Relaxed), 4);
+        let logged: i64 = conn.query_row(
+            "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
+            params![older_copy.directory], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(logged, 1, "older valid copies remain recoverable in history");
     }
 
     #[test]
