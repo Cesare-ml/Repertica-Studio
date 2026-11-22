@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **42 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **43 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -48,6 +48,13 @@ Data ricognizione: **2026-11-22** (trentanovesima ricognizione). Stato uniforme:
 | [REPS-TECH-040](REPS-TECH-040-scambio-contatti-vcard-offline.md) | Interoperabilità rubrica: esportazione selettiva dei recapiti dei collezionisti in vCard aperto, senza cloud o dati commerciali; import soltanto eventuale e con conflitti espliciti | P2–P3 condizionata al bisogno | Proposta — da valutare |
 | [REPS-TECH-041](REPS-TECH-041-checklist-identificazione-object-id-offline.md) | Checklist di identificazione delle opere secondo le nove categorie Object ID (ICOM): verifica delle lacune, eventuale scheda locale con immagini scelte e privacy prudente; nessuna attestazione automatica | P2 se bisogno documentato; P3 se basta modello esterno | Proposta — da valutare |
 | [REPS-TECH-042](REPS-TECH-042-compatibilita-aggiornamenti-recupero-versione-offline.md) | Aggiornamenti: contratto di compatibilità fra versione software e schema SQLite, procedura di recupero offline senza downgrade automatico dei dati né falso rollback dell'installer | P1–P2 (QA/release), P2–P3 (guida eventuale) | Proposta — da valutare |
+| [REPS-TECH-043](REPS-TECH-043-provenienza-verificabile-build-installatori-offline.md) | Provenienza verificabile degli installer ufficiali e delle build: manifest per artifact, hash e attestazioni opzionali verificabili anche offline, senza confondere firma updater, firma OS e sicurezza dell'app | P2 (documentazione e provenienza); P3 (UI eventuale) | Proposta — da valutare |
+
+## Quarantesima ricognizione — 22 novembre 2026 — REPS-TECH-043
+
+- **[REPS-TECH-043 — Provenienza verificabile delle build e degli installatori anche offline](REPS-TECH-043-provenienza-verificabile-build-installatori-offline.md):** ricontrollati `main`, `README.md`, `docs/RELEASING.md`, `src-tauri/src/updater.rs`, `.github/workflows/release.yml`, `ci.yml`, `build-macos.yml`, i lockfile e i **42 studi tecnici precedenti**; confronto anti-doppioni con le **47 proposte Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il percorso updater è **già** firmato e controllato; gli installer OS non sono ancora firmati/notarizzati come publisher. Non emerge un contratto documentato di provenienza per **ogni byte distribuito** né un percorso di verifica offline dei pacchetti ufficiali.
+- **Opportunità circoscritta:** per chi conserva un installer su USB o lo riceve tramite una galleria, valutare prima inventario dei digest/tag/commit e guida locale SHA-256; solo in fase distinta e se utile, [attestazioni di build](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations) con bundle/root verificabili anche [offline](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/verify-attestations-offline). Un hash pubblicato accanto al pacchetto **non autentica da solo la fonte**; un'attestazione non prova l'assenza di vulnerabilità. Le compilazioni ripetute sullo stesso tag richiedono evidenze legate **al nuovo digest**; nessuna promessa di riproducibilità byte-identica.
+- **Confini anti-doppioni:** TECH-042 tratta **compatibilità app/schema e recupero**, TECH-012/037 **dati e ripristino**, TECH-006/009 **backup**. Nessun nuovo updater, controllo invasivo dell'archivio, account, cloud obbligatorio, telemetria o blocco degli installer offline. Il filone Gestione e UX resta intatto. **Priorità solo ipotetica P2** per documentazione e provenienza, **P3** per eventuale UI; alternative leggere prima di nuova complessità. Solo nuova scheda e indice di questa cartella, nessuna approvazione, implementazione, merge o assegnazione. [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) sempre in bozza.
 
 ## Trentanovesima ricognizione — 22 novembre 2026 — REPS-TECH-042
 
