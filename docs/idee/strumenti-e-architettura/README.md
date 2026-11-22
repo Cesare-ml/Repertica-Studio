@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **36 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **37 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -42,6 +42,15 @@ Data ricognizione: **2026-11-22** (trentatreesima ricognizione). Stato uniforme:
 | [REPS-TECH-034](REPS-TECH-034-esportazione-brochure-pdf-atomica-senza-sovrascrittura.md) | Esportazione PDF brochure senza sovrascrittura di documenti esistenti, con eventuale pubblicazione finale sicura e gestione conservativa di errori/temporanei | P1 protezione file; P2 pubblicazione sicura (ipotetiche) | Proposta — da valutare |
 | [REPS-TECH-035](REPS-TECH-035-configurazioni-mcp-client-esterni-conflitti-recupero.md) | Collegamento MCP a client esterni: tutela delle configurazioni JSON/TOML contro modifiche concorrenti, conflitti e recupero, senza sostituire il server già presente | P2 condizionata; P3 se bastano snippet manuali | Proposta — da valutare |
 | [REPS-TECH-036](REPS-TECH-036-mcp-archivi-grandi-paginazione-limiti-risorse.md) | MCP locale con elenchi continuabili e limiti di risorse misurati per archivi grandi, senza nuova rete né dati sensibili esposti | P2 condizionata; P3 se gli archivi sono piccoli | Proposta — da valutare |
+| [REPS-TECH-037](REPS-TECH-037-recupero-ripristino-interrotto-avvio-protetto.md) | Ripristino interrotto: avvio protetto e recupero assistito di rollback e archivi precedenti, senza inizializzazione o scelta implicita | P1–P2 condizionata (guardia); P2–P3 modalità guidata | Proposta — da valutare |
+
+## Trentaquattresima ricognizione — 22 novembre 2026 — REPS-TECH-037
+
+- **[REPS-TECH-037 — Ripristino interrotto: avvio protetto e recupero assistito](REPS-TECH-037-recupero-ripristino-interrotto-avvio-protetto.md):** analizzato il percorso reale di `recover_interrupted_restore` in `backup.rs`, richiamato da `lib.rs` prima di `db::open`. La pipeline di restore **esiste già** e protegge i dati mediante staging e rollback. Quando però sono presenti sia la directory attiva sia `.repertica-studio-restore-rollback`, il recovery sposta la copia precedente sotto `ReperticaStudio-before-restore-...` senza ispezionare preventivamente entrambi i candidati. `db::open` può creare database e cartelle quando mancano: il caso «directory attiva presente ma priva di SQLite + rollback valido» richiede un test di interruzione. **Rischio dedotto dal codice, non perdita riprodotta.**
+- **Proposta condizionata:** prima matrice di crash e controlli reali Windows/macOS/Linux, poi eventuale **guardia conservativa di avvio** che non inizializzi dati nuovi in presenza di indizi di un ripristino incerto; solo successivamente una modalità di recupero read-only con selezione esplicita, conservando ogni candidato. Priorità ipotetica **P1–P2 per la guardia**, **P2–P3 per la UI avanzata**; nessuna cancellazione o rinomina automatica proposta come nuovo comportamento.
+- **Anti-doppione:** TECH-009 inventaria backup pubblicati, TECH-012 protegge migrazioni di schema, TECH-022 stima lo spazio **prima** di backup/restore; TECH-037 tratta lo **stato di avvio dopo un restore interrotto**, comprese cartelle rollback e staging senza manifest. Confrontate anche le 41 schede dell'altra [PR Gestione e UX #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) e mantenute intatte.
+- **Tutele:** SQLite e media locali, funzionamento senza account/cloud, backup completi in cartella scelta e formati esistenti invariati; nessuna telemetria, niente esposizione di dati privati nei report, lingua di sistema con fallback inglese anche senza DB. Criteri di accettazione descrivono stati di interruzione, controlli read-only e assenza di migrazioni involontarie.
+- **Esito:** **37 schede**, tutte **«Proposta — da valutare»**. Solo nuova scheda e questo indice Markdown sotto `docs/idee/strumenti-e-architettura/`; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) mantenuta aperta, in bozza e **senza merge**. Nessuna implementazione, approvazione o assegnazione.
 
 ## Trentatreesima ricognizione — 22 novembre 2026 — REPS-TECH-036
 
