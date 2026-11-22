@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (quarantaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **53 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (quarantasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **54 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -60,6 +60,15 @@ Aggiornato: **2026-11-22** (quarantaseiesima ricognizione). Stato delle proposte
 | [REPS-UX-052](REPS-UX-052-contesto-dichiarato-vendite-canali.md) | Modalità dichiarata di conclusione delle vendite, separata dall'eventuale origine della richiesta; nessuna attribuzione o tracciamento automatico | P2 se validato, P3 o nessuno sviluppo se bastano note/CSV | Proposta — da valutare |
 
 | [REPS-UX-053](REPS-UX-053-didascalie-sala-cartellini-espositivi.md) | Cartellini pubblici di sala generati da opere selezionate, revisionati prima di PDF/stampa, senza etichette QR interne o divulgazione dei dati privati | P2 se usati spesso; P3 o nessuno sviluppo se basta un modello LibreOffice | Proposta — da valutare |
+
+| [REPS-UX-054](REPS-UX-054-vista-presentazione-riservata-in-studio.md) | Vista temporanea per presentare opere a schermo con soli campi deliberatamente visibili, senza fingere protezione dell'archivio | P2 se validata; P3 o nessuno sviluppo se bastano viewer e PDF | Proposta — da valutare |
+
+## Quarantasettesima ricognizione — 22 novembre 2026 — REPS-UX-054
+
+- **[REPS-UX-054 — Vista temporanea di presentazione delle opere](REPS-UX-054-vista-presentazione-riservata-in-studio.md):** riletta la documentazione di `main`, `app.component.html`, il viewer a schermo intero, i modelli, e confrontate 53 schede UX e 49 TECH. Il viewer esistente mostra anche **prezzo e nome acquirente** e consente di passare direttamente alla modifica: questo è utile per l'operatore, ma richiede prudenza se la finestra è visibile a visitatori o durante condivisione schermo. **Nessun incidente osservato**.
+- **Confine anti-doppioni:** UX-007 = dossier PDF, UX-053 = cartellini stampabili, TECH-025 = CSV condivisibili, TECH-013 = copie fotografiche. Qui la proposta è soltanto una **vista interattiva locale a campi consentiti**, distinta da esportazioni o barriere di accesso. Il **viewer attuale e PDF statico** restano le prime alternative da provare.
+- **Rischi e criterio:** prezzo, nome acquirente, descrizioni libere, didascalie e ubicazioni **nascosti per default**; sfondo opaco, zero azioni operative e uscita consapevole. La vista **non protegge fisicamente il PC** e non controlla notifiche OS, foto/scatti o altre finestre. Priorità **P2 solo se validata** con artisti/gallerie, altrimenti P3 o nessuno sviluppo.
+- **Esito:** **54 schede** in stato «Proposta — da valutare», senza approvazione, merge, implementazione o lavoro sull'altro filone. Solo Markdown nella cartella Gestione e UX.
 
 ## Quarantaseiesima ricognizione — 22 novembre 2026 — REPS-UX-053
 
