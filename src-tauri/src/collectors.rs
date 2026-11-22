@@ -359,13 +359,23 @@ pub fn create_collector_full(db: State<'_, Database>, input: NewCollectorInput) 
 pub fn delete_collector(db: State<'_, Database>, id: String) -> Result<(), String> {
     delete_collector_core(&db, &id)
 }
-#[tauri::command]
-pub fn list_collector_images(db: State<'_, Database>, collector_id: String) -> Result<Vec<CollectorImage>, String> {
+// Distinguish a genuinely empty gallery from a stale/deleted collector. Otherwise
+// a UI opening an old link misleadingly reports "no photographs" for a missing owner.
+fn list_collector_images_core(db: &Database, collector_id: &str) -> Result<Vec<CollectorImage>, String> {
     let conn = db.conn.lock().map_err(err)?;
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)",
+        params![collector_id], |row| row.get(0),
+    ).map_err(err)?;
+    if !exists { return Err("Collezionista non trovato".into()); }
     let mut statement = conn.prepare(&format!(
         "SELECT {IMAGE_FIELDS} FROM collector_images WHERE collector_id=?1 ORDER BY (kind='PROFILE') DESC,created_at,id")).map_err(err)?;
     let items = statement.query_map(params![collector_id], image_row).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
     Ok(items)
+}
+#[tauri::command]
+pub fn list_collector_images(db: State<'_, Database>, collector_id: String) -> Result<Vec<CollectorImage>, String> {
+    list_collector_images_core(&db, &collector_id)
 }
 #[tauri::command]
 pub fn add_collector_image_from_path(db: State<'_, Database>, collector_id: String, source_path: String, kind: String) -> Result<CollectorImage, String> {
@@ -375,10 +385,15 @@ pub fn add_collector_image_from_path(db: State<'_, Database>, collector_id: Stri
 // import. Cap the actual read, not only file metadata, before sending IPC data.
 fn collector_image_data_core(db: &Database, image_id: &str) -> Result<String, String> {
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let relative: String = conn.query_row("SELECT image_path FROM collector_images WHERE id=?1",
-        params![image_id], |r| r.get(0))
-        .optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    // Release the SQLite mutex after resolving the path. Reading and base64-
+    // encoding up to 12 MiB from slow/removable storage must not stall edits,
+    // sales or other collector queries on the same local archive.
+    let relative: String = {
+        let conn = db.conn.lock().map_err(err)?;
+        conn.query_row("SELECT image_path FROM collector_images WHERE id=?1",
+            params![image_id], |r| r.get(0))
+            .optional().map_err(err)?.ok_or("Fotografia non trovata")?
+    };
     if !valid_media_file(&relative) { return Err("Percorso media non valido".into()); }
     let path = db.directory.join(relative);
     let kind = fs::symlink_metadata(&path).map_err(err)?.file_type();
@@ -503,6 +518,26 @@ mod tests {
         assert!(add_image_core(&db, &collector.id, text.to_str().unwrap(), "PHOTO").is_err());
         assert!(add_image_core(&db, "inesistente", &picture(dir.path(), "y.jpg", 5), "PHOTO").is_err());
         assert_eq!(media_count(&db), 1, "rejected photographs leave no files behind");
+    }
+
+    #[test]
+    fn listing_photos_distinguishes_empty_collectors_from_stale_links() {
+        let (dir, db) = setup();
+        let anna = save_collector_core(&db, input("Anna")).unwrap();
+        let bruno = save_collector_core(&db, input("Bruno")).unwrap();
+        assert!(list_collector_images_core(&db, &anna.id).unwrap().is_empty());
+        assert!(list_collector_images_core(&db, &bruno.id).unwrap().is_empty());
+        let photo = add_image_core(
+            &db, &anna.id, &picture(dir.path(), "anna.jpg", 1), "PHOTO",
+        ).unwrap();
+        let gallery = list_collector_images_core(&db, &anna.id).unwrap();
+        assert_eq!(gallery.len(), 1);
+        assert_eq!(gallery[0].id, photo.id);
+        assert!(list_collector_images_core(&db, &bruno.id).unwrap().is_empty());
+        delete_collector_core(&db, &anna.id).unwrap();
+        assert!(list_collector_images_core(&db, &anna.id).unwrap_err().contains("non trovato"));
+        assert!(list_collector_images_core(&db, "unknown").unwrap_err().contains("non trovato"));
+        assert!(list_collector_images_core(&db, &bruno.id).unwrap().is_empty());
     }
 
     #[test]
