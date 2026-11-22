@@ -445,7 +445,7 @@ mod tests{
         c.execute("UPDATE sale_allocations SET part_id='missing-part'
             WHERE sale_id='s' AND part_id='savings'",[]).unwrap();
         c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-        let message=finance_overview_core(&c,2026).unwrap_err();
+        let message=finance_overview_core(&c,2026).err().expect("corrupt archive must fail");
         assert!(message.contains("Unknown allocation part"), "{message}");
         assert!(message.contains("missing-part"), "{message}");
 
@@ -456,7 +456,7 @@ mod tests{
             (id,expense_date,category,description,amount_cents,fund,created_at,updated_at)
             VALUES('e','2026-04-12','materials','Paint',500,'missing-fund','t','t')",[]).unwrap();
         c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
-        let message=finance_overview_core(&c,2026).unwrap_err();
+        let message=finance_overview_core(&c,2026).err().expect("corrupt archive must fail");
         assert!(message.contains("Unknown expense fund"), "{message}");
         assert!(message.contains("missing-fund"), "{message}");
 
