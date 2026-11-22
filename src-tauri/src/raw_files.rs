@@ -155,6 +155,49 @@ pub fn remove_file(directory: &Path, relative: &str) {
     }
 }
 
+/// Check immutable recorded metadata before detaching an imported or altered RAW.
+/// Stream the verification to keep RAM bounded even for 1 GiB originals.
+fn verify_raw_integrity(directory: &Path, raw: &RawFile) -> Result<(), String> {
+    let path = regular_raw_path(directory, &raw.media_path)?;
+    if raw.size_bytes <= 0 || raw.size_bytes as u64 > MAX_RAW_BYTES {
+        return Err("Dimensione RAW registrata non valida".into());
+    }
+    let mut input = File::open(&path).map_err(err)?;
+    if input.metadata().map_err(err)?.len() != raw.size_bytes as u64 {
+        return Err("Dimensione RAW diversa dai metadati: allegato conservato".into());
+    }
+    let mut digest = Sha256::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = input.read(&mut buffer).map_err(err)?;
+        if count == 0 { break; }
+        total += count as u64;
+        if total > raw.size_bytes as u64 {
+            return Err("Il RAW è cambiato durante la verifica: allegato conservato".into());
+        }
+        digest.update(&buffer[..count]);
+    }
+    if total != raw.size_bytes as u64 || !format!("{:x}", digest.finalize()).eq_ignore_ascii_case(&raw.sha256) {
+        return Err("Hash RAW diverso dai metadati: allegato conservato".into());
+    }
+    Ok(())
+}
+
+/// Retain a detached RAW when a gallery, collector, certificate, catalogue
+/// revision or another RAW record still needs the same path. Fail closed.
+fn cleanup_unlinked_raw(conn: &Connection, directory: &Path, relative: &str) {
+    if regular_raw_path(directory, relative).is_err() { return; }
+    let in_use = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artwork_raw_files WHERE media_path=?1)",
+        params![relative], |r| r.get::<_, bool>(0),
+    );
+    if matches!(in_use, Ok(false)) {
+        crate::media::remove_file_unless_catalogued(conn, directory, relative);
+    }
+}
+
+
 fn row(conn: &Connection, artwork_id: &str) -> Result<Option<RawFile>, String> {
     conn.query_row("SELECT artwork_id,media_path,original_name,size_bytes,sha256,created_at FROM artwork_raw_files WHERE artwork_id=?1",
         params![artwork_id], |r| Ok(RawFile { artwork_id: r.get(0)?, media_path: r.get(1)?, original_name: r.get(2)?, size_bytes: r.get(3)?,
@@ -164,16 +207,30 @@ fn row(conn: &Connection, artwork_id: &str) -> Result<Option<RawFile>, String> {
 pub fn attach_core(db: &Database, artwork_id: &str, source: &Path, max_bytes: u64) -> Result<RawFile, String> {
     // The long copy happens before the archive lock is taken, so the application stays responsive.
     let staged = stage(&db.directory, source, max_bytes)?;
-    let outcome = (|| -> Result<(RawFile, Option<String>), String> {
+    let outcome = (|| -> Result<(RawFile, Option<RawFile>), String> {
         let mut conn = db.conn.lock().map_err(err)?;
         let tx = conn.transaction().map_err(err)?;
-        let replaced = link(&tx, artwork_id, &staged)?;
+        let replaced = row(&tx, artwork_id)?;
+        // Do not discard the reference to an externally modified original.
+        if let Some(ref old) = replaced { verify_raw_integrity(&db.directory, old)?; }
+        link(&tx, artwork_id, &staged)?;
         let saved = row(&tx, artwork_id)?.ok_or("Allegato non salvato")?;
         tx.commit().map_err(err)?;
         Ok((saved, replaced))
     })();
     match outcome {
-        Ok((saved, replaced)) => { if let Some(old) = replaced { remove_file(&db.directory, &old); } Ok(saved) }
+        Ok((saved, replaced)) => {
+            if let Some(old) = replaced {
+                // Recheck before unlinking; if bytes changed meanwhile, preserve
+                // the file rather than delete evidence that no longer matches.
+                if verify_raw_integrity(&db.directory, &old).is_ok() {
+                    if let Ok(conn) = db.conn.lock() {
+                        cleanup_unlinked_raw(&conn, &db.directory, &old.media_path);
+                    }
+                }
+            }
+            Ok(saved)
+        }
         Err(e) => { staged.discard(); Err(e) }
     }
 }
@@ -182,8 +239,10 @@ pub fn remove_core(db: &Database, artwork_id: &str) -> Result<(), String> {
     regular_media_dir(&db.directory)?;
     let conn = db.conn.lock().map_err(err)?;
     let file = row(&conn, artwork_id)?.ok_or("Nessun file RAW allegato")?;
+    // A damaged import must keep its database reference for recovery.
+    verify_raw_integrity(&db.directory, &file)?;
     conn.execute("DELETE FROM artwork_raw_files WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
-    remove_file(&db.directory, &file.media_path);
+    cleanup_unlinked_raw(&conn, &db.directory, &file.media_path);
     Ok(())
 }
 
@@ -264,8 +323,12 @@ pub async fn attach_artwork_raw(app: tauri::AppHandle, artwork_id: String, sourc
 }
 
 #[tauri::command]
-pub fn remove_artwork_raw(db: State<'_, Database>, artwork_id: String) -> Result<(), String> {
-    remove_core(&db, &artwork_id)
+pub async fn remove_artwork_raw(app: tauri::AppHandle, artwork_id: String) -> Result<(), String> {
+    // Reading and hashing a RAW can take time; never block the Tauri UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<Database>();
+        remove_core(&db, &artwork_id)
+    }).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -358,6 +421,38 @@ mod tests {
         assert!(remove_core(&db, "a").is_err());
         let rows: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM artwork_raw_files", [], |r| r.get(0)).unwrap();
         assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn altered_raw_cannot_be_removed_or_replaced_and_staged_replacement_is_cleaned() {
+        let (dir, db) = setup();
+        let first = raw(dir.path(), "original.nef", &[73, 73, 42, 0], 128);
+        let saved = attach_core(&db, "a", &first, MAX_RAW_BYTES).unwrap();
+        let stored = db.directory.join(&saved.media_path);
+        fs::write(&stored, vec![42_u8; saved.size_bytes as usize]).unwrap();
+        assert!(remove_core(&db, "a").unwrap_err().contains("Hash"));
+        assert_eq!(row(&db.conn.lock().unwrap(), "a").unwrap(), Some(saved.clone()));
+        let replacement = raw(dir.path(), "replacement.dng", &[77, 77, 0, 42], 256);
+        assert!(attach_core(&db, "a", &replacement, MAX_RAW_BYTES).unwrap_err().contains("Hash"));
+        assert_eq!(row(&db.conn.lock().unwrap(), "a").unwrap(), Some(saved));
+        assert_eq!(media_count(&db), 1, "rejected replacement must not leak staged media");
+        assert!(stored.is_file(), "altered bytes are evidence, not disposable media");
+    }
+
+    #[test]
+    fn removing_raw_preserves_files_referenced_by_an_artwork_gallery() {
+        let (dir, db) = setup();
+        let source = raw(dir.path(), "original.nef", &[73, 73, 42, 0], 96);
+        let saved = attach_core(&db, "a", &source, MAX_RAW_BYTES).unwrap();
+        // An imported archive may reuse a RAW path in another media table.
+        db.conn.lock().unwrap().execute(
+            "INSERT INTO artwork_images(id,artwork_id,image_path,created_at,sort_order)
+             VALUES('photo','a',?1,'t',1)",
+            params![saved.media_path],
+        ).unwrap();
+        remove_core(&db, "a").unwrap();
+        assert!(db.directory.join(&saved.media_path).is_file());
+        assert!(row(&db.conn.lock().unwrap(), "a").unwrap().is_none());
     }
 
     #[test]
