@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **40 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **41 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -46,6 +46,15 @@ Aggiornato: **2026-11-22** (trentatreesima ricognizione). Stato delle proposte: 
 | [REPS-UX-038](REPS-UX-038-interessi-dichiarati-collezionisti-richieste-opere.md) | Interessi **dichiarati**, non inferiti: richieste di opere simili o caratteristiche desiderate; nessuna riserva, vendita, profilazione o consenso alle comunicazioni | P2* (P3 se bastano note) | Proposta — da valutare |
 | [REPS-UX-039](REPS-UX-039-ripartizione-informativa-incassi-dichiarati.md) | Vista informativa delle **quote per fondo sugli incassi manualmente dichiarati**, distinta dalle quote sul venduto e senza affermare liquidità effettivamente disponibile | P1–P2* per vendite rateali; P3 se bastano avvisi | Proposta — da valutare |
 | [REPS-UX-040](REPS-UX-040-rimborsi-rettifiche-spese-acquisti.md) | Rimborsi, note di credito e rettifiche dichiarate collegate alle spese, senza cancellare l'acquisto né inventare incassi | P2* (P3 se bastano note; P1–P2 solo dopo validazione) | Proposta — da valutare |
+| [REPS-UX-041](REPS-UX-041-titoli-descrizioni-opere-multilingua.md) | Titoli e descrizioni di presentazione riutilizzabili per lingua, senza traduzione automatica né modifica dei testi canonici e dei certificati | P2* (P3 se bastano override brochure; P1–P2 solo dopo validazione) | Proposta — da valutare |
+
+## Trentaquattresima ricognizione — 22 novembre 2026 — REPS-UX-041
+
+- **[REPS-UX-041 — Titoli e descrizioni delle opere in più lingue, senza traduzioni presunte](REPS-UX-041-titoli-descrizioni-opere-multilingua.md):** la scheda opera su `main` ha un titolo e una descrizione singoli; l'[editor brochure](../../BROCHURES-OFFLINE.md) ha già lingua di documento e override di titolo/descrizione **solo per la singola brochure**. La proposta studia testi editoriali per lingua **riutilizzabili sulla singola opera**, scritti e confermati manualmente, lasciando invariati titolo canonico, certificati immutabili, vendite e vecchi PDF. La ricognizione non dimostra una richiesta reale né un bug.
+- **Esperienza minima:** «Testi per presentazione» facoltativi nella scheda; titolo originale separato dal titolo espositivo; descrizioni indipendenti e stato bozza/pronto; in una fase eventuale una brochure può riusare la variante scelta senza ignorare override espliciti o pubblicare silenziosamente testi mancanti. **Nessun servizio di traduzione o IA, nessuna condivisione automatica**. Lingua UI del sistema/fallback inglese distinta dalla lingua dei testi. Anteprima per la privacy, accessibilità e compatibilità con i limiti tipografici PDF correnti.
+- **Anti-doppione:** UX-007 seleziona campi da mostrare nei dossier, non traduzioni archivistiche; UX-018 riguarda catalogazione in serie; TECH-030 vocabolari tecnici, TECH-032 font Unicode/resa PDF, TECH-001 formati aperti; `BROCHURES-OFFLINE.md` segnala già campi editoriali IT/EN come evoluzione. **Nessun documento della [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) modificato**. Confrontate le **36** proposte tecniche e le 40 schede UX precedenti.
+- **Alternativa essenziale:** mantenere gli override per singola brochure già funzionanti o provare una libreria di testi copiabili senza introdurre un'entità nuova. Priorità **P2 soltanto ipotetica**, P3 per utenti monolingue; eventuale P1–P2 richiede validazione. Backup nella cartella scelta, import/export solo come ipotesi versionate, rischi e criteri di accettazione dettagliati nella scheda.
+- **Esito:** **41 schede** tutte **«Proposta — da valutare»**. Una scheda e questo indice, entrambi Markdown e nella sola cartella Gestione e UX; [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) rimane aperta, in bozza e senza merge, senza approvazione o assegnazione allo sviluppo.
 
 ## Trentatreesima ricognizione — 22 novembre 2026 — REPS-UX-040
 
