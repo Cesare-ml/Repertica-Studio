@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **44 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **45 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -50,6 +50,14 @@ Aggiornato: **2026-11-22** (trentasettesima ricognizione). Stato delle proposte:
 | [REPS-UX-042](REPS-UX-042-pagamenti-dichiarati-spese-acquisti-differiti.md) | Acquisti a saldo differito: pagamenti manualmente dichiarati e scadenze, distinti dalle spese registrate e dalle uscite bancarie verificate | P2* (P3 se bastano note/calendario; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-043](REPS-UX-043-segnalazioni-assistenza-post-vendita-opere.md) | Richieste di assistenza **sull'opera dopo la vendita**: dichiarazioni, seguito ed esito distinti da resi, perizie e garanzie riconosciute | P2* solo se ricorrenti; P3 se bastano note | Proposta — da valutare |
 | [REPS-UX-044](REPS-UX-044-attrezzature-studio-manutenzioni-garanzie.md) | Registro facoltativo di attrezzature durevoli dello studio: identificazione del singolo bene, verifiche e manutenzioni dichiarate, senza creare spese o certificazioni di sicurezza | P2* per laboratori attrezzati; P3 se bastano note | Proposta — da valutare |
+| [REPS-UX-045](REPS-UX-045-rettifica-sostituzione-certificati-opere.md) | Annotazioni documentali e collegamento esplicito dei certificati sostitutivi: originali e seriali immutabili, nessuna revoca o consegna presunta | P1–P2* solo con casi verificati; altrimenti P2–P3 | Proposta — da valutare |
+
+## Trentottesima ricognizione — 22 novembre 2026 — REPS-UX-045
+
+- **[REPS-UX-045 — Rettifiche e sostituzioni documentate dei certificati](REPS-UX-045-rettifica-sostituzione-certificati-opere.md):** verificati su `main` i certificati serializzati e immutabili per trigger SQLite, l'emissione da snapshot corrente, l'elenco che mostra il titolo **attuale** dell'opera e la stampa storica. Non emerge una registrazione gestionale di **discrepanze o sostituzioni dichiarate**. La scheda propone, subordinatamente a casi reali, un'annotazione separata con stato «da verificare», e solo eventualmente collegamenti fra emissioni già effettuate. Nessuna modifica allo snapshot originale, al seriale o ai documenti già consegnati.
+- **Anti-doppioni:** UX-013 affronta rettifiche **delle vendite**, citando ma non progettando una procedura per certificati indipendenti da vendita; UX-004/019/031 riguardano la base documentale. La proposta tecnica [TECH-023](https://github.com/Cesare-ml/Repertica-Studio/blob/docs/idee-strumenti-architettura-20261121/docs/idee/strumenti-e-architettura/REPS-TECH-023-certificati-pdf-a-conservazione-verificabile.md) riguarda **PDF/A**, non lo stato organizzativo dei documenti. Le 40 proposte della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) restano intatte.
+- **Confini:** la sola emissione di un sostituto non prova firma, notifica, ritiro, autenticità o invalidità giuridica. Nessun cambiamento a vendite, incassi, quote, coefficienti o ubicazione; nessuna rete. Fasi opzionali; priorità **P1–P2 soltanto se esiste il bisogno**, altrimenti **P2–P3** o semplice nota esterna.
+- **Esito:** **45 schede**, tutte «Proposta — da valutare». Solo nuova scheda e indice Markdown sotto `docs/idee/gestione-e-ux/`; PR [#14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) ancora aperta, in bozza e senza merge. Nessun codice, test, workflow, configurazione, dipendenza o file dell'altro filone modificato.
 
 ## Trentasettesima ricognizione — 22 novembre 2026 — REPS-UX-044
 
