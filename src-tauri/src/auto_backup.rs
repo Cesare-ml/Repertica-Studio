@@ -168,7 +168,14 @@ pub fn save_core(db: &Database, input: ScheduleInput, now: NaiveDateTime) -> Res
     conn.execute(
         "UPDATE backup_schedule SET enabled=?1,frequency=?2,time_of_day=?3,weekday=?4,day_of_month=?5,
             destination=?6,keep_last=?7,
-            enabled_at=CASE WHEN ?1=1 AND (enabled=0 OR enabled_at IS NULL) THEN ?8 ELSE enabled_at END
+            enabled_at=CASE WHEN ?1=1 AND (enabled=0 OR enabled_at IS NULL) THEN ?8 ELSE enabled_at END,
+            -- A successful backup on a different disk must not satisfy the
+            -- schedule for this destination. Keep the historical backup log.
+            last_success_at=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_success_at END,
+            last_attempt_at=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_attempt_at END,
+            last_status=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_status END,
+            last_message=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_message END,
+            last_directory=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_directory END
          WHERE singleton=1",
         params![i64::from(input.enabled), input.frequency, input.time_of_day, input.weekday, input.day_of_month,
             destination, input.keep_last, now.format(STAMP).to_string()],
@@ -626,6 +633,52 @@ mod tests {
             "disabling retention during an external-disk scan must preserve all backups");
     }
 
+
+    #[test]
+    fn switching_backup_disks_invalidates_old_success_and_retry_without_losing_history() {
+        let (dir, db, first) = setup();
+        let second = dir.path().join("second-disk");
+        fs::create_dir(&second).unwrap();
+        save_core(&db, input(&first, 0), at("2026-11-20 08:00")).unwrap();
+        let previous = run_core(&db, at("2026-11-21 09:05")).unwrap();
+        let previous_directory = previous.last_directory.unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE backup_schedule SET last_attempt_at='2026-11-21T09:06:00',
+                last_status='ERROR',last_message='Disco scollegato' WHERE singleton=1", []).unwrap();
+        }
+
+        let switched = save_core(&db, input(&second, 0), at("2026-11-21 09:07")).unwrap();
+        assert!(switched.last_success_at.is_none(), "old disk success cannot satisfy the new one");
+        assert!(switched.last_attempt_at.is_none(), "old disk errors cannot delay new disk backups");
+        assert!(switched.last_status.is_none() && switched.last_message.is_none());
+        assert!(switched.last_directory.is_none(), "UI must not show an old disk as the latest copy");
+        assert!(Path::new(&previous_directory).is_dir(), "switching disks does not delete old copies");
+        let logged: i64 = db.conn.lock().unwrap().query_row(
+            "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
+            params![previous_directory], |r| r.get(0)).unwrap();
+        assert_eq!(logged, 1, "the old copy remains discoverable in the backup log");
+
+        // A backup completed at 09:05 on the old disk must not suppress the
+        // still-due 09:00 occurrence on the newly selected disk.
+        let next = tick(&db, at("2026-11-21 09:08")).unwrap()
+            .expect("new disk must receive its own backup");
+        let created = fs::canonicalize(next.last_directory.unwrap()).unwrap();
+        assert!(created.starts_with(fs::canonicalize(&second).unwrap()));
+    }
+
+    #[test]
+    fn saving_the_same_backup_destination_preserves_success_history() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-20 08:00")).unwrap();
+        let completed = run_core(&db, at("2026-11-21 09:05")).unwrap();
+        let saved_again = save_core(&db, input(&destination, 0), at("2026-11-21 09:07")).unwrap();
+        assert_eq!(saved_again.last_success_at, completed.last_success_at);
+        assert_eq!(saved_again.last_directory, completed.last_directory);
+        assert_eq!(saved_again.last_status.as_deref(), Some("OK"));
+        assert!(tick(&db, at("2026-11-21 09:08")).unwrap().is_none(),
+            "saving unchanged settings must not duplicate today's backup");
+    }
 
     #[test]
     fn a_completed_backup_does_not_mark_a_new_destination_as_backed_up() {
