@@ -203,11 +203,16 @@ fn apply_retention(db: &Database, destination: &Path, keep: i64) -> Result<(), S
             .unwrap_or(false);
         let regular_file = |name: &str| fs::symlink_metadata(path.join(name))
             .map(|meta| meta.is_file() && !meta.file_type().is_symlink()).unwrap_or(false);
+        // A backup with the right filenames can still have corrupted media,
+        // mismatched hashes, broken relations or a forged manifest. Never count
+        // it toward the quota, and never destroy its potentially salvageable
+        // files: otherwise a damaged recent copy could evict the last valid one.
         if name_ok && plain_directory && directly_inside
-            && regular_file("manifest.json") && regular_file("repertica.sqlite") {
+            && regular_file("manifest.json") && regular_file("repertica.sqlite")
+            && backup::inspect_backup_core(path).is_ok() {
             Some(directory)
         } else {
-            None // Keep suspicious/absent folders and their log entries untouched.
+            None // Keep suspicious, damaged and unavailable copies untouched.
         }
     }).collect();
     for directory in eligible.into_iter().skip(keep as usize) {
@@ -507,6 +512,44 @@ mod tests {
         assert!(Path::new(&keep).is_dir() && Path::new(&newest).is_dir(),
             "a bogus log row must not cost a real copy its retention slot");
         assert!(fake.join("note.txt").exists(), "unrecognized folder is never removed");
+    }
+
+    #[test]
+    fn damaged_recent_backup_cannot_evict_the_last_verified_copies() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 2), at("2026-11-10 08:00")).unwrap();
+        let first = run_core(&db, at("2026-11-11 09:00")).unwrap().last_directory.unwrap();
+        let damaged = run_core(&db, at("2026-11-12 09:00")).unwrap().last_directory.unwrap();
+        // The directory still looks like a backup (manifest + SQLite exist),
+        // but its manifest no longer describes the actual files.
+        fs::write(Path::new(&damaged).join("manifest.json"), "{}").unwrap();
+        assert!(backup::inspect_backup_core(Path::new(&damaged)).is_err());
+
+        let newest = run_core(&db, at("2026-11-13 09:00")).unwrap().last_directory.unwrap();
+        assert!(Path::new(&first).is_dir(), "the older valid copy must survive");
+        assert!(Path::new(&newest).is_dir(), "the newly verified copy must survive");
+        assert!(Path::new(&damaged).is_dir(), "damaged backups may contain salvageable files");
+        assert!(backup::inspect_backup_core(Path::new(&first)).is_ok());
+        assert!(backup::inspect_backup_core(Path::new(&newest)).is_ok());
+        let logged: i64 = db.conn.lock().unwrap()
+            .query_row("SELECT count(*) FROM auto_backup_log", [], |r| r.get(0)).unwrap();
+        assert_eq!(logged, 3, "damaged log records must be retained for manual recovery");
+    }
+
+    #[test]
+    fn damaged_old_backup_is_preserved_when_valid_older_copies_are_pruned() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 2), at("2026-11-10 08:00")).unwrap();
+        let damaged = run_core(&db, at("2026-11-11 09:00")).unwrap().last_directory.unwrap();
+        fs::write(Path::new(&damaged).join("manifest.json"), "{}").unwrap();
+        let oldest_valid = run_core(&db, at("2026-11-12 09:00")).unwrap().last_directory.unwrap();
+        let next = run_core(&db, at("2026-11-13 09:00")).unwrap().last_directory.unwrap();
+        let newest = run_core(&db, at("2026-11-14 09:00")).unwrap().last_directory.unwrap();
+
+        assert!(Path::new(&damaged).is_dir(), "corrupted data must not be deleted automatically");
+        assert!(!Path::new(&oldest_valid).exists(), "oldest verified copy may be pruned");
+        assert!(Path::new(&next).is_dir() && Path::new(&newest).is_dir(),
+            "the two newest verified copies must be preserved");
     }
 
     #[test]
