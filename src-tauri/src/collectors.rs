@@ -333,7 +333,11 @@ fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
     let path: String = conn.query_row("SELECT image_path FROM collector_images WHERE id=?1", params![image_id], |r| r.get(0))
         .optional().map_err(err)?.ok_or("Fotografia non trovata")?;
     if !valid_media_file(&path) { return Err("Percorso media non valido".into()); }
-    conn.execute("DELETE FROM collector_images WHERE id=?1", params![image_id]).map_err(err)?;
+    // An imported archive may contain a BEFORE DELETE trigger that suppresses
+    // the operation with RAISE(IGNORE). Do not tell the artist that a photograph
+    // was deleted when its database row (and therefore its media) still exists.
+    let removed = conn.execute("DELETE FROM collector_images WHERE id=?1", params![image_id]).map_err(err)?;
+    if removed != 1 { return Err("Fotografia non eliminata: verifica l'archivio SQLite".into()); }
     remove_media_file(&conn, db, &path);
     Ok(())
 }
@@ -646,6 +650,31 @@ mod tests {
         assert_eq!(media_count(&db), 0);
         let rows: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collector_images", [], |r| r.get(0)).unwrap();
         assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn suppressed_photo_deletion_reports_error_without_losing_the_original() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        let photo = add_image_core(
+            &db, &collector.id, &picture(dir.path(), "photo.jpg", 1), "PHOTO",
+        ).unwrap();
+
+        // A legacy archive might have a trigger that cancels DELETE without
+        // raising a SQLite error. This must not look like a successful deletion.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_collector_photo_delete BEFORE DELETE ON collector_images
+             BEGIN SELECT RAISE(IGNORE); END;",
+        ).unwrap();
+        let message = delete_image_core(&db, &photo.id).unwrap_err();
+        assert!(message.contains("non eliminata"), "{message}");
+        assert!(db.directory.join(&photo.image_path).is_file());
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, 1);
+
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER ignore_collector_photo_delete").unwrap();
+        delete_image_core(&db, &photo.id).unwrap();
+        assert!(!db.directory.join(&photo.image_path).exists());
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, 0);
     }
 
     #[test]
