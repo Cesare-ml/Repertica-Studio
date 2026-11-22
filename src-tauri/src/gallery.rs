@@ -813,8 +813,8 @@ mod tests {
         assert!(normalize_kind(Some("detail")).is_err(), "codes are exact");
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().join("app")).unwrap();
-        fs::write(db.directory.join("media/cover.png"), b"c").unwrap();
-        fs::write(db.directory.join("media/side.png"), b"s").unwrap();
+        fs::write(db.directory.join("media/cover.png"), [137, 80, 78, 71, 13, 10, 26, 10]).unwrap();
+        fs::write(db.directory.join("media/side.png"), [137, 80, 78, 71, 13, 10, 26, 10]).unwrap();
         {
             let conn = db.conn.lock().unwrap();
             conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at) VALUES('a','A','Art','media/cover.png','t','t')", []).unwrap();
@@ -851,8 +851,8 @@ mod tests {
     fn promoting_photo_swaps_cover_atomically_and_preserves_both_files() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().join("app")).unwrap();
-        fs::write(db.directory.join("media/cover.png"), b"old cover").unwrap();
-        fs::write(db.directory.join("media/side.png"), b"new cover").unwrap();
+        fs::write(db.directory.join("media/cover.png"), [137, 80, 78, 71, 13, 10, 26, 10]).unwrap();
+        fs::write(db.directory.join("media/side.png"), [137, 80, 78, 71, 13, 10, 26, 10]).unwrap();
         {
             let conn = db.conn.lock().unwrap();
             conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
@@ -888,7 +888,7 @@ mod tests {
     fn first_cover_promotion_removes_only_gallery_row_not_media() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().join("app")).unwrap();
-        fs::write(db.directory.join("media/first.jpg"), b"photo").unwrap();
+        fs::write(db.directory.join("media/first.jpg"), [0xff, 0xd8, 0xff, 0x01]).unwrap();
         {
             let conn = db.conn.lock().unwrap();
             conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
