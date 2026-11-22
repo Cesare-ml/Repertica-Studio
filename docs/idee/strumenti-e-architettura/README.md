@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (ventiquattresima ricognizione). Stato uniforme: **Proposta — da valutare**.
+Data ricognizione: **2026-11-22** (venticinquesima ricognizione). Stato uniforme: **Proposta — da valutare**.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -33,6 +33,15 @@ Data ricognizione: **2026-11-22** (ventiquattresima ricognizione). Stato uniform
 | [REPS-TECH-025](REPS-TECH-025-esportazioni-tabellari-minimizzate-condivisione.md) | Copie tabellari con sole colonne e righe deliberatamente condivisibili, anteprima e protezioni conservative, senza alterare CSV integrali o backup | P2 | Proposta — da valutare |
 | [REPS-TECH-026](REPS-TECH-026-backup-compatti-snapshot-verificabili.md) | Studio di backup compatti **opt-in** per archivi multimediali grandi, con snapshot logici verificabili, copia integrale indipendente sempre esportabile e nessuna cancellazione implicita | P3; P2 solo con bisogno misurato | Proposta — da valutare |
 | [REPS-TECH-027](REPS-TECH-027-importazione-fotografie-heic-heif-offline.md) | Importazione facoltativa di fotografie HEIC/HEIF da smartphone con originale preservato, derivati dichiarati, sicurezza codec e funzionamento offline | P2 condizionata; P3 se workaround sufficiente | Proposta — da valutare |
+| [REPS-TECH-028](REPS-TECH-028-ricerca-testo-pdf-allegati-offline.md) | Ricerca testuale offline nei PDF già allegati agli incassi: selezione esplicita, parsing sicuro e indice locale facoltativo ed eliminabile, senza OCR automatico | P2–P3 condizionata | Proposta — da valutare |
+
+## Venticinquesima ricognizione — 22 novembre 2026 — REPS-TECH-028
+
+- **[REPS-TECH-028 — Ricerca testuale offline nei PDF allegati](REPS-TECH-028-ricerca-testo-pdf-allegati-offline.md):** studio di un'eventuale ricerca nel testo **già incorporato** nei PDF degli incassi, per ritrovare un documento senza doverlo aprire uno alla volta. Prima alternativa: ricerca su un PDF scelto manualmente e **senza indice persistente**; solo se il bisogno è verificato, indice locale derivato, cancellabile, su documenti selezionati con consenso. **P2–P3 soltanto ipotetica**, nessun OCR, interpretazione automatica o validazione fiscale.
+- **Riscontro su `main`:** [`docs/RECEIPT-ATTACHMENTS.md`](../../RECEIPT-ATTACHMENTS.md) e [`receipt_attachments.rs`](../../../src-tauri/src/receipt_attachments.rs) gestiscono già PDF e immagini degli incassi, SHA-256, backup e apertura PDF mediante esportazione con WebView CSP restrittiva. [`archive-filters.ts`](../../../src/app/archive-filters.ts) ricerca campi di opere e collezionisti, non il testo dei PDF; dal [`Cargo.toml`](../../../src-tauri/Cargo.toml) esaminato non emerge un estrattore PDF specifico. **Nessun difetto o richiesta utenti misurati** e nessuna prova runtime di copertura completa del codice.
+- **Anti-doppione:** TECH-008 = filtri sui metadati; TECH-016 = custodia e link a più documenti futuri; TECH-003 = integrità media; TECH-014 = confine degli assistenti MCP; TECH-001/025 = portabilità/esportazioni, non ricerca PDF. Le [**32 proposte Gestione e UX**, PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), inclusa UX-028 giustificativi delle spese, non sono state modificate.
+- **Garanzie:** file originali, SHA-256, SQLite autorevole, 12 CSV e backup completi restano invariati; nessuna indicizzazione o upload nascosto, OCR, nuova porta di rete, testo nei log o esposizione MCP, e nessun allentamento CSP. Parsing PDF in contesto limitato, PDF scansiti e protetti, risultati obsoleti e dati finanziari replicati nell'indice richiedono analisi e prove su Windows/macOS/Linux. Offline, lingua di sistema con fallback inglese e supporto tastiera/screen reader.
+- **Esito:** catalogo di **28 idee**, tutte **«Proposta — da valutare»**. Creati e modificati soltanto file Markdown in `docs/idee/strumenti-e-architettura/`. La [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta aperta, in bozza e **senza merge**. Nessuna idea approvata, assegnata o implementata.
 
 ## Ventiquattresima ricognizione — 22 novembre 2026 — REPS-TECH-027
 
