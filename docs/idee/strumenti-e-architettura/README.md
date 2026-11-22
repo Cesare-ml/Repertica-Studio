@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **47 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **48 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -53,6 +53,14 @@ Data ricognizione: **2026-11-22** (quarantaquattresima ricognizione). Stato unif
 | [REPS-TECH-045](REPS-TECH-045-associazione-guidata-foto-importate-opere.md) | Associazione guidata delle fotografie già importate nel Media Center alle opere esistenti: anteprima, revisione umana per riga e collegamento protetto; nessun matching automatico né nuova importazione multipla | P2 se casi frequenti; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-046](REPS-TECH-046-master-fotografici-tiff-bigtiff-offline.md) | Master fotografici TIFF/BigTIFF conservabili come originali offline con hash, backup integrale ed eventuali preview derivate dichiarate; fase iniziale senza obbligo di decoder | P2 condizionata a casi reali; P3/nessuno sviluppo se non utile | Proposta — da valutare |
 | [REPS-TECH-047](REPS-TECH-047-ocr-locale-documenti-scansionati-consenso.md) | OCR locale manuale dei documenti scansionati con originali intatti, testo temporaneo per default e indice solo eventuale opt-in; distinto dal testo PDF nativo di TECH-028 | P2–P3 condizionata, nessuno sviluppo se OCR esterno basta | Proposta — da valutare |
+| [REPS-TECH-048](REPS-TECH-048-parita-ricerca-interfaccia-mcp-unicode.md) | Ricerca opere con semantica Unicode e corrispondenze verificabili fra interfaccia Angular e MCP locale, senza aprire campi privati o cambiare gli ordinamenti/limiti intenzionali | P2 se le divergenze contano nell'uso reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+
+## Quarantacinquesima ricognizione — 22 novembre 2026 — REPS-TECH-048
+
+- **[REPS-TECH-048 — Ricerca delle opere coerente fra interfaccia desktop e MCP locale](REPS-TECH-048-parita-ricerca-interfaccia-mcp-unicode.md):** riletti `main`, [README](../../../README.md), [MVP](../../MVP.md), [MCP](../../MCP.md), [filtri Angular](../../../src/app/archive-filters.ts), [MCP Rust](../../../src-tauri/src/mcp.rs) e i test esistenti, oltre alle **47 precedenti proposte TECH** e alle **52 UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). La ricerca Angular usa NFD, rimozione di combining marks, equivalenze di punteggiatura e dimensioni, mentre il MCP applica una tabella ridotta di caratteri accentati e non ricerca le misure: **possibili divergenze da riprodurre con fixture sintetiche**, non bug utente già osservati.
+- **Proposta delimitata:** matrice anonimizzata di equivalenza della ricerca libera **solo su campi comuni delle opere**, con NFC/NFD, apostrofi, frasi, AND e misure da validare; eventuale allineamento minimo solo dopo prove. Niente nuovo motore di ricerca, sincronizzazione, librerie obbligatorie, nuovo indice o ampliamento dell'MCP a email, recapiti, note private o foto. Parità dei risultati non significa stesso ordine o stesso numero di record restituiti: la paginazione è trattata in TECH-036.
+- **Anti-doppioni:** TECH-008 riguarda viste/filtri avanzati dell'interfaccia, TECH-014 autorizzazioni MCP, TECH-036 limiti di risorse/paginazione, TECH-030 vocabolari; UX-048 tratta codici storici, non l'algoritmo Unicode. Nessun file dell'altra automazione viene modificato.
+- **Priorità ipotetica P2** se le discrepanze sono riproducibili e rilevanti; **P3 o nessuno sviluppo** se la guida attuale è sufficiente. Tutto offline, account e cloud non richiesti, backup/export integrali invariati, lingua di sistema con fallback inglese e originali intatti. **Una sola scheda nuova**; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) solo Markdown, in bozza e senza merge.
 
 ## Quarantaquattresima ricognizione — 22 novembre 2026 — REPS-TECH-047
 
