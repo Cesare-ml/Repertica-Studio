@@ -106,6 +106,12 @@ button.destructive:hover{background:#fff2f0}
 .t-full_bleed .pv-wtech{--x:53;--y:708;--w:489;--h:14;--fs:10;--lh:14}
 .t-full_bleed .pv-wdesc{--x:53;--y:733;--w:489;--h:56;--fs:10.5;--lh:14}
 /* closing page: the block is centred vertically */
+.pv-cover-center{inset:calc(var(--pt)*60) 0 calc(var(--pt)*60)}
+.pv-ornament{width:calc(var(--pt)*60);height:calc(var(--pt)*.8);margin:calc(var(--pt)*14) 0}
+.pv-ornament.short{width:calc(var(--pt)*44);margin:calc(var(--pt)*6) 0 calc(var(--pt)*16)}
+.pv-cover-artist{font-size:calc(var(--pt)*38);line-height:calc(var(--pt)*46);max-width:calc(var(--pt)*440)}
+.pv-cover-title{font-size:calc(var(--pt)*22);line-height:calc(var(--pt)*31);max-width:calc(var(--pt)*440)}
+.pv-cover-subtitle{font-size:calc(var(--pt)*11);line-height:calc(var(--pt)*17);max-width:calc(var(--pt)*420);margin-top:calc(var(--pt)*10)}
 .pv-center{position:absolute;inset:calc(var(--pt)*40) 0 calc(var(--pt)*100);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0}
 .pv-static{position:static}
 .pv-static-rule{width:calc(var(--pt)*36);height:calc(var(--pt)*.8);margin:calc(var(--pt)*10) 0 calc(var(--pt)*30)}

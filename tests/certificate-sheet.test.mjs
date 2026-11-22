@@ -42,13 +42,13 @@ test('the SHA-256 of the issued record is the standard one', async () => {
 test('the certificate keeps the layout of the Gestionale and the artist comes from the settings', () => {
   const sheet = get('src/app/certificate-sheet.component.ts');
   for (const rule of ['210mm', '297mm', '#fffdf8', '#9a762d', "'Palatino Linotype'", 'cs-verify', 'cs-sign']) assert.ok(sheet.includes(rule), rule);
-  assert.match(get('src-tauri/src/commands.rs'), /SELECT artist_name FROM studio_settings/);
+  assert.match(get('src-tauri/src/commands.rs'), /SELECT artist_name,artist_alias FROM studio_settings/);
   assert.match(get('src-tauri/src/db.rs'), /ALTER TABLE studio_settings ADD COLUMN artist_name/);
   const html = get('src/app/app.component.html');
   assert.match(html, /<rp-certificate-sheet/);
   const dialogStart = html.indexOf('aria-labelledby="certificate-title"');
   assert.doesNotMatch(html.slice(dialogStart, dialogStart + 2500), /certificateDraft\.artist_name/, 'no artist field in the emission dialog');
-  assert.match(html, /saveArtistName/);
+  assert.match(html, /saveArtistProfile/);
 });
 
 test('exports live in Settings only, not on the archive pages', () => {

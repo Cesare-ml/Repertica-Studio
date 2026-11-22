@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 17;
+pub const SCHEMA_VERSION: i64 = 18;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -538,6 +538,28 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
             script.push_str("ALTER TABLE certificates ADD COLUMN issued_place TEXT CHECK(issued_place IS NULL OR length(issued_place) BETWEEN 1 AND 240);");
         }
         script.push_str("PRAGMA user_version=17; COMMIT;");
+        conn.execute_batch(&script)?;
+    }
+    if version < 18 {
+        // Price rules per artwork (own coefficient or fixed price), the artist's stage name and the
+        // name that signs the declaration of a certificate.
+        let has_column = |table: &str, column: &str| -> Result<bool, rusqlite::Error> {
+            conn.query_row(&format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name='{column}'"), [], |r| r.get::<_, i64>(0)).map(|n| n > 0)
+        };
+        let mut script = String::from("BEGIN IMMEDIATE;");
+        if !has_column("artworks", "artist_coefficient_override")? {
+            script.push_str("ALTER TABLE artworks ADD COLUMN artist_coefficient_override REAL CHECK(artist_coefficient_override IS NULL OR (artist_coefficient_override > 0 AND artist_coefficient_override <= 100000));");
+        }
+        if !has_column("artworks", "fixed_price_cents")? {
+            script.push_str("ALTER TABLE artworks ADD COLUMN fixed_price_cents INTEGER CHECK(fixed_price_cents IS NULL OR (fixed_price_cents >= 0 AND fixed_price_cents <= 100000000000));");
+        }
+        if !has_column("studio_settings", "artist_alias")? {
+            script.push_str("ALTER TABLE studio_settings ADD COLUMN artist_alias TEXT CHECK(artist_alias IS NULL OR length(artist_alias) BETWEEN 1 AND 240);");
+        }
+        if !has_column("certificates", "declarant_name")? {
+            script.push_str("ALTER TABLE certificates ADD COLUMN declarant_name TEXT CHECK(declarant_name IS NULL OR length(declarant_name) BETWEEN 1 AND 240);");
+        }
+        script.push_str("PRAGMA user_version=18; COMMIT;");
         conn.execute_batch(&script)?;
     }
     // Certificates are append-only even when accessed through a raw SQLite client.

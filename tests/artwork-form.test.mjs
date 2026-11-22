@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { SUPPORTS, TECHNIQUES, OTHER_CHOICE, canEstimate, menuStateFor, valueFor } from '../src/app/artwork-options.ts';
+import { SUPPORTS, TECHNIQUES, OTHER_CHOICE, menuStateFor, valueFor } from '../src/app/artwork-options.ts';
 
 const get = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 
@@ -27,21 +27,14 @@ test('the menus contain the options of the Gestionale Opere and are translated',
   for (const option of [...TECHNIQUES, ...SUPPORTS]) assert.ok(dictionary.includes(`"${option}"`), `translation of ${option}`);
 });
 
-test('an estimate needs two positive finite sizes', () => {
-  assert.ok(canEstimate(30, 40));
-  for (const [w, h] of [[0, 40], [30, null], [undefined, 40], [-1, 5], [Number.NaN, 4], [Infinity, 4]]) assert.ok(!canEstimate(w, h), `${w} ${h}`);
-});
-
-test('the new artwork form estimates the price by itself and offers menus instead of free text', () => {
+test('the new artwork form shows the price by itself and offers menus instead of free text', () => {
   const html = get('src/app/app.component.html');
   const dialog = html.slice(html.indexOf('aria-labelledby="artwork-title"'));
   assert.doesNotMatch(dialog, /Calcola stima/, 'no manual estimate button');
-  assert.match(dialog, /scheduleEstimate\(\)/);
+  assert.match(dialog, /draftPrice\.cents/);
   assert.match(dialog, /setTechniqueChoice/);
   assert.match(dialog, /setSupportChoice/);
   assert.match(dialog, /class="chip-toggle"/);
-  const ts = get('src/app/app.component.ts');
-  assert.match(ts, /scheduleEstimate\(\): void/);
-  const body = ts.slice(ts.indexOf('async previewPrice'), ts.indexOf('private syncMenus'));
-  assert.doesNotMatch(body, /errorMessage/, 'a failed estimate never shows an error');
+  assert.match(dialog, /class="price-modes"/);
+  assert.doesNotMatch(get('src/app/app.component.ts'), /scheduleEstimate|previewPrice/, 'the price is computed in the interface, instantly');
 });

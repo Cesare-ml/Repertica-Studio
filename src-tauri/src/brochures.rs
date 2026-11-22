@@ -130,7 +130,6 @@ fn selected_artwork(db: &Database, id: &str, gallery_id: Option<&str>) -> Result
     }
     Ok(artwork)
 }
-#[derive(Clone)]
 struct Photo { jpg: Vec<u8>, width:u32, height:u32 }
 fn load_photo(db: &Database, relative: &str) -> Result<Photo, String> {
     let path=Path::new(relative);
@@ -214,10 +213,15 @@ fn draw_lines(out:&mut String, lines:&[String], x:f32,mut y:f32,font:f32,leading
         y-=leading;
     }
 }
-fn frame(out:&mut String,page:u32) {
+/// Text of the running header of the inner pages: the artist's name, or the title when there is none.
+fn running_header(b:&Brochure)->String {
+    let text=if b.artist.trim().is_empty(){b.title.trim()}else{b.artist.trim()};
+    text.to_uppercase().chars().take(70).collect()
+}
+fn frame(out:&mut String,page:u32,header:&str) {
     out.push_str("0.16 0.23 0.21 rg 50 771 495 1 re f\n");
     out.push_str("0.42 0.45 0.43 rg\n");
-    put_text(out,"REPERTICA  /  STUDIO",52.0,788.0,9.0,true);
+    put_text(out,header,52.0,788.0,9.0,true);
     put_text(out,&page.to_string(),522.0,40.0,9.0,false);
 }
 fn photo_ops(photo:&Photo,x:f32,y:f32,w:f32,h:f32,cover:bool)->String {
@@ -295,52 +299,56 @@ fn elegant_frame(out:&mut String) {
 fn rule(out:&mut String,cx:f32,y:f32,width:f32,thickness:f32,colour:&str) {
     out.push_str(&format!("{colour} rg {:.1} {y:.1} {width:.1} {thickness:.2} re f\n",cx-width/2.0));
 }
-fn brand_footer(out:&mut String) {
-    rule(out,297.5,86.0,24.0,0.6,GOLD);
-    out.push_str(&format!("{INK} rg\n"));
-    put_centered(out,"REPERTICA  /  STUDIO",297.5,62.0,7.5,Face::SansBold,3.0);
+/// A small gold rule closing the page (the brochure carries the artist's name, never the application's).
+fn closing_ornament(out:&mut String) {
+    rule(out,297.5,70.0,24.0,0.6,GOLD);
 }
 fn kicker(b:&Brochure)->&'static str {
     match b.language.as_str() {"en"=>"SELECTED WORKS","es"=>"OBRAS SELECCIONADAS","fr"=>"ŒUVRES CHOISIES","de"=>"AUSGEWÄHLTE WERKE",_=>"OPERE SELEZIONATE"}
 }
-/// First page: a framed hero picture (the first artwork), the artist in large serif capitals-and-lowercase,
-/// the title in italic and the subtitle; without a picture the text is centred on the page.
-fn cover(b:&Brochure,hero:Option<&Photo>)->Page {
+/// First page: typographic and centred, without a picture: the artist in large serif, the title in
+/// italic and the subtitle between fine gold rules, inside the double frame.
+fn cover(b:&Brochure)->Page {
     let mut out=String::new();
     elegant_frame(&mut out);
     out.push_str(&format!("{GOLD} rg\n"));
     put_centered(&mut out,kicker(b),297.5,758.0,8.5,Face::SansBold,3.4);
     rule(&mut out,297.5,742.0,36.0,0.8,GOLD);
-    let mut cursor=if hero.is_some() {
-        // Passe-partout: white mount with a hairline gold border around the picture.
-        let (mx,my,mw,mh)=(126.0_f32,352.0_f32,343.0_f32,388.0_f32);
-        out.push_str(&format!("1 1 1 rg {mx} {my} {mw} {mh} re f\n{GOLD} RG 0.5 w {:.1} {:.1} {:.1} {:.1} re S\n",mx+5.0,my+5.0,mw-10.0,mh-10.0));
-        if let Some(photo)=hero { out.push_str(&photo_ops(photo,mx+20.0,my+20.0,mw-40.0,mh-40.0,false)); }
-        314.0
-    } else { 560.0 };
+    let artist:Vec<String>=wrap_width(&b.artist,Face::Serif,38.0,440.0).into_iter().take(3).collect();
+    let title:Vec<String>=wrap_width(&b.title,Face::SerifItalic,22.0,440.0).into_iter().take(4).collect();
+    let subtitle:Vec<String>=wrap_width(&b.subtitle,Face::Sans,11.0,420.0).into_iter().take(3).collect();
+    let height=46.0*artist.len() as f32+36.0+31.0*title.len() as f32+if subtitle.is_empty(){0.0}else{26.0+17.0*subtitle.len() as f32};
+    let top=421.0+height/2.0;
+    rule(&mut out,297.5,top+34.0,60.0,0.8,GOLD);
+    let mut y=top-26.0;
     out.push_str(&format!("{INK} rg\n"));
-    for line in wrap_width(&b.artist,Face::Serif,31.0,430.0).into_iter().take(2) {
-        put_centered(&mut out,&line,297.5,cursor,31.0,Face::Serif,0.6);
-        cursor-=38.0;
+    for line in &artist {
+        put_centered(&mut out,line,297.5,y,38.0,Face::Serif,0.8);
+        y-=46.0;
     }
-    if !b.artist.trim().is_empty() { rule(&mut out,297.5,cursor+14.0,44.0,0.8,GOLD); cursor-=14.0; }
+    if !artist.is_empty() { rule(&mut out,297.5,y+22.0,44.0,0.8,GOLD); }
+    y-=14.0;
     out.push_str(&format!("{INK} rg\n"));
-    for line in wrap_width(&b.title,Face::SerifItalic,20.0,430.0).into_iter().take(3) {
-        put_centered(&mut out,&line,297.5,cursor-6.0,20.0,Face::SerifItalic,0.2);
-        cursor-=27.0;
+    for line in &title {
+        put_centered(&mut out,line,297.5,y,22.0,Face::SerifItalic,0.2);
+        y-=31.0;
     }
-    out.push_str(&format!("{MUTED} rg\n"));
-    for line in wrap_width(&b.subtitle,Face::Sans,10.5,420.0).into_iter().take(3) {
-        put_centered(&mut out,&line,297.5,cursor-14.0,10.5,Face::Sans,0.3);
-        cursor-=16.0;
+    if !subtitle.is_empty() {
+        y-=10.0;
+        out.push_str(&format!("{MUTED} rg\n"));
+        for line in &subtitle {
+            put_centered(&mut out,line,297.5,y,11.0,Face::Sans,0.3);
+            y-=17.0;
+        }
     }
-    brand_footer(&mut out);
-    Page{drawing:out,photo:hero.cloned()}
+    rule(&mut out,297.5,top-height-2.0,60.0,0.8,GOLD);
+    closing_ornament(&mut out);
+    Page{drawing:out,photo:None}
 }
 
 fn intro(b:&Brochure)->Page {
     let mut out=String::new();
-    frame(&mut out,0);
+    frame(&mut out,2,&running_header(b));
     put_text(&mut out,match b.language.as_str(){"en"=>"Introduction","es"=>"Introducción","fr"=>"Introduction","de"=>"Einleitung",_=>"Introduzione"},60.0,702.0,27.0,true);
     draw_lines(&mut out,&lines(&b.introduction,84).into_iter().take(36).collect::<Vec<_>>(),60.0,644.0,12.5,18.0);
     Page{drawing:out,photo:None}
@@ -375,10 +383,10 @@ fn contacts(b:&Brochure)->Page {
         put_centered(&mut out,&shown,297.5,y-22.0,15.0,Face::Serif,0.3);
         y-=66.0;
     }
-    brand_footer(&mut out);
+    closing_ornament(&mut out);
     Page{drawing:out,photo:None}
 }
-fn artwork_pages(item:&BrochureItem, art:&ArtPage,photo:Photo,page_num:u32)->Vec<Page> {
+fn artwork_pages(item:&BrochureItem, art:&ArtPage,photo:Photo,page_num:u32,header:&str)->Vec<Page> {
     let title=if item.title_override.trim().is_empty(){&art.title}else{&item.title_override};
     let desc=if item.description_override.trim().is_empty(){art.description.as_deref().unwrap_or("")}else{&item.description_override};
     let technical=format!("{}  ·  {}  ·  {}  ·  {}",
@@ -400,14 +408,14 @@ fn artwork_pages(item:&BrochureItem, art:&ArtPage,photo:Photo,page_num:u32)->Vec
             draw_lines(&mut out,shown,53.0,100.0,10.5,14.0);
         }
         "details" => {
-            frame(&mut out,page_num);
+            frame(&mut out,page_num,header);
             out.push_str(&photo_ops(&photo,52.0,283.0,289.0,455.0,false));
             draw_lines(&mut out,&lines(title,29).into_iter().take(4).collect::<Vec<_>>(),363.0,715.0,17.0,25.0);
             draw_lines(&mut out,&lines(&technical,38).into_iter().take(5).collect::<Vec<_>>(),363.0,585.0,9.0,16.0);
             draw_lines(&mut out,shown,363.0,483.0,10.5,15.0);
         }
         _ => {
-            frame(&mut out,page_num);
+            frame(&mut out,page_num,header);
             out.push_str(&photo_ops(&photo,56.0,315.0,483.0,438.0,false));
             draw_lines(&mut out,&lines(title,47).into_iter().take(2).collect::<Vec<_>>(),56.0,283.0,24.0,29.0);
             put_text(&mut out,&technical,56.0,235.0,10.0,false);
@@ -417,7 +425,7 @@ fn artwork_pages(item:&BrochureItem, art:&ArtPage,photo:Photo,page_num:u32)->Vec
     let mut pages=vec![Page{drawing:out,photo:Some(photo)}];
     for (index,chunk) in rest.chunks(34).enumerate() {
         let mut continuation=String::new();
-        frame(&mut continuation,page_num+index as u32+1);
+        frame(&mut continuation,page_num+index as u32+1,header);
         draw_lines(&mut continuation,&lines(title,47).into_iter().take(2).collect::<Vec<_>>(),60.0,706.0,20.0,27.0);
         draw_lines(&mut continuation,chunk,60.0,622.0,12.0,16.0);
         pages.push(Page{drawing:continuation,photo:None});
@@ -504,21 +512,18 @@ pub fn export_brochure_pdf(db: State<'_,Database>, brochure_id:String, destinati
     };
     validate(&document)?;
     if document.items.is_empty(){return Err("Aggiungi almeno un'opera prima dell'esportazione".into());}
-    // Page one is built last, once the first artwork's picture has been loaded for the hero image.
-    let mut pages=vec![Page{drawing:String::new(),photo:None}];
-    let mut hero:Option<Photo>=None;
+    let header=running_header(&document);
+    let mut pages=vec![cover(&document)];
     if !document.introduction.trim().is_empty(){pages.push(intro(&document));}
     for item in &document.items{
         let artwork=selected_artwork(&db,&item.artwork_id,item.gallery_image_id.as_deref())?;
         let path=artwork.image_path.as_deref()
             .ok_or_else(||format!("Manca la fotografia per l'opera {}",artwork.title))?;
         let photo=load_photo(&db,path)?;
-        if hero.is_none() { hero=Some(photo.clone()); }
         let next_page=pages.len() as u32+1;
-        pages.extend(artwork_pages(item,&artwork,photo,next_page));
+        pages.extend(artwork_pages(item,&artwork,photo,next_page,&header));
     }
     pages.push(contacts(&document));
-    pages[0]=cover(&document,hero.as_ref());
     let pdf=render_pdf(pages);
     fs::write(&destination,&pdf).map_err(error)?;
     Ok(destination)
@@ -540,7 +545,7 @@ mod tests{
     #[test]
     fn generated_pdf_has_page_tree_and_xref(){
         let b=Brochure{title:"Ópera".into(),artist:"Artista".into(),language:"es".into(),..Default::default()};
-        let pdf=render_pdf(vec![cover(&b,None),contacts(&b)]);
+        let pdf=render_pdf(vec![cover(&b),contacts(&b)]);
         assert!(pdf.starts_with(b"%PDF-1.4"));
         let text=String::from_utf8_lossy(&pdf);
         assert!(text.contains("/Count 2"));
@@ -569,26 +574,30 @@ mod tests{
         assert!(long.iter().all(|l|text_width(l,Face::Serif,20.0,0.0)<=200.5) && long.concat().len()==80);
     }
     #[test]
-    fn cover_and_closing_page_use_the_elegant_serif_layout(){
+    fn cover_and_closing_page_use_the_elegant_serif_layout_without_picture_or_product_name(){
         let b=Brochure{title:"Opere selezionate 2026".into(),subtitle:"Una raccolta".into(),artist:"Maria Rossi".into(),language:"it".into(),
             contact_email:"maria@example.test".into(),contact_website:"example.test".into(),..Default::default()};
-        // A real (gradient) picture, so the sample PDF can be looked at.
-        let gradient=image::RgbImage::from_fn(400,500,|x,y|image::Rgb([(40+x/3) as u8,(90+y/6) as u8,(150-y/8) as u8]));
-        let mut jpg=Vec::new();
-        JpegEncoder::new_with_quality(&mut jpg,85).encode_image(&image::DynamicImage::ImageRgb8(gradient)).unwrap();
-        let photo=Photo{jpg,width:400,height:500};
-        let with_hero=cover(&b,Some(&photo));
-        assert!(with_hero.photo.is_some() && with_hero.drawing.contains("/Im0 Do"), "the cover shows the first picture");
-        assert!(with_hero.drawing.contains("/F3 ") && with_hero.drawing.contains("/F4 "), "serif artist and italic title");
-        assert!(with_hero.drawing.contains(&hex_text("Maria Rossi")) && with_hero.drawing.contains(&hex_text("OPERE SELEZIONATE")));
-        let plain=cover(&b,None);
-        assert!(plain.photo.is_none() && !plain.drawing.contains("/Im0 Do"));
+        let first=cover(&b);
+        assert!(first.photo.is_none() && !first.drawing.contains("/Im0 Do"), "the cover carries no artwork picture");
+        assert!(first.drawing.contains("/F3 ") && first.drawing.contains("/F4 "), "serif artist and italic title");
+        for text in ["Maria Rossi","OPERE SELEZIONATE","Opere selezionate 2026","Una raccolta"] { assert!(first.drawing.contains(&hex_text(text)), "{text}"); }
         let last=contacts(&b);
         for label in ["CONTATTI","EMAIL","SITO WEB","maria@example.test"] { assert!(last.drawing.contains(&hex_text(label)), "{label}"); }
         assert!(!last.drawing.contains(&hex_text("INSTAGRAM")), "empty contacts are left out");
+        // The brochure never names the application: not on the cover, the contacts or the inner pages.
+        let mut inner=String::new();
+        frame(&mut inner,3,&running_header(&b));
+        assert!(inner.contains(&hex_text("MARIA ROSSI")), "the running header is the artist");
+        let intro_page=intro(&Brochure{introduction:"Testo".into(),..b.clone()});
+        for page in [&first.drawing,&last.drawing,&inner,&intro_page.drawing] {
+            assert!(!page.contains(&hex_text("REPERTICA")) && !page.contains(&hex_text("Repertica")) && !page.contains(&hex_text("STUDIO")));
+        }
+        assert_eq!(running_header(&Brochure{title:"Solo titolo".into(),..Default::default()}),"SOLO TITOLO","without an artist the title is used");
         // Samples for a visual check when a folder is given.
         if let Ok(dir)=std::env::var("BROCHURE_SAMPLE_DIR") {
-            fs::write(Path::new(&dir).join("cover-and-contacts.pdf"),render_pdf(vec![with_hero,plain,last])).unwrap();
+            let mut inner_page=String::new();
+            frame(&mut inner_page,3,&running_header(&b));
+            fs::write(Path::new(&dir).join("cover-and-contacts.pdf"),render_pdf(vec![first,Page{drawing:inner_page,photo:None},last])).unwrap();
         }
     }
     #[test]

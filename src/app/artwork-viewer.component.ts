@@ -122,6 +122,7 @@ const CACHE_LIMIT = 6;
               <div class="av-fact"><b>{{ tr('Anno') }}</b>{{ a.year || '—' }}</div>
               <div class="av-fact wide"><b>{{ tr('Tecnica') }} / {{ tr('Supporto') }}</b>{{ techniqueLine(a) }}</div>
               <div class="av-fact wide"><b>{{ tr('Misure') }}</b>{{ dimensions(a) }}</div>
+              <div class="av-fact wide" *ngIf="prices[a.id]"><b>{{ tr('Prezzo') }}</b>{{ prices[a.id] }}</div>
               <div class="av-fact wide" *ngIf="buyers[a.id]"><b>{{ tr('Venduta a') }}</b>{{ buyers[a.id] }}</div>
             </div>
             <p class="av-desc" *ngIf="a.description">{{ a.description }}</p>
@@ -141,6 +142,8 @@ export class ArtworkViewerComponent implements OnChanges, OnDestroy {
   @Input() language: AppLanguage = 'it';
   /** Name of the collector who bought each sold artwork, by artwork id. */
   @Input() buyers: Record<string, string> = {};
+  /** Price of each artwork, already formatted, by artwork id. */
+  @Input() prices: Record<string, string> = {};
   @Output() closed = new EventEmitter<void>();
   @Output() edit = new EventEmitter<Artwork>();
   @Output() gallery = new EventEmitter<Artwork>();

@@ -100,7 +100,6 @@ pub fn run() {
             finance::save_expense,
             finance::delete_expense,
             finance::finance_overview,
-            finance::price_preview,
             receipts::list_sale_receipts,
             receipts::record_sale_receipt,
             receipts::delete_sale_receipt,

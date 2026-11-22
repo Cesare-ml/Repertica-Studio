@@ -84,7 +84,8 @@ export class CertificateSheetComponent implements OnChanges {
     if (!this.certificate || !this.snapshot) return;
     if (changes['certificate'] || changes['snapshot']) {
       const c = this.certificate;
-      this.texts = certificateTexts(c.language, c.artist_name);
+      // The header and the artist line show the (stage) name; the declaration is signed with the full name.
+      this.texts = certificateTexts(c.language, c.declarant_name || c.artist_name);
       this.date = formatIssueDate(c.issued_at, c.language);
       this.identity = [this.snapshot.year, this.snapshot.code].filter(Boolean).join(' · ');
       this.dimensions = dimensionsText(this.snapshot);

@@ -220,7 +220,7 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
     let c = &archive.conn;
     let found = c.query_row(
         "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,status,
-                image_path IS NOT NULL,created_at,updated_at,signed,final_varnish,framed
+                image_path IS NOT NULL,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents
          FROM artworks WHERE id=?1 OR code=?1 COLLATE NOCASE",
         params![key],
         |r| {
@@ -231,15 +231,18 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
                 r.get::<_, Option<String>>(9)?, r.get::<_, String>(10)?,
                 r.get::<_, bool>(11)?, r.get::<_, String>(12)?, r.get::<_, String>(13)?,
                 [r.get::<_, bool>(14)?, r.get::<_, bool>(15)?, r.get::<_, bool>(16)?],
+                r.get::<_, Option<f64>>(17)?, r.get::<_, Option<i64>>(18)?,
             ))
         },
     );
-    let (id, code, title, year, technique, support, size, description, status, has_cover, created, updated, flags) =
+    let (id, code, title, year, technique, support, size, description, status, has_cover, created, updated, flags, own_coefficient, fixed_price) =
         match found {
             Ok(v) => v,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Err("Opera non trovata".into()),
             Err(e) => return Err(format!("Errore di lettura dell'archivio: {e}")),
         };
+    let (rate, artist_coefficient): (i64, f64) = sql(c.query_row("SELECT base_price_cm2_cents,artist_coefficient FROM studio_settings WHERE singleton=1", [], |r| Ok((r.get(0)?, r.get(1)?))))?;
+    let price = crate::finance::price_cents(size[0], size[1], rate, artist_coefficient, own_coefficient, fixed_price);
     let gallery: i64 = sql(c.query_row("SELECT count(*) FROM artwork_images WHERE artwork_id=?1", params![id], |r| r.get(0)))?;
     let sale = c.query_row(
         "SELECT s.id,s.sold_at,s.amount_cents,c.name,
@@ -269,6 +272,9 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
         "height_cm": size[1], "width_cm": size[0], "depth_cm": size[2],
         "description": excerpt(&description, 8000), "status": status,
         "signed": flags[0], "final_varnish_applied": flags[1], "framed": flags[2],
+        "price_cents": price, "price_eur": price.map(eur),
+        "price_source": if fixed_price.is_some() { "fixed_price" } else if own_coefficient.is_some() { "own_coefficient" } else { "artist_coefficient" },
+        "artist_coefficient_override": own_coefficient,
         "has_cover_photo": has_cover, "gallery_photo_count": gallery,
         "sale": sale, "certificates": certificates, "created_at": created, "updated_at": updated
     }))

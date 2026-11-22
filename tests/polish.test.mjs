@@ -47,9 +47,11 @@ test('the brochure cover and last page use the elegant layout, and the preview m
   assert.match(rust, /Times-Roman/);
   assert.match(rust, /Times-Italic/);
   assert.match(rust, /fn elegant_frame/);
-  assert.match(rust, /pages\[0\]=cover\(&document,hero\.as_ref\(\)\)/, 'the cover shows the first artwork');
+  assert.doesNotMatch(rust, /hero/, 'no artwork picture on the cover');
+  assert.doesNotMatch(rust.slice(0, rust.indexOf('#[cfg(test)]')), /REPERTICA|Repertica/, 'brochures never name the application');
   const html = get('src/app/brochures.component.html');
-  for (const klass of ['pv-frame', 'pv-mount', 'pv-artist', 'pv-contact']) assert.ok(html.includes(klass), klass);
+  for (const klass of ['pv-frame', 'pv-cover-artist', 'pv-contact']) assert.ok(html.includes(klass), klass);
+  assert.doesNotMatch(html, /pv-mount|REPERTICA|Repertica/, 'no picture on the cover and no product name in the preview');
   assert.match(html, /\[ngClass\]="'t-' \+ item\.template"/, 'every layout of the PDF has its own preview');
   const css = get('src/app/brochures.component.css');
   for (const layout of ['t-classic', 't-details', 't-full_bleed']) assert.ok(css.includes(layout), layout);

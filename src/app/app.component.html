@@ -36,13 +36,21 @@
         <button type="button" class="primary" (click)="navigate('artworks'); newArtwork()" [disabled]="!initialized">{{ tr('+ Nuova opera') }}</button>
       </div>
       <aside class="panel artist-prompt" *ngIf="initialized && !artistName" aria-labelledby="artist-prompt-title">
-        <div><h3 id="artist-prompt-title">{{ tr('Come ti chiami?') }}</h3>
-          <p>{{ tr('Il tuo nome d’artista comparirà sui certificati di autenticità. Potrai cambiarlo in Impostazioni.') }}</p></div>
-        <div class="artist-row">
-          <label class="settings-input"><span class="sr-only">{{ tr('Nome dell’artista') }}</span>
-            <input maxlength="240" [(ngModel)]="artistNameDraft" [placeholder]="tr('Nome e cognome')" (keydown.enter)="saveArtistName(artistNameDraft)"></label>
-          <button type="button" class="primary" (click)="saveArtistName(artistNameDraft)" [disabled]="busy || !artistNameDraft.trim()">{{ tr('Salva') }}</button>
+        <div><h3 id="artist-prompt-title">{{ tr('Imposta il tuo profilo') }}</h3>
+          <p>{{ tr('Servono per i certificati e per calcolare il prezzo delle opere. Potrai cambiarli quando vuoi in Impostazioni.') }}</p></div>
+        <div class="form-grid">
+          <label><span>{{ tr('Nome e cognome') }} *</span>
+            <input maxlength="240" [(ngModel)]="profileDraft.name" [placeholder]="tr('Nome e cognome')"></label>
+          <label><span>{{ tr('Nome d’artista') }} ({{ tr('facoltativo') }})</span>
+            <input maxlength="240" [(ngModel)]="profileDraft.alias" [placeholder]="tr('Se è diverso dal nome')"></label>
+          <label class="full"><span>{{ tr('Coefficiente artista') }}</span>
+            <input type="number" min="0.01" step="0.05" [(ngModel)]="profileDraft.coefficient"></label>
+          <div class="full price-examples" role="status" aria-live="polite">
+            <div class="example" *ngFor="let size of exampleSizes"><span>{{ size.width }} × {{ size.height }} cm</span>
+              <strong>{{ exampleCents(size, profileDraft.coefficient) !== null ? euros(exampleCents(size, profileDraft.coefficient)!) : '—' }}</strong></div>
+            <small>{{ tr('Prezzo calcolato con la tariffa di') }} {{ euros(settings.base_price_cm2_cents) }} {{ tr('al cm²') }} × {{ tr('coefficiente') }}. {{ tr('Ogni opera può avere un coefficiente proprio o un prezzo fisso.') }}</small></div>
         </div>
+        <div class="artist-row"><button type="button" class="primary" (click)="saveArtistProfile(profileDraft.name, profileDraft.alias, profileDraft.coefficient)" [disabled]="busy || !profileDraft.name.trim()">{{ tr('Salva e continua') }}</button></div>
       </aside>
       <aside class="panel guide" *ngIf="showGuide" aria-labelledby="guide-title">
         <div class="guide-head">
@@ -104,12 +112,13 @@
         <span class="filter-count" aria-live="polite">{{ visibleArtworks.length }} / {{ artworks.length }} {{ tr('Opere') }}</span>
       </div>
       <div class="panel table-scroll">
-        <table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Anno / tecnica') }}</th><th>{{ tr('Misure') }}</th><th>{{ tr('Stato') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+        <table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Anno / tecnica') }}</th><th>{{ tr('Misure') }}</th><th>{{ tr('Prezzo') }}</th><th>{{ tr('Stato') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
           <tbody><tr *ngFor="let a of visibleArtworks">
             <td><div class="work-cell"><button type="button" class="work-open" (click)="openViewer(a)" [attr.aria-label]="tr('Apri a schermo intero') + ': ' + a.title" [title]="tr('Apri a schermo intero')"><span class="work-image"><img *ngIf="thumbnails[a.id]" [src]="thumbnails[a.id]" alt=""><span *ngIf="!thumbnails[a.id]">R</span></span></button>
               <div><button type="button" class="link-button work-title" (click)="openViewer(a)">{{ a.title }}</button><span class="raw-badge" *ngIf="rawByArtwork[a.id]" [title]="rawByArtwork[a.id].original_name">RAW</span><small>{{ a.code }}</small></div></div></td>
             <td>{{ a.year || '—' }}<small class="stacked">{{ a.technique || 'Tecnica non indicata' }}</small></td>
             <td>{{ dimensions(a) }}</td>
+            <td>{{ priceLabel(a) }}<small class="stacked" *ngIf="priceNote(a)">{{ priceNote(a) }}</small></td>
             <td><span class="status" [ngClass]="a.status">{{ tr(statusLabels[a.status]) }}</span></td>
             <td><button *ngIf="salesByArtwork[a.id] as sale" type="button" class="link-button"
               (click)="openCollectorFromArtwork(a.id)" [attr.aria-label]="'Apri il collezionista ' + sale.collector_name">{{ sale.collector_name }}</button>
@@ -206,7 +215,7 @@
     </section>
 
     <section *ngIf="section === 'brochures'" class="page brochure-section">
-      <rp-brochures [artworks]="artworks" [language]="language"></rp-brochures>
+      <rp-brochures [artworks]="artworks" [language]="language" [artistName]="displayArtistName"></rp-brochures>
     </section>
 
     <section *ngIf="section === 'finance'" class="page finance-page">
@@ -309,11 +318,13 @@
         </div>
         <div class="backup-block artist-block">
           <h3>{{ tr('Artista e certificati') }}</h3>
-          <p>{{ tr('Il nome dell’artista compare su tutti i certificati che emetti. Impostalo una volta sola qui.') }}</p>
+          <p>{{ tr('Il nome e cognome firma la dichiarazione dei certificati; il nome d’artista, se c’è, compare al suo posto come autore sui certificati e nelle brochure.') }}</p>
           <div class="artist-row">
-            <label class="settings-input"><span>{{ tr('Nome dell’artista') }}</span>
+            <label class="settings-input"><span>{{ tr('Nome e cognome') }}</span>
               <input maxlength="240" [(ngModel)]="settingsDraft.artist_name" [placeholder]="tr('Nome e cognome')"></label>
-            <button type="button" class="primary" (click)="saveArtistName(settingsDraft.artist_name ?? '')" [disabled]="busy || !(settingsDraft.artist_name ?? '').trim() || (settingsDraft.artist_name ?? '').trim() === artistName">{{ tr('Salva') }}</button>
+            <label class="settings-input"><span>{{ tr('Nome d’artista') }} ({{ tr('facoltativo') }})</span>
+              <input maxlength="240" [(ngModel)]="settingsDraft.artist_alias" [placeholder]="tr('Se è diverso dal nome')"></label>
+            <button type="button" class="primary" (click)="saveArtistProfile(settingsDraft.artist_name ?? '', settingsDraft.artist_alias ?? '')" [disabled]="busy || !(settingsDraft.artist_name ?? '').trim()">{{ tr('Salva') }}</button>
           </div>
         </div>
         <div class="backup-block export-block">
@@ -428,7 +439,10 @@
             <label class="settings-input"><span>{{ tr('Coefficiente artista') }}</span>
               <input type="number" min="0.01" step="0.1" [(ngModel)]="settingsDraft.artist_coefficient"></label>
           </div>
+          <div class="price-examples" role="status"><div class="example" *ngFor="let size of exampleSizes"><span>{{ size.width }} × {{ size.height }} cm</span>
+            <strong>{{ exampleCentsDraft(size) !== null ? euros(exampleCentsDraft(size)!) : '—' }}</strong></div></div>
           <p class="backup-note">{{ tr('Metodo superficie: larghezza × altezza × tariffa per cm² × coefficiente. Il prezzo suggerito non modifica il prezzo storico delle vendite.') }}</p>
+          <p class="backup-note">{{ tr('Ogni opera può usare un coefficiente proprio o un prezzo fisso: si sceglie nella scheda dell’opera.') }}</p>
         </div>
         <div class="backup-block economy-settings allocation-editor">
           <h3>{{ tr('Ripartizione vendite') }}</h3>
@@ -527,7 +541,7 @@
   </main>
 </div>
 
-<rp-artwork-viewer *ngIf="viewerIndex !== null" [artworks]="viewerArtworks" [startIndex]="viewerIndex" [language]="language" [buyers]="buyersByArtwork"
+<rp-artwork-viewer *ngIf="viewerIndex !== null" [artworks]="viewerArtworks" [startIndex]="viewerIndex" [language]="language" [buyers]="buyersByArtwork" [prices]="pricesByArtwork"
   (closed)="viewerIndex = null" (edit)="viewerIndex = null; editArtwork($event)" (gallery)="viewerIndex = null; openGallery($event)"></rp-artwork-viewer>
 
 <div class="overlay" *ngIf="artworkDialog" role="dialog" aria-modal="true" aria-labelledby="artwork-title">
@@ -633,14 +647,33 @@
             <option value="Altro">{{ tr('Altro…') }}</option></select>
           <input *ngIf="supportMenu.choice === 'Altro'" [ngModel]="supportMenu.other" (ngModelChange)="setSupportOther($event)" maxlength="300" [placeholder]="tr('Specifica il supporto')" [attr.aria-label]="tr('Specifica il supporto')"></label>
         <div class="full measures" role="group" [attr.aria-label]="tr('Misure (cm)')">
-          <label><span>{{ tr('Altezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [ngModel]="artworkDraft.height_cm" (ngModelChange)="artworkDraft.height_cm = $event; scheduleEstimate()"></label>
-          <label><span>{{ tr('Larghezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [ngModel]="artworkDraft.width_cm" (ngModelChange)="artworkDraft.width_cm = $event; scheduleEstimate()"></label>
+          <label><span>{{ tr('Altezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [ngModel]="artworkDraft.height_cm" (ngModelChange)="artworkDraft.height_cm = $event"></label>
+          <label><span>{{ tr('Larghezza (cm)') }}</span><input type="number" min="0.01" step="0.1" [ngModel]="artworkDraft.width_cm" (ngModelChange)="artworkDraft.width_cm = $event"></label>
           <label><span>{{ tr('Profondità (cm)') }}</span><input type="number" min="0.01" step="0.1" [(ngModel)]="artworkDraft.depth_cm"></label>
-          <div class="estimate" [class.on]="estimateCents !== null" role="status" aria-live="polite">
-            <span>{{ tr('Prezzo indicativo') }}</span>
-            <strong>{{ estimateCents !== null ? euros(estimateCents) : '—' }}</strong>
-            <small>{{ estimateCents !== null ? tr('Calcolato dalle misure') : tr('Inserisci altezza e larghezza') }}</small></div>
         </div>
+      </div>
+    </section>
+    <section class="form-card">
+      <h3>{{ tr('Prezzo') }}</h3>
+      <div class="price-modes" role="radiogroup" [attr.aria-label]="tr('Come si determina il prezzo')">
+        <label class="price-mode" [class.on]="priceMode === 'auto'"><input type="radio" name="price-mode" value="auto" [ngModel]="priceMode" (ngModelChange)="setPriceMode($event)">
+          <span><b>{{ tr('Coefficiente dell’artista') }}</b><small>{{ tr('Coefficiente') }} {{ settings.artist_coefficient }}</small></span></label>
+        <label class="price-mode" [class.on]="priceMode === 'coefficient'"><input type="radio" name="price-mode" value="coefficient" [ngModel]="priceMode" (ngModelChange)="setPriceMode($event)">
+          <span><b>{{ tr('Coefficiente per quest’opera') }}</b><small>{{ tr('Sostituisce quello dell’artista') }}</small></span></label>
+        <label class="price-mode" [class.on]="priceMode === 'fixed'"><input type="radio" name="price-mode" value="fixed" [ngModel]="priceMode" (ngModelChange)="setPriceMode($event)">
+          <span><b>{{ tr('Prezzo fisso') }}</b><small>{{ tr('Ignora misure e coefficiente') }}</small></span></label>
+      </div>
+      <div class="price-row">
+        <label *ngIf="priceMode === 'coefficient'" class="price-input"><span>{{ tr('Coefficiente') }}</span>
+          <input type="number" min="0.01" step="0.05" [ngModel]="artworkDraft.artist_coefficient_override" (ngModelChange)="artworkDraft.artist_coefficient_override = $event"></label>
+        <label *ngIf="priceMode === 'fixed'" class="price-input"><span>{{ tr('Prezzo (€)') }}</span>
+          <input type="number" min="0" step="1" [ngModel]="fixedPriceEur" (ngModelChange)="setFixedPriceEur($event)"></label>
+        <div class="estimate" [class.on]="draftPrice.cents !== null" role="status" aria-live="polite">
+          <span>{{ tr('Prezzo dell’opera') }}</span>
+          <strong>{{ draftPrice.cents !== null ? euros(draftPrice.cents) : '—' }}</strong>
+          <small *ngIf="draftPrice.source === 'fixed'">{{ tr('Prezzo fisso impostato a mano') }}</small>
+          <small *ngIf="draftPrice.source !== 'fixed' && draftPrice.cents !== null">{{ tr('Larghezza × altezza × tariffa × coefficiente') }} {{ draftPrice.coefficient }}</small>
+          <small *ngIf="draftPrice.source !== 'fixed' && draftPrice.cents === null">{{ tr('Inserisci altezza e larghezza') }}</small></div>
       </div>
     </section>
     <section class="form-card">
@@ -912,7 +945,7 @@
     <div class="form-grid">
       <label class="full"><span>{{ tr('Opera *') }}</span><select [(ngModel)]="certificateDraft.artwork_id"><option *ngFor="let a of artworks" [value]="a.id">{{ a.code }} — {{ a.title }}</option></select></label>
       <div class="full code-field"><span>{{ tr('Artista che emette') }}</span>
-        <strong *ngIf="artistName; else noArtist">{{ artistName }}</strong>
+        <strong *ngIf="artistName; else noArtist">{{ displayArtistName }}</strong>
         <ng-template #noArtist><span class="warn-text">{{ tr('Non ancora impostato') }}</span>
           <button type="button" class="small" (click)="certificateDialog = false; navigate('settings')">{{ tr('Imposta nelle Impostazioni') }}</button></ng-template></div>
       <label><span>{{ tr('Lingua del certificato') }}</span><select [(ngModel)]="certificateDraft.language">

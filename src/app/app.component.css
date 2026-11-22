@@ -231,14 +231,35 @@ td.money{color:#234f3c;font-weight:700;font-variant-numeric:tabular-nums}
 .allocation-total{color:#4d6957;font-weight:700}
 .form-card{border:1px solid #e3e6e0;border-radius:12px;background:#fcfdfb;margin:14px 0 0;padding:14px 16px 16px}
 .form-card>h3{margin:0 0 12px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#4d5f56}
-.measures{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(170px,1.2fr);gap:12px;align-items:stretch}
+.measures{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:stretch}
 .measures label{display:flex;flex-direction:column;gap:7px;min-width:0}
 .estimate{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:8px 12px;border-radius:10px;border:1px dashed #cfd8cd;background:#f4f6f2;color:#7a867f;min-width:0}
 .estimate>span{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-.estimate>strong{font-size:18px;color:#8a978f}
+.estimate>strong{font-size:22px;color:#8a978f}
 .estimate>small{font-size:10px}
 .estimate.on{border-style:solid;border-color:#b9d1c1;background:#eaf3ec;color:#3e6350}
 .estimate.on>strong{color:#1f4a35}
+.price-modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.price-mode{position:relative;display:flex;border:1px solid #d4dcd3;border-radius:12px;background:#fff;padding:11px 14px;cursor:pointer;transition:background .15s,border-color .15s}
+.price-mode:hover{border-color:#a9bdae}
+.price-mode input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.price-mode:has(input:focus-visible){outline:2px solid #3e6350;outline-offset:2px}
+.price-mode span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.price-mode b{font-size:12px;color:#33433b}
+.price-mode small{font-size:11px;color:#7a867f}
+.price-mode.on{background:#e3f0e6;border-color:#7fa88c}
+.price-mode.on b{color:#1f4a35}
+.price-row{display:flex;gap:14px;align-items:stretch;margin-top:12px;flex-wrap:wrap}
+.price-row .estimate{flex:1 1 260px}
+.price-input{display:flex;flex-direction:column;gap:7px;flex:0 1 180px}
+.price-input span{font-size:11px;font-weight:700;color:#586b5e}
+.price-input input{background:#fff;border:1px solid #dce2db;border-radius:9px;padding:11px 12px;color:#21392d;font-size:12px;width:100%}
+.price-examples{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch}
+.price-examples .example{display:flex;flex-direction:column;gap:2px;padding:9px 14px;border-radius:10px;background:#eaf3ec;border:1px solid #b9d1c1;min-width:130px}
+.price-examples .example span{font-size:11px;color:#3e6350;font-weight:600}
+.price-examples .example strong{font-size:16px;color:#1f4a35}
+.price-examples small{flex-basis:100%;color:#66756d;font-size:11px}
+@media (max-width:760px){.price-modes{grid-template-columns:1fr}}
 .chip-toggles{display:flex;gap:10px;flex-wrap:wrap}
 .chip-toggle{position:relative;display:inline-flex;align-items:center;gap:9px;padding:9px 15px 9px 11px;border:1px solid #d4dcd3;border-radius:999px;background:#fff;color:#44574c;font-size:12px;font-weight:600;cursor:pointer;user-select:none;transition:background .15s,border-color .15s,color .15s}
 .chip-toggle:hover{border-color:#a9bdae}
@@ -250,7 +271,7 @@ td.money{color:#234f3c;font-weight:700;font-variant-numeric:tabular-nums}
 .chip-toggle.on .chip-mark::after{content:'';position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .form-grid label>input+input,.form-grid label>select+input{margin-top:2px}
-@media (max-width:760px){.measures{grid-template-columns:repeat(2,minmax(0,1fr))}.estimate{grid-column:1/-1}}
+@media (max-width:760px){.measures{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .export-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:10px}
 .export-group{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:12px 14px;border:1px solid #e3e6e0;border-radius:11px;background:#fcfdfb}
 .export-group h4{margin:0 0 2px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#4d5f56}

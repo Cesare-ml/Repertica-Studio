@@ -28,9 +28,9 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
     // carries its date; no historic record is silently omitted.
     let (header, query) = match kind {
         "artworks" => (
-            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at;signed;final_varnish;framed",
+            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at;signed;final_varnish;framed;artist_coefficient_override;fixed_price_cents",
             "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,
-                    description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed
+                    description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents
              FROM artworks ORDER BY code COLLATE NOCASE,id"
         ),
         "gallery" => (
@@ -62,9 +62,9 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              ORDER BY a.code COLLATE NOCASE,a.id"
         ),
         "certificates" => (
-            "certificate_id;artwork_id;artwork_code;current_artwork_title;serial;issued_at;artist_name;collector_name;notes;snapshot_json;created_at;language;issued_place",
+            "certificate_id;artwork_id;artwork_code;current_artwork_title;serial;issued_at;artist_name;collector_name;notes;snapshot_json;created_at;language;issued_place;declarant_name",
             "SELECT c.id,c.artwork_id,a.code,a.title,c.serial,c.issued_at,c.artist_name,
-                    c.collector_name,c.notes,c.snapshot_json,c.created_at,c.language,c.issued_place
+                    c.collector_name,c.notes,c.snapshot_json,c.created_at,c.language,c.issued_place,c.declarant_name
              FROM certificates c JOIN artworks a ON a.id=c.artwork_id
              ORDER BY c.issued_at,c.serial,c.id"
         ),
@@ -450,6 +450,9 @@ seconda riga','t','t')", []).unwrap();
         assert!(certificates.starts_with("\u{feff}certificate_id;artwork_id;artwork_code;current_artwork_title;"));
         assert!(certificates.contains("\"cert\";\"art\";\"'=OP-1\";\"Titolo attuale\";\"RS-0001\""));
         assert!(certificates.contains("\"'+ARTIST\""));
+        assert!(certificates.lines().next().unwrap().ends_with(";language;issued_place;declarant_name"));
+        let artworks = render_csv(&conn, "artworks").unwrap();
+        assert!(artworks.lines().next().unwrap().ends_with(";artist_coefficient_override;fixed_price_cents"), "{artworks}");
         assert!(certificates.contains("\"{\"\"title\"\":\"\"Titolo originario\"\"}\""));
     }
 

@@ -12,6 +12,10 @@ pub struct Artwork {
     /// A final protective varnish has been applied.
     pub final_varnish: bool,
     pub framed: bool,
+    /// Coefficient used for this artwork instead of the artist's one (None: the artist's coefficient).
+    pub artist_coefficient_override: Option<f64>,
+    /// A price set by hand, which wins over any calculation (None: the price is calculated).
+    pub fixed_price_cents: Option<i64>,
 }
 #[derive(Debug, Deserialize)]
 pub struct ArtworkInput {
@@ -25,6 +29,8 @@ pub struct ArtworkInput {
     #[serde(default)] pub signed: bool,
     #[serde(default)] pub final_varnish: bool,
     #[serde(default)] pub framed: bool,
+    #[serde(default)] pub artist_coefficient_override: Option<f64>,
+    #[serde(default)] pub fixed_price_cents: Option<i64>,
 }
 #[derive(Debug, Serialize)]
 pub struct Sale {
@@ -47,6 +53,8 @@ pub struct Certificate {
     pub snapshot_json: String, pub artwork_title: String, pub created_at: String,
     /// `it`, `en` or `bilingual`: the language of the printed declaration.
     pub language: String, pub issued_place: Option<String>,
+    /// Name that signs the declaration (the artist's full name); None on certificates issued before it was recorded.
+    pub declarant_name: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct CertificateInput {

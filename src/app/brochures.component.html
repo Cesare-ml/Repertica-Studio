@@ -146,17 +146,20 @@
             <div class="pv-frame"></div><div class="pv-frame pv-frame-inner"></div>
             <div class="pv-at pv-kicker" style="--x:0;--y:76;--w:595;--fs:8.5">{{ coverKicker(b.language) }}</div>
             <span class="pv-at pv-rule" style="--x:279.5;--y:99;--w:36;--h:.8"></span>
-            <div class="pv-at pv-mount" *ngIf="coverImage" style="--x:126;--y:102;--w:343;--h:388"><img [src]="coverImage" alt=""></div>
-            <div class="pv-at pv-artist" [style.--y]="coverImage ? 504 : 240" style="--x:82;--w:431;--h:80;--fs:31;--lh:38">{{ b.artist || tr('Nome artista') }}</div>
-            <div class="pv-at pv-title" [style.--y]="coverImage ? 580 : 330" style="--x:82;--w:431;--h:84;--fs:20;--lh:27">{{ b.title || tr('Titolo della brochure') }}</div>
-            <div class="pv-at pv-subtitle" [style.--y]="coverImage ? 650 : 400" style="--x:87;--w:421;--h:50;--fs:10.5;--lh:16">{{ b.subtitle }}</div>
-            <span class="pv-at pv-rule" style="--x:285.5;--y:756;--w:24;--h:.6"></span>
-            <div class="pv-at pv-brand" style="--x:0;--y:772;--w:595;--fs:7.5">REPERTICA &nbsp;/&nbsp; STUDIO</div>
+            <div class="pv-center pv-cover-center">
+              <span class="pv-rule pv-ornament"></span>
+              <div class="pv-artist pv-static pv-cover-artist">{{ b.artist || tr('Nome artista') }}</div>
+              <span class="pv-rule pv-ornament short" *ngIf="b.artist"></span>
+              <div class="pv-title pv-static pv-cover-title">{{ b.title || tr('Titolo della brochure') }}</div>
+              <div class="pv-subtitle pv-static pv-cover-subtitle" *ngIf="b.subtitle">{{ b.subtitle }}</div>
+              <span class="pv-rule pv-ornament"></span>
+            </div>
+            <span class="pv-at pv-rule" style="--x:285.5;--y:772;--w:24;--h:.6"></span>
           </div></div>
 
           <!-- Introduction -->
           <div *ngIf="b.introduction.trim()" class="pv"><div class="pv-in pv-sheet plain">
-            <div class="pv-at pv-head" style="--x:52;--y:47;--fs:9">REPERTICA &nbsp;/&nbsp; STUDIO</div>
+            <div class="pv-at pv-head" style="--x:52;--y:47;--w:480;--h:14;--fs:9">{{ runningHeader(b) }}</div>
             <span class="pv-at pv-ink" style="--x:50;--y:70;--w:495;--h:1"></span>
             <div class="pv-at pv-sans pv-bold" style="--x:60;--y:120;--w:475;--h:40;--fs:27;--lh:32">{{ introHeading(b.language) }}</div>
             <div class="pv-at pv-sans pv-body" style="--x:60;--y:184;--w:475;--h:648;--fs:12.5;--lh:18">{{ b.introduction }}</div>
@@ -169,7 +172,7 @@
             <ng-template #noPhoto><div class="pv-at pv-photo pv-missing"><span>{{ tr('Immagine non disponibile') }}</span></div></ng-template>
             <div class="pv-at pv-box" *ngIf="item.template === 'full_bleed'"></div>
             <ng-container *ngIf="item.template !== 'full_bleed'">
-              <div class="pv-at pv-head" style="--x:52;--y:47;--fs:9">REPERTICA &nbsp;/&nbsp; STUDIO</div>
+              <div class="pv-at pv-head" style="--x:52;--y:47;--w:480;--h:14;--fs:9">{{ runningHeader(b) }}</div>
               <span class="pv-at pv-ink" style="--x:50;--y:70;--w:495;--h:1"></span>
               <div class="pv-at pv-pageno" style="--x:522;--y:795;--w:40;--fs:9">{{ pageNumber(n) }}</div>
             </ng-container>
@@ -190,8 +193,7 @@
                 <div class="pv-value">{{ entry.value }}</div>
               </div>
             </div>
-            <span class="pv-at pv-rule" style="--x:285.5;--y:756;--w:24;--h:.6"></span>
-            <div class="pv-at pv-brand" style="--x:0;--y:772;--w:595;--fs:7.5">REPERTICA &nbsp;/&nbsp; STUDIO</div>
+            <span class="pv-at pv-rule" style="--x:285.5;--y:772;--w:24;--h:.6"></span>
           </div></div>
         </div>
       </aside>

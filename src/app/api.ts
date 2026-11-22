@@ -157,5 +157,4 @@ export const api = {
   mcpClientsStatus: () => invoke<McpClientStatus[]>('mcp_clients_status'),
   mcpClientConfigure: (clientId: string) => invoke<McpClientStatus>('mcp_client_configure', { clientId }),
   mcpClientRemove: (clientId: string) => invoke<McpClientStatus>('mcp_client_remove', { clientId }),
-  pricePreview: (widthCm: number, heightCm: number) => invoke<number|null>('price_preview', {widthCm,heightCm})
 };

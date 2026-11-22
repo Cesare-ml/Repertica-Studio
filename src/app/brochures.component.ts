@@ -21,6 +21,8 @@ import type { Artwork, Brochure, BrochureItem, GalleryImage } from './models';
 export class BrochuresComponent implements OnInit {
   @Input() artworks: Artwork[] = [];
   @Input() language: AppLanguage = 'en';
+  /** Name proposed as the artist of a new brochure (stage name or full name from the settings). */
+  @Input() artistName = '';
 
   documents: Brochure[] = [];
   draft: Brochure | null = null;
@@ -52,7 +54,7 @@ export class BrochuresComponent implements OnInit {
   }
   create(): void {
     this.draft = {
-      id: '', title: '', subtitle: '', artist: '', introduction: '',
+      id: '', title: '', subtitle: '', artist: this.artistName, introduction: '',
       contact_email: '', contact_website: '', contact_instagram: '', language: this.language,
       items: [], created_at: '', updated_at: ''
     };
@@ -190,9 +192,9 @@ export class BrochuresComponent implements OnInit {
     catch (error) { this.showError(error); }
   }
   // ---- Preview: the same texts and geometry as the exported PDF -----------------------------
-  get coverImage(): string | null {
-    const first = this.draft?.items[0];
-    return first ? this.previews[first.artwork_id] ?? null : null;
+  /** Running header of the inner pages: the artist, or the title when there is none. */
+  runningHeader(b: Brochure): string {
+    return (b.artist.trim() || b.title.trim()).toUpperCase().slice(0, 70);
   }
   coverKicker(language: string): string {
     return ({ en: 'SELECTED WORKS', es: 'OBRAS SELECCIONADAS', fr: 'ŒUVRES CHOISIES', de: 'AUSGEWÄHLTE WERKE' } as Record<string, string>)[language] ?? 'OPERE SELEZIONATE';

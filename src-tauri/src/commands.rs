@@ -32,10 +32,11 @@ fn artwork_row(row: &Row<'_>) -> rusqlite::Result<Artwork> {
         location: row.get(10)?, status: row.get(11)?, image_path: row.get(12)?,
         created_at: row.get(13)?, updated_at: row.get(14)?,
         signed: row.get(15)?, final_varnish: row.get(16)?, framed: row.get(17)?,
+        artist_coefficient_override: row.get(18)?, fixed_price_cents: row.get(19)?,
     })
 }
 const ARTWORK_FIELDS: &str =
-    "id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed";
+    "id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents";
 fn artwork_by_id(conn: &Connection, id: &str) -> Result<Artwork, String> {
     conn.query_row(
         &format!("SELECT {ARTWORK_FIELDS} FROM artworks WHERE id=?1"),
@@ -54,6 +55,7 @@ struct ArtworkFields {
     support: Option<String>, width: Option<f64>, height: Option<f64>, depth: Option<f64>,
     description: Option<String>, location: Option<String>, status: String,
     signed: bool, final_varnish: bool, framed: bool,
+    coefficient: Option<f64>, fixed_price: Option<i64>,
 }
 fn normalize_artwork(input: &ArtworkInput) -> Result<ArtworkFields, String> {
     if !["available", "reserved", "sold", "archived"].contains(&input.status.as_str()) {
@@ -70,6 +72,14 @@ fn normalize_artwork(input: &ArtworkInput) -> Result<ArtworkFields, String> {
         location: clean(input.location.clone(), 300)?,
         status: input.status.clone(),
         signed: input.signed, final_varnish: input.final_varnish, framed: input.framed,
+        coefficient: match input.artist_coefficient_override {
+            Some(c) if !c.is_finite() || c <= 0.0 || c > 100_000.0 => return Err("Il coefficiente dell'opera deve essere un numero positivo".into()),
+            other => other,
+        },
+        fixed_price: match input.fixed_price_cents {
+            Some(p) if !(0..=100_000_000_000).contains(&p) => return Err("Prezzo non valido".into()),
+            other => other,
+        },
     })
 }
 fn code_in_use(conn: &Connection, code: &str, except_id: &str) -> Result<bool, String> {
@@ -97,12 +107,12 @@ fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, Stri
     let (title, year, technique, support, description, location) =
         (fields.title, fields.year, fields.technique, fields.support, fields.description, fields.location);
     if existing {
-        tx.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13,signed=?14,final_varnish=?15,framed=?16 WHERE id=?1",
-            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed]).map_err(err)?;
+        tx.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13,signed=?14,final_varnish=?15,framed=?16,artist_coefficient_override=?17,fixed_price_cents=?18 WHERE id=?1",
+            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed,fields.coefficient,fields.fixed_price]).map_err(err)?;
     } else {
-        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at,signed,final_varnish,framed)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13,?14,?15,?16)",
-            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed]).map_err(err)?;
+        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13,?14,?15,?16,?17,?18)",
+            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed,fields.coefficient,fields.fixed_price]).map_err(err)?;
     }
     let saved = artwork_by_id(&tx, &id)?;
     tx.commit().map_err(err)?;
@@ -194,12 +204,12 @@ fn create_artwork_full_core(db: &Database, input: NewArtworkInput) -> Result<Art
             cover_ref = Some(crate::media::materialize(&tx, &db.directory, source, loaded.map(|(b, _)| b.as_slice()), loaded.map(|(_, n)| n.as_str()).unwrap_or("immagine"))?);
         }
         let stamp = now();
-        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,image_media_id,created_at,updated_at,signed,final_varnish,framed)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18)",
+        tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,image_path,image_media_id,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents)
+            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?15,?16,?17,?18,?19,?20)",
             params![id, code, fields.title, fields.year, fields.technique, fields.support, fields.width, fields.height,
                 fields.depth, fields.description, fields.location, fields.status,
                 cover_ref.as_ref().map(|r| r.1.clone()), cover_ref.as_ref().map(|r| r.0.clone()), stamp,
-                fields.signed, fields.final_varnish, fields.framed]).map_err(err)?;
+                fields.signed, fields.final_varnish, fields.framed, fields.coefficient, fields.fixed_price]).map_err(err)?;
         for (position, source) in input.gallery.iter().enumerate() {
             let loaded = gallery[position].as_ref();
             let (media_id, relative) = crate::media::materialize(&tx, &db.directory, source, loaded.map(|(b, _)| b.as_slice()), loaded.map(|(_, n)| n.as_str()).unwrap_or("immagine"))?;
@@ -346,12 +356,12 @@ fn certificate_row(row: &Row<'_>) -> rusqlite::Result<Certificate> {
     Ok(Certificate { id:row.get(0)?,artwork_id:row.get(1)?,serial:row.get(2)?,issued_at:row.get(3)?,
         artist_name:row.get(4)?,collector_name:row.get(5)?,notes:row.get(6)?,
         snapshot_json:row.get(7)?,artwork_title:row.get(8)?,created_at:row.get(9)?,
-        language:row.get(10)?,issued_place:row.get(11)? })
+        language:row.get(10)?,issued_place:row.get(11)?,declarant_name:row.get(12)? })
 }
 #[tauri::command]
 pub fn list_certificates(db: State<'_, Database>) -> Result<Vec<Certificate>, String> {
     let conn=db.conn.lock().map_err(err)?;
-    let mut statement=conn.prepare("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at,c.language,c.issued_place
+    let mut statement=conn.prepare("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at,c.language,c.issued_place,c.declarant_name
         FROM certificates c JOIN artworks a ON a.id=c.artwork_id ORDER BY c.created_at DESC").map_err(err)?;
     let items = statement.query_map([], certificate_row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(items)
@@ -371,11 +381,17 @@ fn issue_certificate_core(db: &Database, input: CertificateInput) -> Result<Cert
     let typed_artist=clean(input.artist_name,240)?;
     let mut conn=db.conn.lock().map_err(err)?;
     let tx=conn.transaction().map_err(err)?;
-    // The artist who signs is set once in the settings; a name given explicitly wins.
-    let artist_name=match typed_artist {
-        Some(name)=>name,
-        None=>tx.query_row("SELECT artist_name FROM studio_settings WHERE singleton=1",[],|r|r.get::<_,Option<String>>(0)).map_err(err)?
-            .ok_or_else(||"Imposta il nome dell'artista in Impostazioni prima di emettere un certificato".to_string())?,
+    // The names are set once in the settings; a name given explicitly wins. The certificate shows the
+    // stage name when there is one, while the declaration is signed with the full name.
+    let (stored_name,stored_alias):(Option<String>,Option<String>)=tx.query_row(
+        "SELECT artist_name,artist_alias FROM studio_settings WHERE singleton=1",[],|r|Ok((r.get(0)?,r.get(1)?))).map_err(err)?;
+    let (artist_name,declarant_name)=match typed_artist {
+        Some(name)=>(name.clone(),Some(name)),
+        None=>{
+            let display=stored_alias.clone().or_else(||stored_name.clone())
+                .ok_or_else(||"Imposta il nome dell'artista in Impostazioni prima di emettere un certificato".to_string())?;
+            (display,stored_name.or(stored_alias))
+        }
     };
     let artwork=artwork_by_id(&tx,&input.artwork_id)?;
     let snapshot_json=serde_json::to_string(&artwork).map_err(err)?;
@@ -388,10 +404,10 @@ fn issue_certificate_core(db: &Database, input: CertificateInput) -> Result<Cert
     let id=Uuid::new_v4().to_string();
     let stamp=now();
     let issued_at=today.format("%Y-%m-%d").to_string();
-    tx.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,created_at,language,issued_place)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-        params![id,input.artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,stamp,language,place]).map_err(err)?;
-    let cert=tx.query_row("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at,c.language,c.issued_place FROM certificates c JOIN artworks a ON a.id=c.artwork_id WHERE c.id=?1",
+    tx.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,created_at,language,issued_place,declarant_name)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        params![id,input.artwork_id,serial,issued_at,artist_name,collector_name,notes,snapshot_json,stamp,language,place,declarant_name]).map_err(err)?;
+    let cert=tx.query_row("SELECT c.id,c.artwork_id,c.serial,c.issued_at,c.artist_name,c.collector_name,c.notes,c.snapshot_json,a.title,c.created_at,c.language,c.issued_place,c.declarant_name FROM certificates c JOIN artworks a ON a.id=c.artwork_id WHERE c.id=?1",
         params![id],certificate_row).map_err(err)?;
     tx.commit().map_err(err)?;
     Ok(cert)
@@ -677,6 +693,7 @@ mod tests {
             technique: None, support: None, width_cm: None, height_cm: None,
             depth_cm: None, description: None, location: None,
             status: "available".into(), signed: false, final_varnish: false, framed: false,
+            artist_coefficient_override: None, fixed_price_cents: None,
         }
     }
 
@@ -828,6 +845,32 @@ mod tests {
     }
     fn count(db: &Database, table: &str) -> i64 {
         db.conn.lock().unwrap().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn an_artwork_can_have_its_own_coefficient_or_a_fixed_price_and_both_are_validated() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let mut input = new_artwork("Con coefficiente", None);
+        input.artwork.artist_coefficient_override = Some(1.5);
+        let created = create_artwork_full_core(&db, input).unwrap();
+        assert_eq!((created.artist_coefficient_override, created.fixed_price_cents), (Some(1.5), None));
+        let mut edit = artwork_edit_input(Some(created.id.clone()), "Con coefficiente");
+        edit.code = None;
+        edit.fixed_price_cents = Some(250_000);
+        let fixed = save_artwork_core(&db, edit).unwrap();
+        assert_eq!((fixed.artist_coefficient_override, fixed.fixed_price_cents), (None, Some(250_000)), "saving replaces both settings");
+        for bad in [Some(0.0), Some(-1.0), Some(f64::NAN), Some(1e9)] {
+            let mut e = artwork_edit_input(Some(created.id.clone()), "x");
+            e.code = None; e.artist_coefficient_override = bad;
+            assert!(save_artwork_core(&db, e).is_err(), "{bad:?}");
+        }
+        let mut negative = artwork_edit_input(Some(created.id.clone()), "x");
+        negative.code = None; negative.fixed_price_cents = Some(-5);
+        assert!(save_artwork_core(&db, negative).is_err());
+        let mut free = artwork_edit_input(Some(created.id.clone()), "x");
+        free.code = None; free.fixed_price_cents = Some(0);
+        assert_eq!(save_artwork_core(&db, free).unwrap().fixed_price_cents, Some(0), "a price of zero is allowed");
     }
 
     #[test]
@@ -1103,6 +1146,19 @@ mod tests {
         assert_eq!((typed.artist_name.as_str(), typed.language.as_str()), ("Altro Nome", "it"));
         assert!(issue_certificate_core(&db, plain(None, Some("fr"))).unwrap_err().contains("Lingua"));
         assert!(from_settings.serial.ends_with("000001") && typed.serial.ends_with("000002"));
+    }
+
+    #[test]
+    fn a_stage_name_is_shown_while_the_full_name_signs_the_declaration() {
+        let (_dir, db, artwork, _collector) = sale_fixture();
+        let input = || CertificateInput { artwork_id: artwork.clone(), artist_name: None, collector_name: None, notes: None, language: None, place: None };
+        db.conn.lock().unwrap().execute("UPDATE studio_settings SET artist_name='Maria Rossi',artist_alias='Mara R.' WHERE singleton=1", []).unwrap();
+        let certificate = issue_certificate_core(&db, input()).unwrap();
+        assert_eq!((certificate.artist_name.as_str(), certificate.declarant_name.as_deref()), ("Mara R.", Some("Maria Rossi")));
+        // Only a stage name: it is both the display and the signing name.
+        db.conn.lock().unwrap().execute("UPDATE studio_settings SET artist_name=NULL WHERE singleton=1", []).unwrap();
+        let alias_only = issue_certificate_core(&db, input()).unwrap();
+        assert_eq!((alias_only.artist_name.as_str(), alias_only.declarant_name.as_deref()), ("Mara R.", Some("Mara R.")));
     }
 
     #[test]

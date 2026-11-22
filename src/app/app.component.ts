@@ -19,7 +19,9 @@ import { emptyPayment, installmentRows, paymentToInput, toCents, type PaymentDra
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
 import type { ArtworkOrder, CollectorFilter } from './archive-filters';
 import { PHOTO_KINDS } from './models';
-import { ESTIMATE_DELAY_MS, MenuState, SUPPORTS, TECHNIQUES, canEstimate, menuStateFor, valueFor } from './artwork-options';
+import { MenuState, SUPPORTS, TECHNIQUES, menuStateFor, valueFor } from './artwork-options';
+import { EXAMPLE_SIZES, examplePriceCents, priceFieldsFor, priceModeOf, priceOf } from './pricing';
+import type { PriceMode } from './pricing';
 import { FIRST_UPDATE_CHECK_DELAY_MS, UPDATE_CHECK_INTERVAL_MS, isQuietStatus, progressPercent, updateMessage } from './updates';
 import { getVersion } from '@tauri-apps/api/app';
 import type {
@@ -37,7 +39,8 @@ type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'cer
 const freshArtwork = (): ArtworkInput => ({
   code: null, title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
-  location: null, status: 'available', signed: false, final_varnish: false, framed: false
+  location: null, status: 'available', signed: false, final_varnish: false, framed: false,
+  artist_coefficient_override: null, fixed_price_cents: null
 });
 const freshCollector = (): CollectorInput => ({
   first_name: '', last_name: null, email: null, phone: null, address: null, notes: null,
@@ -125,7 +128,7 @@ export class AppComponent implements OnInit {
   financeYears = Array.from({length: 8}, (_,i)=>new Date().getFullYear()-i);
   settings: StudioSettings = {
     artist_coefficient:1,base_price_cm2_cents:16,personal_bp:3334,activity_bp:3333,
-    savings_bp:3333,treasury_start_date:null,default_tax_bp:0,ui_language:null,artist_name:null
+    savings_bp:3333,treasury_start_date:null,default_tax_bp:0,ui_language:null,artist_name:null,artist_alias:null
   };
   settingsDraft: StudioSettings = {...this.settings};
   rateEuro = .16;
@@ -142,7 +145,11 @@ export class AppComponent implements OnInit {
   allocationPlan: AllocationPlan = { enabled: true, parts: [] };
   allocationDraft = { enabled: true, parts: [] as { id?: string; name: string; percent: number; pays_expenses: boolean }[] };
   defaultTaxPercent = 0;
-  estimateCents: number | null = null;
+  /** How the price of the artwork in the form is set: artist coefficient, own coefficient or fixed price. */
+  priceMode: PriceMode = 'auto';
+  readonly exampleSizes = EXAMPLE_SIZES;
+  /** Profile asked on the first start (full name, stage name, coefficient). */
+  profileDraft = { name: '', alias: '', coefficient: 1 };
   /** Index (in the filtered list) of the artwork shown in the full-screen viewer; null when closed. */
   viewerIndex: number | null = null;
   viewerArtworks: Artwork[] = [];
@@ -150,7 +157,6 @@ export class AppComponent implements OnInit {
   readonly supportOptions = SUPPORTS;
   techniqueMenu: MenuState = { choice: '', other: '' };
   supportMenu: MenuState = { choice: '', other: '' };
-  private estimateTimer: ReturnType<typeof setTimeout> | null = null;
   expenseDialog = false;
   readonly expenseCategories = [
     {code:'painting-materials',label:'Materiali pittura'},
@@ -225,7 +231,6 @@ export class AppComponent implements OnInit {
   certificateDraft: CertificateInput = { artwork_id: '', collector_name: null, notes: null, language: 'it', place: null };
   certificatePreview = false;
   certificateImage: string | null = null;
-  artistNameDraft = '';
   private readonly placeKey = 'repertica-certificate-place';
   selectedCertificate: Certificate | null = null;
   selectedSnapshot: Artwork | null = null;
@@ -794,12 +799,6 @@ export class AppComponent implements OnInit {
     if(!window.confirm(this.tr('Elimina') + ': '+e.description+'?'))return;
     await this.run(()=>api.deleteExpense(e.id),this.tr('Elimina'));
   }
-  /** The estimate follows the measures: it is requested shortly after the user stops typing. */
-  scheduleEstimate(): void {
-    if (this.estimateTimer) clearTimeout(this.estimateTimer);
-    if (!canEstimate(this.artworkDraft.width_cm, this.artworkDraft.height_cm)) { this.estimateCents = null; return; }
-    this.estimateTimer = setTimeout(() => void this.previewPrice(), ESTIMATE_DELAY_MS);
-  }
   openViewer(artwork: Artwork): void {
     // A snapshot: the list getter builds a new array on every change detection.
     const list = [...this.visibleArtworks];
@@ -809,14 +808,52 @@ export class AppComponent implements OnInit {
   get buyersByArtwork(): Record<string, string> {
     return Object.fromEntries(Object.entries(this.salesByArtwork).map(([id, sale]) => [id, sale.collector_name]));
   }
-  async previewPrice():Promise<void> {
-    if (!canEstimate(this.artworkDraft.width_cm, this.artworkDraft.height_cm)) { this.estimateCents = null; return; }
-    try {
-      this.estimateCents=await api.pricePreview(this.artworkDraft.width_cm??0,this.artworkDraft.height_cm??0);
-    } catch {
-      this.estimateCents = null; // an estimate is only a convenience: never interrupt the form with an error
-    }
-    this.change.detectChanges();
+  // ---------------------------------------------------------------- price
+  get priceRules() { return { rateCm2Cents: this.settings.base_price_cm2_cents, artistCoefficient: this.settings.artist_coefficient }; }
+  /** Price of the artwork in the form, recalculated as the measures, coefficient or fixed price change. */
+  get draftPrice() {
+    const d = this.artworkDraft;
+    const fixed = this.priceMode === 'fixed' ? d.fixed_price_cents : null;
+    const own = this.priceMode === 'coefficient' ? d.artist_coefficient_override : null;
+    return priceOf(d.width_cm, d.height_cm, this.priceRules, own, fixed);
+  }
+  get fixedPriceEur(): number | null { return this.artworkDraft.fixed_price_cents === null ? null : this.artworkDraft.fixed_price_cents / 100; }
+  setFixedPriceEur(value: number | null): void {
+    this.artworkDraft.fixed_price_cents = value === null || value === undefined || !Number.isFinite(value) ? null : Math.round(value * 100);
+  }
+  setPriceMode(mode: PriceMode): void {
+    const d = this.artworkDraft;
+    if (mode === 'coefficient' && d.artist_coefficient_override === null) d.artist_coefficient_override = this.settings.artist_coefficient;
+    // Starting a fixed price from the calculated one is usually what the artist wants to round off.
+    if (mode === 'fixed' && d.fixed_price_cents === null) d.fixed_price_cents = this.draftPrice.cents !== null ? Math.round(this.draftPrice.cents / 100) * 100 : null;
+    this.priceMode = mode;
+  }
+  /** The price fields to store for the chosen mode, or null (with a message shown) when the input is incomplete. */
+  private priceFields() {
+    const d = this.artworkDraft;
+    const fields = priceFieldsFor(this.priceMode, d.artist_coefficient_override, d.fixed_price_cents);
+    if ('error' in fields) { this.errorMessage = this.tr(fields.error); return null; }
+    return fields;
+  }
+  /** Price of a stored artwork, with how it was obtained (for the archive and the viewer). */
+  priceInfo(a: Artwork) { return priceOf(a.width_cm, a.height_cm, this.priceRules, a.artist_coefficient_override, a.fixed_price_cents); }
+  priceLabel(a: Artwork): string {
+    const info = this.priceInfo(a);
+    return info.cents === null ? '—' : this.euros(info.cents);
+  }
+  priceNote(a: Artwork): string {
+    if (a.fixed_price_cents !== null) return this.tr('Prezzo fisso');
+    return a.artist_coefficient_override !== null ? this.tr('Coefficiente') + ' ' + a.artist_coefficient_override : '';
+  }
+  get pricesByArtwork(): Record<string, string> {
+    return Object.fromEntries(this.viewerArtworks.map(a => [a.id, this.priceLabel(a) + (this.priceNote(a) ? ' · ' + this.priceNote(a) : '')]));
+  }
+  exampleCents(size: { width: number; height: number }, coefficient: number): number | null {
+    return examplePriceCents(size, this.priceRules, coefficient);
+  }
+  /** Same examples for the economy settings, which edit the rate and the coefficient before saving. */
+  exampleCentsDraft(size: { width: number; height: number }): number | null {
+    return examplePriceCents(size, { rateCm2Cents: Math.round(this.rateEuro * 100), artistCoefficient: this.settingsDraft.artist_coefficient }, this.settingsDraft.artist_coefficient);
   }
   private syncMenus(): void {
     this.techniqueMenu = menuStateFor(TECHNIQUES, this.artworkDraft.technique);
@@ -844,7 +881,7 @@ export class AppComponent implements OnInit {
   }
   fileName(path: string): string { return path.split(/[\\/]/).pop() ?? path; }
   async newArtwork(): Promise<void> {
-    this.estimateCents = null; this.artworkDraft = freshArtwork(); this.syncMenus();
+    this.artworkDraft = freshArtwork(); this.priceMode = 'auto'; this.syncMenus();
     this.newCover = null; this.newGallery = []; this.newRawPath = null; this.withSale = false; this.sessionImports.clear();
     this.newSaleDraft = this.freshNewSale(); this.newSalePayment = emptyPayment(today()); this.nextCode = '';
     this.artworkDialog = true;
@@ -1033,6 +1070,12 @@ export class AppComponent implements OnInit {
     if (this.withSale && !this.newSaleDraft.collector_id) {
       this.newSaleDraft.collector_id = this.collectors.length ? '' : '__new__';
     }
+    // The price of the artwork is the natural amount of its sale.
+    const price = this.draftPrice.cents;
+    if (this.withSale && this.newSaleDraft.amount_eur === null && price !== null && price > 0) {
+      this.newSaleDraft.amount_eur = price / 100;
+      this.recalculateNewSaleTax();
+    }
   }
   recalculateNewSaleTax(): void {
     const amount = this.newSaleDraft.amount_eur;
@@ -1051,18 +1094,21 @@ export class AppComponent implements OnInit {
     }, this.tr('Codice archivio salvato'));
   }
   editArtwork(a: Artwork): void {
-    this.estimateCents=null;
     this.artworkDraft = {
       id: a.id, code: a.code, title: a.title, year: a.year, technique: a.technique,
       support: a.support, width_cm: a.width_cm, height_cm: a.height_cm,
       depth_cm: a.depth_cm, description: a.description, location: a.location, status: a.status,
-      signed: a.signed, final_varnish: a.final_varnish, framed: a.framed
+      signed: a.signed, final_varnish: a.final_varnish, framed: a.framed,
+      artist_coefficient_override: a.artist_coefficient_override, fixed_price_cents: a.fixed_price_cents
     };
     this.syncMenus();
-    this.scheduleEstimate();
+    this.priceMode = priceModeOf(a.artist_coefficient_override, a.fixed_price_cents);
     this.artworkDialog = true;
   }
   async saveArtwork(): Promise<void> {
+    const priced = this.priceFields();
+    if (!priced) return;
+    this.artworkDraft = { ...this.artworkDraft, ...priced };
     if (this.artworkDraft.id) {
       if (await this.run(() => api.saveArtwork(this.artworkDraft), this.tr('Opera salvata'))) this.artworkDialog = false;
       return;
@@ -1558,13 +1604,24 @@ export class AppComponent implements OnInit {
     this.certificateDialog = true;
   }
   get artistName(): string { return (this.settings.artist_name ?? '').trim(); }
-  /** Save the name printed on certificates (settings, and the first-start card on the overview). */
-  async saveArtistName(value: string): Promise<void> {
-    const name = value.trim();
-    if (this.busy || !name) return;
-    const draft: StudioSettings = { ...this.settings, artist_name: name };
-    if (await this.run(async () => { this.settings = await api.saveSettings(draft); this.settingsDraft = { ...this.settingsDraft, artist_name: this.settings.artist_name }; }, this.tr('Nome dell’artista salvato'))) {
-      this.artistNameDraft = '';
+  /** Name shown on certificates and brochures: the stage name when there is one. */
+  get displayArtistName(): string { return (this.settings.artist_alias ?? '').trim() || this.artistName; }
+  /** Save the artist's names (and, from the first-start card, the coefficient). */
+  async saveArtistProfile(name: string, alias: string, coefficient?: number): Promise<void> {
+    const fullName = name.trim();
+    if (this.busy || !fullName) return;
+    if (coefficient !== undefined && !(Number.isFinite(coefficient) && coefficient > 0 && coefficient <= 100_000)) {
+      this.errorMessage = this.tr('Il coefficiente deve essere un numero maggiore di zero'); return;
+    }
+    const draft: StudioSettings = {
+      ...this.settings, artist_name: fullName, artist_alias: alias.trim() || null,
+      artist_coefficient: coefficient ?? this.settings.artist_coefficient
+    };
+    if (await this.run(async () => {
+      this.settings = await api.saveSettings(draft);
+      this.settingsDraft = { ...this.settingsDraft, artist_name: this.settings.artist_name, artist_alias: this.settings.artist_alias, artist_coefficient: this.settings.artist_coefficient };
+    }, this.tr('Profilo dell’artista salvato'))) {
+      this.profileDraft = { name: '', alias: '', coefficient: this.settings.artist_coefficient };
     }
   }
   async saveCertificate(): Promise<void> {

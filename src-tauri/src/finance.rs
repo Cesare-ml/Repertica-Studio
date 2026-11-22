@@ -36,6 +36,8 @@ pub struct StudioSettings {
     pub ui_language: Option<String>,
     /// Name printed on certificates as the issuing artist.
     #[serde(default)] pub artist_name: Option<String>,
+    /// Stage name: shown on certificates and brochures instead of the full name.
+    #[serde(default)] pub artist_alias: Option<String>,
 }
 fn valid_settings(s: &StudioSettings) -> Result<(),String> {
     if !s.artist_coefficient.is_finite() || s.artist_coefficient <= 0.0 || s.artist_coefficient > 100000.0 {
@@ -57,10 +59,10 @@ fn valid_settings(s: &StudioSettings) -> Result<(),String> {
     Ok(())
 }
 fn settings_tx(c: &rusqlite::Connection) -> Result<StudioSettings,String> {
-    c.query_row("SELECT artist_coefficient,base_price_cm2_cents,personal_bp,activity_bp,savings_bp,treasury_start_date,default_tax_bp,ui_language,artist_name FROM studio_settings WHERE singleton=1",
+    c.query_row("SELECT artist_coefficient,base_price_cm2_cents,personal_bp,activity_bp,savings_bp,treasury_start_date,default_tax_bp,ui_language,artist_name,artist_alias FROM studio_settings WHERE singleton=1",
         [], |r|Ok(StudioSettings{
             artist_coefficient:r.get(0)?,base_price_cm2_cents:r.get(1)?,personal_bp:r.get(2)?,
-            activity_bp:r.get(3)?,savings_bp:r.get(4)?,treasury_start_date:r.get(5)?,default_tax_bp:r.get(6)?,ui_language:r.get(7)?,artist_name:r.get(8)?
+            activity_bp:r.get(3)?,savings_bp:r.get(4)?,treasury_start_date:r.get(5)?,default_tax_bp:r.get(6)?,ui_language:r.get(7)?,artist_name:r.get(8)?,artist_alias:r.get(9)?
         })).map_err(error)
 }
 #[tauri::command]
@@ -72,9 +74,10 @@ pub fn get_studio_settings(db:State<'_,Database>) -> Result<StudioSettings,Strin
 pub fn save_studio_settings(db:State<'_,Database>,mut input:StudioSettings)->Result<StudioSettings,String>{
     valid_settings(&input)?;
     input.artist_name=crate::commands::clean(input.artist_name,240)?;
+    input.artist_alias=crate::commands::clean(input.artist_alias,240)?;
     let c=db.conn.lock().map_err(error)?;
-    c.execute("UPDATE studio_settings SET artist_coefficient=?1,base_price_cm2_cents=?2,personal_bp=?3,activity_bp=?4,savings_bp=?5,treasury_start_date=?6,default_tax_bp=?7,ui_language=?8,artist_name=?9 WHERE singleton=1",
-    params![input.artist_coefficient,input.base_price_cm2_cents,input.personal_bp,input.activity_bp,input.savings_bp,input.treasury_start_date,input.default_tax_bp,input.ui_language,input.artist_name]).map_err(error)?;
+    c.execute("UPDATE studio_settings SET artist_coefficient=?1,base_price_cm2_cents=?2,personal_bp=?3,activity_bp=?4,savings_bp=?5,treasury_start_date=?6,default_tax_bp=?7,ui_language=?8,artist_name=?9,artist_alias=?10 WHERE singleton=1",
+    params![input.artist_coefficient,input.base_price_cm2_cents,input.personal_bp,input.activity_bp,input.savings_bp,input.treasury_start_date,input.default_tax_bp,input.ui_language,input.artist_name,input.artist_alias]).map_err(error)?;
     settings_tx(&c)
 }
 
@@ -297,23 +300,38 @@ pub fn finance_overview(db:State<'_,Database>,year:i32)->Result<FinanceOverview,
     let c=db.conn.lock().map_err(error)?;
     finance_overview_core(&c,year)
 }
-#[tauri::command]
-pub fn price_preview(db:State<'_,Database>,width_cm:f64,height_cm:f64)->Result<Option<i64>,String>{
-    if !width_cm.is_finite() || !height_cm.is_finite() || width_cm<=0.0 || height_cm<=0.0 ||
-        width_cm>100000.0 || height_cm>100000.0 {return Ok(None)}
-    let c=db.conn.lock().map_err(error)?;
-    let s=settings_tx(&c)?;
-    let cents=width_cm*height_cm*s.base_price_cm2_cents as f64*s.artist_coefficient;
-    if !cents.is_finite() || cents>100_000_000_000.0 {return Ok(None)}
-    Ok(Some(cents.round() as i64))
+/// Price of an artwork in cents. A fixed price always wins; otherwise width × height × rate per cm²
+/// × coefficient, where the coefficient is the artwork's own or, when it has none, the artist's.
+/// `None` when the size is missing or the result is not a sensible amount.
+pub fn price_cents(width_cm:Option<f64>,height_cm:Option<f64>,rate_cm2_cents:i64,artist_coefficient:f64,own_coefficient:Option<f64>,fixed_price_cents:Option<i64>)->Option<i64>{
+    if let Some(fixed)=fixed_price_cents {return Some(fixed)}
+    let (width,height)=(width_cm?,height_cm?);
+    if !width.is_finite() || !height.is_finite() || width<=0.0 || height<=0.0 || width>100000.0 || height>100000.0 {return None}
+    let cents=width*height*rate_cm2_cents as f64*own_coefficient.unwrap_or(artist_coefficient);
+    if !cents.is_finite() || cents<0.0 || cents>100_000_000_000.0 {return None}
+    Some(cents.round() as i64)
 }
 #[cfg(test)]
 mod tests{
     use super::*;
     #[test]
+    fn price_follows_fixed_price_then_own_coefficient_then_artist_coefficient(){
+        // 30 x 40 cm at 0,16 EUR/cm2 with coefficient 1 = 192 EUR
+        assert_eq!(price_cents(Some(30.0),Some(40.0),16,1.0,None,None),Some(19_200));
+        assert_eq!(price_cents(Some(30.0),Some(40.0),16,2.0,None,None),Some(38_400),"the artist's coefficient");
+        assert_eq!(price_cents(Some(30.0),Some(40.0),16,2.0,Some(1.5),None),Some(28_800),"the artwork's own coefficient wins");
+        assert_eq!(price_cents(Some(30.0),Some(40.0),16,2.0,Some(1.5),Some(50_000)),Some(50_000),"a fixed price wins over everything");
+        assert_eq!(price_cents(None,None,16,2.0,Some(1.5),Some(50_000)),Some(50_000),"a fixed price needs no size");
+        assert_eq!(price_cents(Some(90.0),Some(120.0),16,1.25,None,None),Some(216_000));
+        for (w,h) in [(None,Some(10.0)),(Some(0.0),Some(10.0)),(Some(-1.0),Some(10.0)),(Some(f64::NAN),Some(10.0)),(Some(1e6),Some(10.0))] {
+            assert_eq!(price_cents(w,h,16,1.0,None,None),None,"{w:?} {h:?}");
+        }
+        assert_eq!(price_cents(Some(1e5),Some(1e5),100000,1.0,None,None),None,"absurd totals are refused");
+    }
+    #[test]
     fn settings_validate_exact_percentages(){
         let good=StudioSettings{artist_coefficient:1.0,base_price_cm2_cents:16,personal_bp:3334,activity_bp:3333,savings_bp:3333,
-            treasury_start_date:None,default_tax_bp:0,ui_language:None,artist_name:None};
+            treasury_start_date:None,default_tax_bp:0,ui_language:None,artist_name:None,artist_alias:None};
         assert!(valid_settings(&good).is_ok());
         let mut bad=good.clone();bad.savings_bp=3332;
         assert!(valid_settings(&bad).is_err());

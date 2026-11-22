@@ -76,10 +76,14 @@ export interface Artwork {
   signed: boolean;
   final_varnish: boolean;
   framed: boolean;
+  /** Coefficient for this artwork instead of the artist's one. */
+  artist_coefficient_override: number | null;
+  /** Price set by hand (cents); wins over the calculation. */
+  fixed_price_cents: number | null;
 }
 export type ArtworkInput = Pick<Artwork,
   'title' | 'year' | 'technique' | 'support' | 'width_cm' |
-  'height_cm' | 'depth_cm' | 'description' | 'location' | 'status' | 'signed' | 'final_varnish' | 'framed'
+  'height_cm' | 'depth_cm' | 'description' | 'location' | 'status' | 'signed' | 'final_varnish' | 'framed' | 'artist_coefficient_override' | 'fixed_price_cents'
 > & { id?: string; code?: string | null };
 /** For a new artwork the archive code is assigned by the application. */
 export type NewArtworkRecord = ArtworkInput;
@@ -199,6 +203,8 @@ export interface Certificate {
   artist_name: string; collector_name: string | null; notes: string | null;
   snapshot_json: string; artwork_title: string; created_at: string;
   language: 'it' | 'en' | 'bilingual'; issued_place: string | null;
+  /** Name that signs the declaration; null on certificates issued before it was recorded. */
+  declarant_name: string | null;
 }
 export interface CertificateInput {
   artwork_id: string;
@@ -229,6 +235,8 @@ export interface StudioSettings {
   ui_language: 'it' | 'en' | 'es' | 'fr' | 'de' | null;
   /** Name printed on certificates as the issuing artist. */
   artist_name: string | null;
+  /** Stage name: shown on certificates and brochures instead of the full name. */
+  artist_alias: string | null;
 }
 export interface Expense {
   id:string; expense_date:string; category:string; description:string;

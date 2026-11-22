@@ -30,11 +30,3 @@ export function valueFor(choice: string, other: string): string | null {
   if (choice === OTHER_CHOICE) return other.trim() || null;
   return choice.trim() || null;
 }
-
-/** Wait for the user to stop typing before an estimate is requested. */
-export const ESTIMATE_DELAY_MS = 300;
-
-/** An estimate needs two positive, finite dimensions. */
-export function canEstimate(width: number | null | undefined, height: number | null | undefined): boolean {
-  return [width, height].every(v => typeof v === 'number' && Number.isFinite(v) && v > 0);
-}
