@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **37 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **38 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -43,6 +43,14 @@ Aggiornato: **2026-11-22** (trentesima ricognizione). Stato delle proposte: **Pr
 | [REPS-UX-035](REPS-UX-035-preferenze-contatto-comunicazioni-individuali.md) | Preferenze di contatto dichiarate e avvisi contestuali per le comunicazioni individuali ai collezionisti, distinguendo inviti promozionali e comunicazioni su vendite senza presunzioni di consenso | P2*; P3 se bastano note/etichette | Proposta — da valutare |
 | [REPS-UX-036](REPS-UX-036-misure-opere-non-rettangolari.md) | Misure speciali dichiarate (diametro, ingombro, dimensioni variabili), senza alterare campi cm o stime rettangolari; prima valutare nota facoltativa | P2* (P3 se bastano note) | Proposta — da valutare |
 | [REPS-UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) | Scadenze di uscite ricorrenti (affitto studio, assicurazioni, canoni) **distinte dalle spese effettivamente registrate**; prima validare promemoria semplice, senza generare movimenti | P2* (P3 se basta calendario esterno) | Proposta — da valutare |
+| [REPS-UX-038](REPS-UX-038-interessi-dichiarati-collezionisti-richieste-opere.md) | Interessi **dichiarati**, non inferiti: richieste di opere simili o caratteristiche desiderate; nessuna riserva, vendita, profilazione o consenso alle comunicazioni | P2* (P3 se bastano note) | Proposta — da valutare |
+
+## Trentunesima ricognizione — 22 novembre 2026 — REPS-UX-038
+
+- **[REPS-UX-038 — Interessi dichiarati dei collezionisti e richieste di opere simili](REPS-UX-038-interessi-dichiarati-collezionisti-richieste-opere.md):** il [MVP](../../MVP.md) dichiara che gli interessi per le opere non sono stati portati dal Gestionale Opere. La proposta studia un registro locale minimo di richieste *espresse* («vorrei vedere lavori simili», «cerco opere su carta»), anche senza una trattativa o un'opera attualmente disponibile, con stato manuale e fonte contestuale. Non inferisce gusti dagli acquisti, non invia messaggi e non presume consenso.
+- **Confini anti-duplicazione:** UX-002 = offerta/prenotazione per opera specifica; UX-014 = identità e storico relazioni; UX-035 = preferenze sulle comunicazioni; UX-006 = incarico accettato; TECH-030 = vocabolari per tecniche/supporti. Confrontate le **33 proposte tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), senza modificarne i file.
+- **Alternativa preferibile prima di decidere:** provare note strutturate leggere e ricerca, senza creare nuovo modulo. Priorità **P2 soltanto ipotetica**, P3 se già bastano le note. Documento con problema, casi d'uso, UX, dati/API solo descrittivi, offline e lingue, privacy, import/export, compatibilità, complessità, dipendenze, rischi, accettazione, fasi, certezze/ipotesi/domande; nessuna validazione utenti o test runtime.
+- **Perimetro dell'aggiornamento:** soltanto questa scheda Markdown e questo indice nella cartella Gestione e UX; nessuna modifica tecnica, approvazione, issue o merge. [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) da lasciare aperta e in bozza per revisione personale.
 
 ## Trentesima ricognizione — 22 novembre 2026 — REPS-UX-037
 
