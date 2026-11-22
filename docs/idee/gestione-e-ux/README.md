@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **42 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **43 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -48,6 +48,14 @@ Aggiornato: **2026-11-22** (trentacinquesima ricognizione). Stato delle proposte
 | [REPS-UX-040](REPS-UX-040-rimborsi-rettifiche-spese-acquisti.md) | Rimborsi, note di credito e rettifiche dichiarate collegate alle spese, senza cancellare l'acquisto né inventare incassi | P2* (P3 se bastano note; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-041](REPS-UX-041-titoli-descrizioni-opere-multilingua.md) | Titoli e descrizioni di presentazione riutilizzabili per lingua, senza traduzione automatica né modifica dei testi canonici e dei certificati | P2* (P3 se bastano override brochure; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-042](REPS-UX-042-pagamenti-dichiarati-spese-acquisti-differiti.md) | Acquisti a saldo differito: pagamenti manualmente dichiarati e scadenze, distinti dalle spese registrate e dalle uscite bancarie verificate | P2* (P3 se bastano note/calendario; P1–P2 solo dopo validazione) | Proposta — da valutare |
+| [REPS-UX-043](REPS-UX-043-segnalazioni-assistenza-post-vendita-opere.md) | Richieste di assistenza **sull'opera dopo la vendita**: dichiarazioni, seguito ed esito distinti da resi, perizie e garanzie riconosciute | P2* solo se ricorrenti; P3 se bastano note | Proposta — da valutare |
+
+## Trentaseiesima ricognizione — 22 novembre 2026 — REPS-UX-043
+
+- **[REPS-UX-043 — Segnalazioni e assistenza post-vendita](REPS-UX-043-segnalazioni-assistenza-post-vendita-opere.md):** su `main` le schede `Artwork`, `Sale` e `Collector`, le vendite rateali, le email professionali e i certificati immutabili non costituiscono un **registro di richieste di assistenza legate a un'opera**. Si propone, solo se interviste confermano l'esigenza, un flusso leggero per annotare una segnalazione, una risposta, un prossimo passo e una chiusura, senza confondere un **problema riferito dal collezionista** con diagnosi, difetto accertato, garanzia o rimborso.
+- **Confini verificati:** UX-013 registra resi/annullamenti commerciali, UX-004 condizioni effettivamente osservate, UX-025 istruzioni di cura, UX-001 movimenti fisici e UX-014 relazioni generali. Questa proposta non duplica tali registri, non modifica vendite/incassi/certificati e non interpreta automaticamente email. Nel filone tecnico [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), TECH-015 è supporto tecnico **al software** e TECH-016 riguarda il supporto **binario agli allegati**, non il ciclo gestionale delle segnalazioni.
+- **Alternativa da validare prima:** una nota datata per opera o collezionista potrebbe bastare. Priorità **P2 esclusivamente ipotetica**, **P3** se i casi sono rari. Casi tipo: danno alla cornice riferito dal cliente, domanda di manutenzione, valutazione da concordare, richiesta di persona diversa dall'acquirente. Nessun dato personale in cataloghi pubblici o export non deliberati.
+- **Perimetro del run:** soltanto la nuova scheda Markdown e questo indice Markdown sotto `docs/idee/gestione-e-ux/`, nessun codice, test, configurazione, workflow, dipendenza, file dell'altro filone, merge o issue. Tutte le **43 proposte** restano **«Proposta — da valutare»**, senza approvazione o incarico. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta in bozza per revisione del proprietario.
 
 ## Trentacinquesima ricognizione — 22 novembre 2026 — REPS-UX-042
 
