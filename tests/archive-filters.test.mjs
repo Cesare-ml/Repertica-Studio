@@ -226,7 +226,8 @@ test('artwork dimensions are searchable in cm with x or × and decimal commas', 
 
   assert.deepEqual(found('30,5 × 40,25'), ['a']);
   assert.deepEqual(found('30.5 x 40.25'), ['a']);
-  assert.deepEqual(found('30,5 X 40,25 X 2'), ['a']);
+  assert.deepEqual(found('30,5 × 40,25 cm'), ['a']);
+  assert.deepEqual(found('30,5 X 40,25 X 2 cm'), ['a']);
   assert.deepEqual(found('"30,5 × 40,25" ELODIE'), ['a']);
   assert.deepEqual(found('40,25x30,5'), ['b']); // Width and height keep their order.
   assert.deepEqual(found('30 × 40'), ['c']);
