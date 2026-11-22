@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (venticinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **32 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (ventiseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **33 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -38,6 +38,16 @@ Aggiornato: **2026-11-22** (venticinquesima ricognizione). Stato delle proposte:
 | [REPS-UX-030](REPS-UX-030-quadratura-facoltativa-estratti-conto-locali.md) | Quadratura facoltativa **solo locale** di incassi/spese con movimenti da CSV bancario selezionato dall'utente, anteprima e collegamenti manuali; nessun nuovo incasso automatico né collegamento online | P2–P3* | Proposta — da valutare |
 | [REPS-UX-031](REPS-UX-031-autorialita-opere-attribuzioni-collaborazioni.md) | Autorialità delle opere: attribuzioni anche incerte, più autori e identità distinte da proprietà, diritti, fotografia e vendite; prima verificare se basta un campo testuale opzionale | P2* (P1 solo se validato) | Proposta — da valutare |
 | [REPS-UX-032](REPS-UX-032-budget-mensili-categorie-spesa-scostamenti.md) | Budget mensili facoltativi per categorie di spesa, confronto preventivato/registrato e spese fuori budget ben visibili; senza creare movimenti né alterare le statistiche esistenti | P2* | Proposta — da valutare |
+| [REPS-UX-033](REPS-UX-033-entrate-professionali-non-vendita-opere.md) | Registro locale e facoltativo dei **compensi professionali extra-vendita** (didattica, licenze, servizi), distinti da vendite, incassi e quote congelate; nessun ricavo o pagamento presunto | P2* (P1–P2 solo se validato) | Proposta — da valutare |
+
+## Ventiseiesima ricognizione — 22 novembre 2026 — REPS-UX-033
+
+- **[REPS-UX-033 — Entrate professionali non derivanti dalle vendite di opere](REPS-UX-033-entrate-professionali-non-vendita-opere.md):** valutazione di un registro locale **facoltativo** per compensi di workshop, servizi creativi, partecipazioni o licenze, quando non esiste una vendita fisica dell'opera. Prima ipotesi: importo, data, categoria, causale, controparte opzionale e CSV dedicato; nessun modulo fiscale o collegamento bancario. **P2 ipotetica**, P1–P2 soltanto dopo confronto con utenti reali.
+- **Evidenza su `main`:** in [`finance.rs`](../../../src-tauri/src/finance.rs) le statistiche mensili sommano vendite in `sales` e spese in `expenses`, con quote congelate per vendita; [`models.rs`](../../../src-tauri/src/models.rs) associa una vendita a opera e collezionista. I [12 CSV](../../DATA-PORTABILITY.md) esportano i registri esistenti ma non documentano compensi non derivanti da vendite. La [issue #13](https://github.com/Cesare-ml/Repertica-Studio/issues/13) sui flussi finanziari resta un punto di confronto, **non** una conferma dell'esistenza della funzione. Il bisogno professionale non è ancora stato misurato.
+- **Anti-doppione:** [UX-006](REPS-UX-006-incarichi-opere-su-richiesta.md) = realizzazione di opere commissionate, [UX-010](REPS-UX-010-diritti-riproduzione-crediti-autorizzazioni.md) = permessi e crediti, [UX-023](REPS-UX-023-prezzi-richiesti-listini-storico.md) = prezzi delle opere, [UX-024](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md)/[UX-030](REPS-UX-030-quadratura-facoltativa-estratti-conto-locali.md) = scadenze/incassi/verifiche, [UX-032](REPS-UX-032-budget-mensili-categorie-spesa-scostamenti.md) = budget spese. Nel filone tecnico [TECH-001, TECH-018 e TECH-025](https://github.com/Cesare-ml/Repertica-Studio/pull/16) studiano formati e robustezza dell'interscambio, non fonti dei ricavi. **Nessun file tecnico modificato.**
+- **Garanzie e incognite:** importi in centesimi, nessuna ripartizione automatica dei compensi né riscrittura degli aggregati esistenti, nessun doppio conteggio con vendite, nessun compenso equiparato a incasso verificato o utile fiscale. Backup a cartella scelta, CSV integrali esistenti, offline, multilingua di sistema con fallback inglese, privacy e navigazione accessibile conservati. La forma minima va preferita a una contabilità generalista; chiedere al proprietario se il prodotto debba comprendere redditi diversi dalle opere.
+- **Esito:** **33 proposte** Gestione e UX, tutte **«Proposta — da valutare»**; aggiunta una sola scheda Markdown e aggiornato il presente indice nella stessa cartella. [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) aperta, in bozza e **non unita**. Nessuna approvazione, assegnazione, implementazione o modifica a codice/configurazioni.
+
 
 ## Venticinquesima ricognizione (22 novembre 2026) — REPS-UX-032
 
