@@ -335,6 +335,9 @@ mod tests {
             VALUES('c','Cliente','t','t')", []).unwrap();
         c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
             VALUES('s','a','c',1000,'2026-11-21','t')", []).unwrap();
+        // Backups require the finance snapshot accompanying every sale (schema >= 2).
+        c.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+            VALUES('s',0,0,3334,3333,3333)", []).unwrap();
         c.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
             VALUES('r','s','2026-11-21',400,'cash','t')", []).unwrap();
     }
