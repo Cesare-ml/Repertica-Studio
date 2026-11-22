@@ -232,5 +232,6 @@ test('artwork dimensions are searchable in cm with x or × and decimal commas', 
   assert.deepEqual(found('30 × 40'), ['c']);
   assert.deepEqual(found('30x50'), []);
   assert.deepEqual(found('30,5'), ['a', 'b']); // Single dimensions remain searchable.
-  assert.deepEqual(found('d'), ['d']); // Missing measurements are never fabricated.
+  assert.deepEqual(found('0x0'), []); // Missing measurements are never fabricated.
+  assert.deepEqual(found('"senza misure"'), ['d']);
 });
