@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **46 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **47 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -52,6 +52,14 @@ Data ricognizione: **2026-11-22** (quarantatreesima ricognizione). Stato uniform
 | [REPS-TECH-044](REPS-TECH-044-esportazione-scadenze-rate-icalendar-offline.md) | Esportazione manuale delle scadenze rateali esistenti in iCalendar .ics, senza sincronizzazione o nuovi pagamenti; privacy minima e attenzione a UUID instabili dopo modifiche dei piani | P2–P3 condizionata; nessuno sviluppo se CSV/agenda manuale bastano | Proposta — da valutare |
 | [REPS-TECH-045](REPS-TECH-045-associazione-guidata-foto-importate-opere.md) | Associazione guidata delle fotografie già importate nel Media Center alle opere esistenti: anteprima, revisione umana per riga e collegamento protetto; nessun matching automatico né nuova importazione multipla | P2 se casi frequenti; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-046](REPS-TECH-046-master-fotografici-tiff-bigtiff-offline.md) | Master fotografici TIFF/BigTIFF conservabili come originali offline con hash, backup integrale ed eventuali preview derivate dichiarate; fase iniziale senza obbligo di decoder | P2 condizionata a casi reali; P3/nessuno sviluppo se non utile | Proposta — da valutare |
+| [REPS-TECH-047](REPS-TECH-047-ocr-locale-documenti-scansionati-consenso.md) | OCR locale manuale dei documenti scansionati con originali intatti, testo temporaneo per default e indice solo eventuale opt-in; distinto dal testo PDF nativo di TECH-028 | P2–P3 condizionata, nessuno sviluppo se OCR esterno basta | Proposta — da valutare |
+
+## Quarantaquattresima ricognizione — 22 novembre 2026 — REPS-TECH-047
+
+- **[REPS-TECH-047 — OCR locale facoltativo dei documenti scansionati](REPS-TECH-047-ocr-locale-documenti-scansionati-consenso.md):** analizzati su main [allegati degli incassi](../../RECEIPT-ATTACHMENTS.md), [backend](../../../src-tauri/src/receipt_attachments.rs), [MVP](../../MVP.md), [portabilità](../../DATA-PORTABILITY.md), [Cargo](../../../src-tauri/Cargo.toml), [MCP](../../MCP.md), le **46 precedenti schede TECH** e le **51 UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). I documenti PDF/JPEG/PNG/WebP degli incassi già esistono, ma non emerge OCR delle scansioni. TECH-028 propone soltanto **estrazione del testo PDF nativo**; UX-028 riguarda i **giustificativi delle spese**, ancora ipotetici. Nessun doppione né file dell'altro filone modificato.
+- **Idea delimitata:** solo OCR **locale, facoltativo e manuale** di allegati selezionati, con originali invariati, risultati non verificati e trascrizione temporanea per default; indice privato solo in fase separata, senza MCP, cloud, inferenze economiche o PDF sostituiti. [Tesseract](https://github.com/tesseract-ocr/tesseract) è solo un possibile motore e [non accetta direttamente PDF](https://github.com/tesseract-ocr/tessdoc/blob/main/InputFormats.md).
+- **Priorità ipotetica:** **P2–P3** subordinata a prove con professionisti e scansioni autorizzate; preferire OCR esterno offline se sufficiente, nel qual caso **nessuno sviluppo**. Tutto locale, backup scelto dall'utente, lingua UI OS/fallback EN distinta da lingua OCR; nessuna approvazione.
+- **Esito:** **47 proposte**, tutte «Proposta — da valutare». Soltanto nuova scheda e indice Markdown nella cartella autorizzata; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta in bozza e senza merge.
 
 ## Quarantatreesima ricognizione — 22 novembre 2026 — REPS-TECH-046
 
