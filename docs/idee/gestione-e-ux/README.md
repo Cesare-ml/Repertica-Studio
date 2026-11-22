@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (ventisettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **34 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (ventottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **35 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -40,6 +40,15 @@ Aggiornato: **2026-11-22** (ventisettesima ricognizione). Stato delle proposte: 
 | [REPS-UX-032](REPS-UX-032-budget-mensili-categorie-spesa-scostamenti.md) | Budget mensili facoltativi per categorie di spesa, confronto preventivato/registrato e spese fuori budget ben visibili; senza creare movimenti né alterare le statistiche esistenti | P2* | Proposta — da valutare |
 | [REPS-UX-033](REPS-UX-033-entrate-professionali-non-vendita-opere.md) | Registro locale e facoltativo dei **compensi professionali extra-vendita** (didattica, licenze, servizi), distinti da vendite, incassi e quote congelate; nessun ricavo o pagamento presunto | P2* (P1–P2 solo se validato) | Proposta — da valutare |
 | [REPS-UX-034](REPS-UX-034-analisi-vendite-caratteristiche-opere.md) | Analisi aggregata delle **vendite registrate** per tecnica, supporto o anno delle opere: gruppi con metadati mancanti, definizioni verificabili e nessuna inferenza su incassi, utili o classificazioni storiche | P2* (P3 se bastano CSV; P1–P2 solo dopo validazione) | Proposta — da valutare |
+| [REPS-UX-035](REPS-UX-035-preferenze-contatto-comunicazioni-individuali.md) | Preferenze di contatto dichiarate e avvisi contestuali per le comunicazioni individuali ai collezionisti, distinguendo inviti promozionali e comunicazioni su vendite senza presunzioni di consenso | P2*; P3 se bastano note/etichette | Proposta — da valutare |
+
+## Ventottesima ricognizione — 22 novembre 2026 — REPS-UX-035
+
+- **[REPS-UX-035 — Preferenze di contatto e cautele nelle comunicazioni individuali](REPS-UX-035-preferenze-contatto-comunicazioni-individuali.md):** proposta per non perdere indicazioni dichiarate dai collezionisti, come «non desidero inviti alle mostre», mantenendo distinto il contatto su una vendita. «Non indicato» non equivale a un consenso, e nessuna preferenza è presentata come certificazione di conformità normativa. L'eventuale promemoria contestuale in composizione sarebbe una **fase separata**, senza invio automatico.
+- **Nuova verifica di `main`:** [Posta professionale IMAP/SMTP](../../BUSINESS-MAIL-DESKTOP.md) **già implementata** come funzione personale facoltativa, con bozze SQLite offline, suggerimenti degli indirizzi dei collezionisti e invio SMTP soltanto dopo conferma dell'utente. Il [modello del collezionista](../../../src/app/models.ts) ha email, telefono e note ma non una preferenza strutturata per finalità/canale nei percorsi consultati. Non è provato né un difetto normativo né un bisogno degli utenti; la posta, quando usata, comunica con i provider scelti e non è un'attività completamente offline.
+- **Coordinamento anti-doppione:** UX-014 studia una **rubrica multi-ruolo con storico interazioni**, non il promemoria contestuale su istruzioni ricevute; UX-002 riguarda trattative e non finalità di contatto. [TECH-014](https://github.com/Cesare-ml/Repertica-Studio/pull/16) riguarda autorizzazioni **MCP** e TECH-025 export tabellari minimizzati. Nessuna newsletter, tracciamento aperture, scoring contatti o nuovo sistema email è proposto; nessun file dell'altra automazione modificato.
+- **Alternativa minima:** campo facoltativo «non inviare inviti» e nota/data; verificare prima con artisti/gallerie se basti questo e se la posta Repertica venga effettivamente usata. Privacy e separazione delle finalità, backup completi in cartella scelta, CSV precedenti non modificati, IT/EN/ES/FR/DE con lingua di sistema e fallback inglese, navigazione accessibile su desktop. Priorità **P2 puramente ipotetica**, P3 se basta una nota.
+- **Esito:** **35 schede** Gestione e UX, tutte **«Proposta — da valutare»**; aggiunta una scheda Markdown e aggiornato questo indice nella sola cartella di pertinenza. [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) aperta, in bozza e **senza merge**. Nessuna approvazione, assegnazione, implementazione o modifica a codice/configurazioni.
 
 ## Ventisettesima ricognizione — 22 novembre 2026 — REPS-UX-034
 
