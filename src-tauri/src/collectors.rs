@@ -283,19 +283,25 @@ fn add_image_core(db: &Database, collector_id: &str, source_path: &str, kind: &s
     }
     let relative = store_media(&db.directory, &bytes, extension)?;
     let id = Uuid::new_v4().to_string();
-    let inserted = tx.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
-        params![id, collector_id, kind, relative, now()]);
-    if let Err(e) = inserted {
+    // Any error after staging the file (not just INSERT/COMMIT) must remove it.
+    // The transaction is dropped/rolled back before the file is unlinked, so an
+    // existing profile photograph and its database reference remain unchanged.
+    let outcome = (|| -> Result<CollectorImage, String> {
+        tx.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
+            params![id, collector_id, kind, relative, now()]).map_err(err)?;
+        let image = tx.query_row(
+            &format!("SELECT {IMAGE_FIELDS} FROM collector_images WHERE id=?1"),
+            params![id], image_row,
+        ).map_err(err)?;
+        tx.commit().map_err(err)?;
+        Ok(image)
+    })();
+    if outcome.is_err() {
         let _ = fs::remove_file(db.directory.join(&relative));
-        return Err(err(e));
+    } else if let Some(old) = replaced {
+        remove_media_file(&conn, db, &old);
     }
-    let image = tx.query_row(&format!("SELECT {IMAGE_FIELDS} FROM collector_images WHERE id=?1"), params![id], image_row).map_err(err)?;
-    if let Err(e) = tx.commit() {
-        let _ = fs::remove_file(db.directory.join(&relative));
-        return Err(err(e));
-    }
-    if let Some(old) = replaced { remove_media_file(&conn, db, &old); }
-    Ok(image)
+    outcome
 }
 
 fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
@@ -312,13 +318,23 @@ fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
 fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
     require_regular_media_dir(db)?;
     let conn = db.conn.lock().map_err(err)?;
+    // Report the sales restriction only when a real sale exists. A disk error,
+    // database lock or an import-specific SQLite trigger must not be mislabeled
+    // as a sale relationship. This also protects imported archives where FK
+    // enforcement was disabled before the record was created.
+    let has_sales: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sales WHERE collector_id=?1)",
+        params![id], |row| row.get(0),
+    ).map_err(err)?;
+    if has_sales {
+        return Err("Non puoi eliminare un collezionista collegato a una vendita".into());
+    }
     let paths: Vec<String> = {
         let mut statement = conn.prepare("SELECT image_path FROM collector_images WHERE collector_id=?1").map_err(err)?;
         let paths = statement.query_map(params![id], |r| r.get(0)).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
         paths
     };
-    let affected = conn.execute("DELETE FROM collectors WHERE id=?1", params![id])
-        .map_err(|_| "Non puoi eliminare un collezionista collegato a una vendita".to_string())?;
+    let affected = conn.execute("DELETE FROM collectors WHERE id=?1", params![id]).map_err(err)?;
     if affected == 0 { return Err("Collezionista non trovato".into()); }
     for path in paths { remove_media_file(&conn, db, &path); }
     Ok(())
@@ -490,6 +506,40 @@ mod tests {
     }
 
     #[test]
+    fn replacing_profile_rolls_back_and_cleans_media_when_inserted_row_disappears() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        let original = add_image_core(
+            &db, &collector.id, &picture(dir.path(), "original.jpg", 1), "PROFILE",
+        ).unwrap();
+        // An externally added AFTER INSERT trigger can remove the new row before
+        // the follow-up SELECT. The old profile must survive, and the staged
+        // replacement must not remain orphaned in media/.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER drop_new_collector_photo AFTER INSERT ON collector_images
+             BEGIN DELETE FROM collector_images WHERE id=NEW.id; END;",
+        ).unwrap();
+        let failure = add_image_core(
+            &db, &collector.id, &picture(dir.path(), "replacement.jpg", 2), "PROFILE",
+        ).unwrap_err();
+        assert!(failure.contains("Query returned no rows"), "{failure}");
+        assert_eq!(media_count(&db), 1, "failed replacement must not leak media");
+        assert!(db.directory.join(&original.image_path).is_file());
+        let saved = by_id(&db.conn.lock().unwrap(), &collector.id).unwrap();
+        assert_eq!(saved.profile_image_id.as_deref(), Some(original.id.as_str()));
+        assert_eq!(saved.photo_count, 1);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER drop_new_collector_photo").unwrap();
+        let next = add_image_core(
+            &db, &collector.id, &picture(dir.path(), "replacement-ok.jpg", 3), "PROFILE",
+        ).unwrap();
+        assert_eq!(media_count(&db), 1);
+        assert_eq!(
+            by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().profile_image_id.as_deref(),
+            Some(next.id.as_str()),
+        );
+    }
+
+    #[test]
     fn photographs_are_capped_and_deleting_a_collector_removes_its_files_but_not_when_sold_to() {
         let (dir, db) = setup();
         let collector = save_collector_core(&db, input("Anna")).unwrap();
@@ -510,6 +560,27 @@ mod tests {
         assert_eq!(media_count(&db), 0);
         let rows: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collector_images", [], |r| r.get(0)).unwrap();
         assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn collector_deletion_preserves_photos_and_reports_actual_sqlite_failure() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        let photo = add_image_core(
+            &db, &collector.id, &picture(dir.path(), "photo.jpg", 1), "PHOTO",
+        ).unwrap();
+        // A different database failure should not be reported as a linked sale.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER block_collector_delete BEFORE DELETE ON collectors
+             BEGIN SELECT RAISE(ABORT, 'external_archive_rejects_delete'); END;",
+        ).unwrap();
+        let failure = delete_collector_core(&db, &collector.id).unwrap_err();
+        assert!(failure.contains("external_archive_rejects_delete"), "{failure}");
+        assert!(db.directory.join(&photo.image_path).is_file());
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, 1);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER block_collector_delete").unwrap();
+        delete_collector_core(&db, &collector.id).unwrap();
+        assert_eq!(media_count(&db), 0);
     }
 
     #[test]
