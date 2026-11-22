@@ -649,7 +649,13 @@ mod tests {
         assert!(unchanged.last_success_at.is_none(), "an old disk must not satisfy the new schedule");
         assert!(unchanged.last_directory.is_none());
         let new_run = tick(&db, at("2026-11-21 09:06")).unwrap().expect("new destination is still due");
-        assert!(Path::new(&new_run.last_directory.unwrap()).starts_with(&second));
+        // Windows can return a verbatim (\\\\?\\) path for the temporary directory,
+        // while the backup API deliberately returns a user-facing path without it.
+        // Compare resolved filesystem locations rather than their display spelling.
+        let created = fs::canonicalize(new_run.last_directory.unwrap()).unwrap();
+        let selected = fs::canonicalize(&second).unwrap();
+        assert!(created.starts_with(&selected),
+            "the new backup must be inside the newly selected destination");
     }
 
     #[test]
