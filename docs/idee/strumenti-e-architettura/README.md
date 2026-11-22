@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (quarantaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **49 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (quarantasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **50 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -55,6 +55,13 @@ Data ricognizione: **2026-11-22** (quarantaseiesima ricognizione). Stato uniform
 | [REPS-TECH-047](REPS-TECH-047-ocr-locale-documenti-scansionati-consenso.md) | OCR locale manuale dei documenti scansionati con originali intatti, testo temporaneo per default e indice solo eventuale opt-in; distinto dal testo PDF nativo di TECH-028 | P2–P3 condizionata, nessuno sviluppo se OCR esterno basta | Proposta — da valutare |
 | [REPS-TECH-048](REPS-TECH-048-parita-ricerca-interfaccia-mcp-unicode.md) | Ricerca opere con semantica Unicode e corrispondenze verificabili fra interfaccia Angular e MCP locale, senza aprire campi privati o cambiare gli ordinamenti/limiti intenzionali | P2 se le divergenze contano nell'uso reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-049](REPS-TECH-049-confine-istruzioni-dati-mcp-prompt-injection.md) | Testi delle schede come dati non attendibili negli output MCP: rischio di prompt injection indiretta, confini di responsabilità degli host e test sintetici senza censurare le opere | P2–P3 condizionata | Proposta — da valutare |
+| [REPS-TECH-050](REPS-TECH-050-confronto-backup-senza-ripristino.md) | Confronto descrittivo e read-only di due backup completi verificati: differenze per record e hash media senza ripristino, fusione o deduzioni sulla provenienza | P2–P3 condizionata; nessuno sviluppo se bastano CSV/Calc | Proposta — da valutare |
+
+## Quarantasettesima ricognizione — 22 novembre 2026 — REPS-TECH-050
+
+- **[REPS-TECH-050 — Confronto descrittivo di due backup verificati, senza ripristino](REPS-TECH-050-confronto-backup-senza-ripristino.md):** esaminati su `main` `README.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/backup.rs`, `db.rs`, `auto_backup.rs`, i 49 studi TECH e le 54 schede Gestione/UX della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). `inspect_backup_core` ispeziona già una singola copia completa ma non confronta i record di **due** backup; il manifest v1 non attesta l'identità comune dell'archivio.
+- **Confini e cautela:** TECH-009 è inventario/verifica/retention dei backup; TECH-037 è recupero di avvio dopo ripristino interrotto; TECH-010 è storia delle revisioni dentro l'archivio; UX-050 è rendiconto mensile. La nuova proposta confronta **solo due backup completi verificati e selezionati manualmente**, senza restore, sync, eliminazioni o attribuzione di «record cancellato». Differenze per UUID e SHA-256 sono osservazioni, non prova di provenienza o cronologia.
+- **Validazione prima dello sviluppo:** provare backup sintetici e CSV + LibreOffice Calc; solo se emerge un bisogno reale, prima confrontare manifest e contatori, poi record omogenei dello stesso schema e dettagli privacy-by-default. **P2–P3 ipotetica**, oppure nessuno sviluppo. Offline, percorso scelto liberamente, nessun account/cloud, UI lingua sistema/fallback EN. Nessun file dell'altro filone modificato; PR solo documentale, in bozza e **senza merge**.
 
 ## Quarantaseiesima ricognizione — 22 novembre 2026 — REPS-TECH-049
 
