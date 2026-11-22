@@ -59,12 +59,30 @@ function searchTerms(query: string): string[] {
   return terms;
 }
 
-function matchesTerms(terms: string[], fields: Array<string | null | undefined>): boolean {
+/**
+ * Phone numbers are commonly pasted without the spaces, parentheses or dashes
+ * used in the saved contact. Keep this alternative strictly numeric and at
+ * least five digits long: normal words, years and quoted prose remain literal.
+ */
+function phoneDigitsForSearch(term: string): string | null {
+  if (!/^[+\d\s().\/-]+$/u.test(term)) return null;
+  const digits = term.replace(/\D/gu, '');
+  return digits.length >= 5 ? digits : null;
+}
+
+function matchesTerms(
+  terms: string[], fields: Array<string | null | undefined>, phone?: string | null
+): boolean {
   if (terms.length === 0) return true;
-  // Match within a single field so a quoted phrase cannot accidentally span
-  // an artwork title, its technique and a collector name joined by spaces.
+  // A quoted phrase cannot span multiple unrelated fields. The phone
+  // alternative only compares digits against this collector's own phone.
   const normalizedFields = fields.map(field => foldSearch(field ?? ''));
-  return terms.every(term => normalizedFields.some(field => field.includes(term)));
+  const savedPhoneDigits = (phone ?? '').replace(/\D/gu, '');
+  return terms.every(term => {
+    if (normalizedFields.some(field => field.includes(term))) return true;
+    const digits = phoneDigitsForSearch(term);
+    return digits !== null && savedPhoneDigits.includes(digits);
+  });
 }
 
 export function filterArtworks(
@@ -114,5 +132,5 @@ export function filterCollectors(
   return base.filter(c =>
     matchesTerms(terms, [c.name, c.email, c.phone, c.address, c.notes, c.birth_place,
       c.instagram, c.facebook, c.tiktok, c.website, c.linkedin,
-      ...(indexes.byCollector[c.id] ?? []).map(s => s.artwork_title)]));
+      ...(indexes.byCollector[c.id] ?? []).map(s => s.artwork_title)], c.phone));
 }

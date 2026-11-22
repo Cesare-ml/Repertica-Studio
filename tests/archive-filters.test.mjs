@@ -162,3 +162,22 @@ test('collector filters separate buyers and incomplete records and search social
   assert.deepEqual(ids(filterCollectors(collectors, 'luca_art', indexes)), ['b']);
   assert.deepEqual(ids(filterCollectors(collectors, 'notte', indexes, 'incomplete')), []);
 });
+
+
+test('collector search matches phone numbers across formatting without weakening other terms', () => {
+  const people = [
+    collector('a', { name: 'Luca', phone: '+39 (333) 123-4567', notes: 'Opera 2026' }),
+    collector('b', { name: 'Marta', phone: '555.000.9999' }),
+    collector('c', { name: 'Carla', phone: null, notes: '3331234567' })
+  ];
+  const indexes = buildSaleIndexes([]);
+  const found = query => filterCollectors(people, query, indexes).map(c => c.id);
+
+  assert.deepEqual(found('3331234567'), ['a', 'c']);
+  assert.deepEqual(found('"333 123 4567"'), ['a']);
+  assert.deepEqual(found('Luca 333.123.4567'), ['a']);
+  assert.deepEqual(found('5550009999'), ['b']);
+  assert.deepEqual(found('Marta 3331234567'), []);
+  assert.deepEqual(found('3331239999'), []);
+  assert.deepEqual(found('2026'), ['a']); // No digit-only fuzzy matching for years.
+});
