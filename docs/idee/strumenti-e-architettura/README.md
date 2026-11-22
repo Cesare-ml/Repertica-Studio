@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **35 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **36 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -41,6 +41,15 @@ Data ricognizione: **2026-11-22** (trentaduesima ricognizione). Stato uniforme: 
 | [REPS-TECH-033](REPS-TECH-033-salvataggio-condizionale-schede-obsolete.md) | Salvataggio condizionale di schede obsolete: impedire sovrascritture silenziose di opere e collezionisti; senza cronologia obbligatoria o cloud | P1–P2 condizionata | Proposta — da valutare |
 | [REPS-TECH-034](REPS-TECH-034-esportazione-brochure-pdf-atomica-senza-sovrascrittura.md) | Esportazione PDF brochure senza sovrascrittura di documenti esistenti, con eventuale pubblicazione finale sicura e gestione conservativa di errori/temporanei | P1 protezione file; P2 pubblicazione sicura (ipotetiche) | Proposta — da valutare |
 | [REPS-TECH-035](REPS-TECH-035-configurazioni-mcp-client-esterni-conflitti-recupero.md) | Collegamento MCP a client esterni: tutela delle configurazioni JSON/TOML contro modifiche concorrenti, conflitti e recupero, senza sostituire il server già presente | P2 condizionata; P3 se bastano snippet manuali | Proposta — da valutare |
+| [REPS-TECH-036](REPS-TECH-036-mcp-archivi-grandi-paginazione-limiti-risorse.md) | MCP locale con elenchi continuabili e limiti di risorse misurati per archivi grandi, senza nuova rete né dati sensibili esposti | P2 condizionata; P3 se gli archivi sono piccoli | Proposta — da valutare |
+
+## Trentatreesima ricognizione — 22 novembre 2026 — REPS-TECH-036
+
+- **[REPS-TECH-036 — MCP locale per archivi grandi: paginazione stabile e limiti di risorse](REPS-TECH-036-mcp-archivi-grandi-paginazione-limiti-risorse.md):** sul `main` del 22/11/2026 i tool MCP di sola lettura esistono già; `search_artworks`, `list_collectors` e `list_sales` scorrono tutte le righe pertinenti pur restituendo soltanto 50/200 risultati, `list_certificates` prima raccoglie tutto in un `Vec`, e non sono presenti cursori per proseguire dall'ultima riga. Il parser delle righe STDIO non mostra un tetto esplicito ai byte di input. **Rischi dedotti dal codice, non rallentamenti o incidenti riprodotti**.
+- **Proposta P2 esclusivamente ipotetica:** misurare l'impatto su archivi sintetici crescenti; valutare una paginazione opzionale e ordinamenti con spareggio stabile, controlli di dimensione di richiesta/risposta e un percorso memoria-limitato per certificati. Distinguere accuratamente conteggi esatti, pagine parziali e consistenza live quando l'archivio cambia. Non promettere prestazioni o snapshot senza prove; **P3 se il bisogno reale è modesto**.
+- **Anti-doppioni:** [TECH-014](REPS-TECH-014-bridge-mcp-locale-lettura-permessi.md) tratta **visibilità/autorizzazioni** del server, [TECH-035](REPS-TECH-035-configurazioni-mcp-client-esterni-conflitti-recupero.md) i **file di configurazione di client esterni**, [TECH-008](REPS-TECH-008-viste-salvate-filtri-ricerca-locale.md) la ricerca nell'**interfaccia desktop**. Confrontate le 40 proposte [Gestione e UX — PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14): non è stata modificata alcuna loro scheda.
+- **Tutele:** STDIO e SQLite locali, sola lettura, nessun cloud/account, nessuna nuova esposizione di contatti/fotografie/annotazioni private, nessun indice remoto. Esportazione completa e backup su cartella scelta restano indipendenti; lingua di sistema/fallback inglese per la UI; compatibilità con client MCP esistenti da verificare prima di ogni decisione.
+- **Esito:** **36 schede**, tutte **«Proposta — da valutare»**. Unica nuova scheda e questo indice Markdown sotto `docs/idee/strumenti-e-architettura/`; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) mantenuta aperta in bozza e senza merge, nessuna approvazione o implementazione.
 
 ## Trentaduesima ricognizione — 22 novembre 2026 — REPS-TECH-035
 
