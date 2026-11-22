@@ -129,6 +129,30 @@ fn attach_core(db: &Database, receipt_id: &str, source: &Path) -> Result<Receipt
     conn.query_row(&format!("SELECT {FIELDS} FROM sale_receipt_attachments WHERE receipt_id=?1"),
         params![receipt_id], row).map_err(err)
 }
+// Used by both viewing/exporting and by destructive unlinking. A manually
+// replaced or corrupt file must not be discarded just because the record's
+// media_path still looks safe.
+fn verified_attachment_bytes(db: &Database, attachment: &ReceiptAttachment) -> Result<Vec<u8>, String> {
+    media_directory(db)?;
+    if !safe_media_path(&attachment.media_path) {
+        return Err("Percorso allegato non sicuro".into());
+    }
+    let path = db.directory.join(&attachment.media_path);
+    let size = regular_file(&path)?;
+    if size == 0 || size > MAX_BYTES as u64 || size != attachment.size_bytes as u64 {
+        return Err("Dimensione allegato non valida".into());
+    }
+    let mut bytes = Vec::new();
+    File::open(&path).map_err(err)?.take(MAX_BYTES as u64 + 1)
+        .read_to_end(&mut bytes).map_err(err)?;
+    if bytes.len() != size as usize || mime(&bytes).map(|(_, m)| m) != Some(attachment.mime_type.as_str()) {
+        return Err("Formato allegato non valido".into());
+    }
+    if format!("{:x}", Sha256::digest(&bytes)) != attachment.sha256 {
+        return Err("Impronta SHA-256 allegato non valida".into());
+    }
+    Ok(bytes)
+}
 fn data_core(db: &Database, receipt_id: &str) -> Result<String, String> {
     // Hold the SQLite mutex while reading to serialize with backup and attachment removal.
     let conn = db.conn.lock().map_err(err)?;
@@ -136,22 +160,7 @@ fn data_core(db: &Database, receipt_id: &str) -> Result<String, String> {
         &format!("SELECT {FIELDS} FROM sale_receipt_attachments WHERE receipt_id=?1"),
         params![receipt_id], row,
     ).optional().map_err(err)?.ok_or("Allegato non trovato")?;
-    media_directory(db)?;
-    if !safe_media_path(&attachment.media_path) { return Err("Percorso allegato non sicuro".into()); }
-    let file = db.directory.join(&attachment.media_path);
-    let size = regular_file(&file)?;
-    if size == 0 || size > MAX_BYTES as u64 || size != attachment.size_bytes as u64 {
-        return Err("Dimensione allegato non valida".into());
-    }
-    let mut bytes = Vec::new();
-    File::open(&file).map_err(err)?.take(MAX_BYTES as u64 + 1)
-        .read_to_end(&mut bytes).map_err(err)?;
-    if bytes.len() != size as usize || mime(&bytes).map(|(_,m)| m) != Some(attachment.mime_type.as_str()) {
-        return Err("Formato allegato non valido".into());
-    }
-    if format!("{:x}", Sha256::digest(&bytes)) != attachment.sha256 {
-        return Err("Impronta SHA-256 allegato non valida".into());
-    }
+    let bytes = verified_attachment_bytes(db, &attachment)?;
     Ok(format!("data:{};base64,{}", attachment.mime_type, STANDARD.encode(bytes)))
 }
 // Imported or manually edited archives can point an artwork, collector, RAW,
@@ -204,19 +213,33 @@ fn cleanup_unlinked(db: &Database, relative: &str) -> Result<(), String> {
 }
 fn detach_core(db: &Database, receipt_id: &str) -> Result<(), String> {
     let conn = db.conn.lock().map_err(err)?;
-    let relative: String = conn.query_row(
-        "SELECT media_path FROM sale_receipt_attachments WHERE receipt_id=?1",
-        params![receipt_id], |r| r.get(0),
+    let attachment: ReceiptAttachment = conn.query_row(
+        &format!("SELECT {FIELDS} FROM sale_receipt_attachments WHERE receipt_id=?1"),
+        params![receipt_id], row,
     ).optional().map_err(err)?.ok_or("Allegato non trovato")?;
-    if !safe_media_path(&relative) { return Err("Percorso allegato non sicuro".into()); }
+    if !safe_media_path(&attachment.media_path) {
+        return Err("Percorso allegato non sicuro".into());
+    }
     // Check the directory and all other references BEFORE modifying SQLite.
     // If the media directory was replaced or a query fails, retain the link.
     media_directory(db)?;
-    let still_used = referenced_elsewhere(&conn, &relative, receipt_id)?;
+    let still_used = referenced_elsewhere(&conn, &attachment.media_path, receipt_id)?;
+    if !still_used {
+        // Imported archives and external edits may contain a replaced file,
+        // including a dangling symlink. Never silently delete unverified bytes.
+        // A genuinely missing file may still be unlinked to repair a broken
+        // attachment record; the cleanup step already tolerates NotFound.
+        let target = db.directory.join(&attachment.media_path);
+        match fs::symlink_metadata(&target) {
+            Ok(_) => { verified_attachment_bytes(db, &attachment)?; }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(err(e)),
+        }
+    }
     conn.execute("DELETE FROM sale_receipt_attachments WHERE receipt_id=?1", params![receipt_id])
         .map_err(err)?;
     if still_used { return Ok(()); }
-    cleanup_unlinked(db, &relative)
+    cleanup_unlinked(db, &attachment.media_path)
 }
 #[tauri::command]
 pub fn get_sale_receipt_attachment(db: State<'_, Database>, receipt_id: String)
@@ -397,6 +420,66 @@ mod tests {
         let filename = Path::new(&attachment.media_path).file_name().unwrap();
         assert!(original.join(filename).exists());
         assert_eq!(fs::read_dir(&external).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn altered_evidence_cannot_be_silently_deleted_or_unlinked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let original = b"%PDF-1.7\\nproof-A";
+        let source = tmp.path().join("proof.pdf");
+        fs::write(&source, original).unwrap();
+        let attachment = attach_core(&db, "r", &source).unwrap();
+        let stored = db.directory.join(&attachment.media_path);
+
+        // Same size and same PDF signature: only the SHA-256 detects this edit.
+        fs::write(&stored, b"%PDF-1.7\\nproof-B").unwrap();
+        let error = detach_core(&db, "r").unwrap_err();
+        assert!(error.contains("SHA-256"), "{error}");
+        assert!(get_core(&db, "r").unwrap().is_some(), "retain DB reference on mismatch");
+        assert!(stored.exists(), "never remove the altered file");
+
+        fs::write(&stored, original).unwrap();
+        detach_core(&db, "r").unwrap();
+        assert!(get_core(&db, "r").unwrap().is_none());
+        assert!(!stored.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacing_stored_evidence_with_a_symlink_does_not_unlink_the_record() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("proof.pdf");
+        fs::write(&source, b"%PDF-1.7\\nproof").unwrap();
+        let attachment = attach_core(&db, "r", &source).unwrap();
+        let stored = db.directory.join(&attachment.media_path);
+        fs::remove_file(&stored).unwrap();
+        let external = tmp.path().join("external.pdf");
+        fs::write(&external, b"%PDF-1.7\\nproof").unwrap();
+        std::os::unix::fs::symlink(&external, &stored).unwrap();
+
+        assert!(detach_core(&db, "r").is_err());
+        assert!(get_core(&db, "r").unwrap().is_some());
+        assert!(fs::symlink_metadata(&stored).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read(&external).unwrap(), b"%PDF-1.7\\nproof");
+    }
+
+    #[test]
+    fn missing_evidence_can_be_unlinked_without_recreating_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("proof.pdf");
+        fs::write(&source, b"%PDF-1.7\\nproof").unwrap();
+        let attachment = attach_core(&db, "r", &source).unwrap();
+        let stored = db.directory.join(&attachment.media_path);
+        fs::remove_file(&stored).unwrap();
+        detach_core(&db, "r").unwrap();
+        assert!(get_core(&db, "r").unwrap().is_none());
+        assert!(!stored.exists());
     }
 
     #[test]
