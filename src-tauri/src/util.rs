@@ -41,9 +41,16 @@ pub fn friendly(error: impl std::fmt::Display) -> String {
 }
 
 /// Lower-case and strip common Latin accents so that "Cafè" matches "cafe".
+/// Also ignore combining diacritics: photos imported with decomposed Unicode
+/// names (e.g. "Cafe\u{301}") must match searches typed as "café" or "cafe".
+/// This is deliberately a small Latin-oriented search fold, not a transliterator.
 pub fn fold(text: &str) -> String {
     text.chars()
         .flat_map(char::to_lowercase)
+        .filter(|c| !matches!(*c,
+            '\u{0300}'..='\u{036f}' | '\u{1ab0}'..='\u{1aff}' |
+            '\u{1dc0}'..='\u{1dff}' | '\u{20d0}'..='\u{20ff}' |
+            '\u{fe20}'..='\u{fe2f}'))
         .map(|c| match c {
             'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
             'ç' => 'c',
@@ -107,6 +114,23 @@ mod tests {
         let io = std::io::Error::from_raw_os_error(if cfg!(windows) { 112 } else { 28 });
         assert!(friendly(io).contains("Spazio su disco"));
         assert!(friendly("Accesso negato. (os error 5)").contains("Accesso negato"));
+    }
+
+    #[test]
+    fn local_media_search_folds_decomposed_unicode_accents() {
+        // Media filenames and tags may originate on macOS, where combining
+        // characters are common. Normalise both query and stored metadata.
+        assert_eq!(fold("Café"), "cafe");
+        assert_eq!(fold("Cafe\u{301}"), "cafe");
+        assert_eq!(fold("CAFÉ"), fold("cafe\u{301}"));
+        assert_eq!(fold("Piñata"), fold("Pin\u{303}ata"));
+        assert_eq!(fold("İSTANBUL"), "istanbul");
+
+        let title = fold("Antichita\u{300} · SÖLE");
+        assert!(title.contains(&fold("antichità")));
+        assert!(title.contains(&fold("sole")));
+        assert_eq!(fold("Studio #42 & 📷"), "studio #42 & 📷",
+            "unrelated characters and punctuation are preserved");
     }
 
     #[test]
