@@ -118,8 +118,7 @@ pub fn list_expenses(db:State<'_,Database>)->Result<Vec<Expense>,String>{
     let rows=q.query_map([],expense_row).map_err(error)?.collect::<Result<Vec<_>,_>>().map_err(error)?;
     Ok(rows)
 }
-#[tauri::command]
-pub fn save_expense(db:State<'_,Database>,input:ExpenseInput)->Result<Expense,String>{
+fn save_expense_core(db:&Database,input:ExpenseInput)->Result<Expense,String>{
     if !date_ok(&input.expense_date) {return Err("Invalid expense date".into())}
     if input.amount_cents<=0 || input.amount_cents>100_000_000_000 {return Err("Invalid amount".into())}
     let category=text(input.category,120)?;
@@ -143,8 +142,14 @@ pub fn save_expense(db:State<'_,Database>,input:ExpenseInput)->Result<Expense,St
     let exists:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM expenses WHERE id=?1)",params![id],|r|r.get(0)).map_err(error)?;
     let now=Utc::now().to_rfc3339();
     if exists {
-        c.execute("UPDATE expenses SET expense_date=?2,category=?3,description=?4,amount_cents=?5,fund=?6,supplier=?7,purchase_url=?8,notes=?9,updated_at=?10 WHERE id=?1",
+        // An externally edited SQLite archive may contain a RAISE(IGNORE) trigger.
+        // SQLite then reports success without changing the row. Never return the
+        // old expense as if the artist's changes had been saved.
+        let changed = c.execute("UPDATE expenses SET expense_date=?2,category=?3,description=?4,amount_cents=?5,fund=?6,supplier=?7,purchase_url=?8,notes=?9,updated_at=?10 WHERE id=?1",
             params![id,input.expense_date,category,description,input.amount_cents,fund,supplier,purchase_url,notes,now]).map_err(error)?;
+        if changed != 1 {
+            return Err("Expense was not updated by SQLite; reload the record and retry".into());
+        }
     }else{
         if updating {return Err("Expense does not exist".into());}
         c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
@@ -152,6 +157,10 @@ pub fn save_expense(db:State<'_,Database>,input:ExpenseInput)->Result<Expense,St
     }
     c.query_row("SELECT id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at FROM expenses WHERE id=?1",
         params![id],expense_row).map_err(error)
+}
+#[tauri::command]
+pub fn save_expense(db:State<'_,Database>,input:ExpenseInput)->Result<Expense,String>{
+    save_expense_core(&db,input)
 }
 #[tauri::command]
 pub fn delete_expense(db:State<'_,Database>,id:String)->Result<(),String>{
@@ -342,6 +351,36 @@ mod tests{
         bad=good.clone();bad.artist_coefficient=f64::NAN;
         assert!(valid_settings(&bad).is_err());
     }
+    #[test]
+    fn expense_update_rejects_silently_ignored_sqlite_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_owned()).unwrap();
+        let input = |id: Option<String>, description: &str| ExpenseInput {
+            id, expense_date: "2026-11-20".into(), category: "materials".into(),
+            description: description.into(), amount_cents: 3500,
+            fund: None, supplier: None, purchase_url: None, notes: None,
+        };
+        let original = save_expense_core(&db, input(None, "Canvas")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("CREATE TRIGGER ignore_expense_edit BEFORE UPDATE ON expenses
+                BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+        let message = save_expense_core(&db, input(Some(original.id.clone()), "Paint"))
+            .expect_err("ignored update cannot be reported as a successful save");
+        assert!(message.contains("not updated"), "{message}");
+        {
+            let conn = db.conn.lock().unwrap();
+            let description: String = conn.query_row(
+                "SELECT description FROM expenses WHERE id=?1",
+                params![&original.id], |r| r.get(0)).unwrap();
+            assert_eq!(description, "Canvas", "the original expense must remain intact");
+            conn.execute_batch("DROP TRIGGER ignore_expense_edit").unwrap();
+        }
+        let updated = save_expense_core(&db, input(Some(original.id), "Paint")).unwrap();
+        assert_eq!(updated.description, "Paint", "editing works after the block is removed");
+    }
+
     #[test]
     fn monthly_sales_and_expenses_are_separate(){
         let dir=tempfile::tempdir().unwrap();
