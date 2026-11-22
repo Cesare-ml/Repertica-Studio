@@ -42,7 +42,7 @@ pub struct PartInput {
     pub pays_expenses: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Plan {
     pub enabled: bool,
     /// Active parts in display order.
