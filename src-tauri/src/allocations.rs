@@ -138,12 +138,15 @@ pub fn save_plan_core(db: &Database, input: PlanInput) -> Result<Plan, String> {
     validate(&input)?;
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
-    let existing: Vec<String> = all_parts(&tx)?.into_iter().map(|p| p.id).collect();
+    let existing = all_parts(&tx)?;
     let mut kept: Vec<String> = Vec::new();
+    // Keep the exact expected state: an AFTER trigger can alter a row while
+    // SQLite still reports that our INSERT/UPDATE/DELETE affected one row.
+    let mut expected_parts: Vec<Part> = Vec::new();
     for (position, part) in input.parts.iter().enumerate() {
         let name = part.name.trim().to_string();
         let id = match &part.id {
-            Some(id) if existing.contains(id) => id.clone(),
+            Some(id) if existing.iter().any(|old| old.id == *id) => id.clone(),
             Some(_) => return Err("Parte non trovata: ricarica le impostazioni".into()),
             None => Uuid::new_v4().to_string(),
         };
@@ -155,23 +158,32 @@ pub fn save_plan_core(db: &Database, input: PlanInput) -> Result<Plan, String> {
             params![id, name, part.share_bp, i64::from(part.pays_expenses), position as i64 + 1],
         ).map_err(err)?;
         require_plan_write(changed, "save part")?;
+        expected_parts.push(Part {
+            id: id.clone(), name, share_bp: part.share_bp,
+            pays_expenses: part.pays_expenses, position: position as i64 + 1, active: true,
+        });
         kept.push(id);
     }
-    for id in existing.iter().filter(|id| !kept.contains(id)) {
+    for old in existing.iter().filter(|old| !kept.contains(&old.id)) {
         let used: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM sale_allocations WHERE part_id=?1) OR EXISTS(SELECT 1 FROM expenses WHERE fund=?1)",
-            params![id], |r| r.get(0)).map_err(err)?;
+            params![&old.id], |r| r.get(0)).map_err(err)?;
         if used {
             // History keeps pointing at the part; it just stops being offered.
-            let changed = tx.execute("UPDATE allocation_parts SET active=0 WHERE id=?1", params![id]).map_err(err)?;
+            let changed = tx.execute("UPDATE allocation_parts SET active=0 WHERE id=?1", params![&old.id]).map_err(err)?;
             require_plan_write(changed, "deactivate historical part")?;
+            expected_parts.push(Part { active: false, ..old.clone() });
         } else {
-            let changed = tx.execute("DELETE FROM allocation_parts WHERE id=?1", params![id]).map_err(err)?;
+            let changed = tx.execute("DELETE FROM allocation_parts WHERE id=?1", params![&old.id]).map_err(err)?;
             require_plan_write(changed, "remove unused part")?;
         }
     }
     let changed = tx.execute("UPDATE allocation_settings SET enabled=?1 WHERE singleton=1", params![i64::from(input.enabled)]).map_err(err)?;
     require_plan_write(changed, "save enabled state")?;
+    expected_parts.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
+    if enabled(&tx)? != input.enabled || all_parts(&tx)? != expected_parts {
+        return Err("SQLite changed the allocation plan unexpectedly; no changes were saved".into());
+    }
     let plan = load_plan(&tx)?;
     tx.commit().map_err(err)?;
     Ok(plan)
@@ -382,6 +394,75 @@ mod tests {
         }).unwrap_err();
         assert!(message.contains("save part"), "{message}");
         assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before);
+    }
+
+    #[test]
+    fn after_update_triggers_cannot_change_the_saved_shares_or_enabled_flag() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        let edited = || PlanInput {
+            enabled: false,
+            parts: before.parts.iter().map(|p| PartInput {
+                id: Some(p.id.clone()), name: format!("Nuovo {}", p.name),
+                share_bp: p.share_bp, pays_expenses: p.pays_expenses,
+            }).collect(),
+        };
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER tamper_saved_part AFTER UPDATE OF name ON allocation_parts
+                   WHEN NEW.id='personal' BEGIN
+                   UPDATE allocation_parts SET share_bp=1234 WHERE id=NEW.id;
+                 END;"
+            ).unwrap();
+        }
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("unexpectedly"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before,
+            "a mutated part must roll back all changes");
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER tamper_saved_part;
+                 CREATE TRIGGER tamper_saved_setting AFTER UPDATE OF enabled ON allocation_settings
+                   BEGIN UPDATE allocation_settings SET enabled=1; END;"
+            ).unwrap();
+        }
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("unexpectedly"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before,
+            "a mutated enabled flag must roll back all part edits");
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER tamper_saved_setting;").unwrap();
+        let saved = save_plan_core(&db, edited()).unwrap();
+        assert!(!saved.enabled);
+        assert!(saved.parts.iter().all(|p| p.name.starts_with("Nuovo ")));
+    }
+
+    #[test]
+    fn after_delete_trigger_cannot_silently_recreate_an_unused_allocation_part() {
+        let (_dir, db) = setup();
+        let before = all_parts(&db.conn.lock().unwrap()).unwrap();
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER recreate_deleted_part AFTER DELETE ON allocation_parts
+             WHEN OLD.id='activity' BEGIN
+               INSERT INTO allocation_parts(id,name,share_bp,pays_expenses,position,active)
+               VALUES(OLD.id,OLD.name,OLD.share_bp,OLD.pays_expenses,OLD.position,OLD.active);
+             END;"
+        ).unwrap();
+        let only_personal = || PlanInput {
+            enabled: true,
+            parts: vec![PartInput {
+                id: Some("personal".into()), name: "Personale".into(),
+                share_bp: 10_000, pays_expenses: false,
+            }],
+        };
+        let message = save_plan_core(&db, only_personal()).unwrap_err();
+        assert!(message.contains("unexpectedly"), "{message}");
+        assert_eq!(all_parts(&db.conn.lock().unwrap()).unwrap(), before);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER recreate_deleted_part;").unwrap();
+        let saved = save_plan_core(&db, only_personal()).unwrap();
+        assert_eq!(saved.parts.len(), 1);
+        assert_eq!(all_parts(&db.conn.lock().unwrap()).unwrap().len(), 1);
     }
 
     #[test]
