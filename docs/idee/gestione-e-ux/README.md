@@ -44,6 +44,7 @@ Aggiornato: **2026-11-22** (trentaduesima ricognizione). Stato delle proposte: *
 | [REPS-UX-036](REPS-UX-036-misure-opere-non-rettangolari.md) | Misure speciali dichiarate (diametro, ingombro, dimensioni variabili), senza alterare campi cm o stime rettangolari; prima valutare nota facoltativa | P2* (P3 se bastano note) | Proposta — da valutare |
 | [REPS-UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) | Scadenze di uscite ricorrenti (affitto studio, assicurazioni, canoni) **distinte dalle spese effettivamente registrate**; prima validare promemoria semplice, senza generare movimenti | P2* (P3 se basta calendario esterno) | Proposta — da valutare |
 | [REPS-UX-038](REPS-UX-038-interessi-dichiarati-collezionisti-richieste-opere.md) | Interessi **dichiarati**, non inferiti: richieste di opere simili o caratteristiche desiderate; nessuna riserva, vendita, profilazione o consenso alle comunicazioni | P2* (P3 se bastano note) | Proposta — da valutare |
+| [REPS-UX-039](REPS-UX-039-ripartizione-informativa-incassi-dichiarati.md) | Vista informativa delle **quote per fondo sugli incassi manualmente dichiarati**, distinta dalle quote sul venduto e senza affermare liquidità effettivamente disponibile | P1–P2* per vendite rateali; P3 se bastano avvisi | Proposta — da valutare |
 
 ## Trentaduesima ricognizione — 22 novembre 2026 — REPS-UX-039
 
