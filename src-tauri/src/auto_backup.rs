@@ -94,6 +94,30 @@ pub fn is_due(
     !last_attempt_failed.is_some_and(|t| now < t + Duration::minutes(RETRY_MINUTES))
 }
 
+/// Show the next *actual attempt*, including overdue jobs and pending retries.
+/// Reporting only the next calendar slot hides a missed backup while the app
+/// is about to run it, and can make a disconnected USB disk look scheduled for
+/// tomorrow when a retry is due in minutes.
+fn next_due_time(
+    schedule: &Schedule, now: NaiveDateTime, enabled_at: Option<NaiveDateTime>,
+    last_success: Option<NaiveDateTime>, last_failure: Option<NaiveDateTime>,
+) -> NaiveDateTime {
+    if is_due(schedule, now, enabled_at, last_success, last_failure) {
+        return now;
+    }
+    let previous = schedule.previous_occurrence(now);
+    let covered = [enabled_at, last_success].into_iter().flatten().max()
+        .is_some_and(|at| at >= previous);
+    if !covered {
+        if let Some(retry_at) = last_failure
+            .and_then(|at| at.checked_add_signed(Duration::minutes(RETRY_MINUTES)))
+        {
+            if retry_at > now { return retry_at; }
+        }
+    }
+    schedule.next_occurrence(now)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct ScheduleInput {
     pub enabled: bool,
@@ -146,17 +170,23 @@ fn schedule_of(status: &ScheduleStatus) -> Schedule {
 }
 
 pub fn status(conn: &Connection, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
-    let mut status = conn.query_row(
+    let (mut status, enabled_at): (ScheduleStatus, Option<String>) = conn.query_row(
         "SELECT enabled,frequency,time_of_day,weekday,day_of_month,destination,keep_last,last_success_at,
-                last_attempt_at,last_status,last_message,last_directory FROM backup_schedule WHERE singleton=1",
-        [], |r| Ok(ScheduleStatus {
+                last_attempt_at,last_status,last_message,last_directory,enabled_at FROM backup_schedule WHERE singleton=1",
+        [], |r| Ok((ScheduleStatus {
             enabled: r.get::<_, i64>(0)? == 1, frequency: r.get(1)?, time_of_day: r.get(2)?, weekday: r.get(3)?,
             day_of_month: r.get(4)?, destination: r.get(5)?, keep_last: r.get(6)?, last_success_at: r.get(7)?,
             last_attempt_at: r.get(8)?, last_status: r.get(9)?, last_message: r.get(10)?, last_directory: r.get(11)?,
             next_run_at: None,
-        })).map_err(err)?;
+        }, r.get(12)?))).map_err(err)?;
     if status.enabled {
-        status.next_run_at = Some(schedule_of(&status).next_occurrence(now).format(STAMP).to_string());
+        let failed_at = if status.last_status.as_deref() == Some("ERROR") {
+            parse_stamp(&status.last_attempt_at)
+        } else { None };
+        status.next_run_at = Some(next_due_time(
+            &schedule_of(&status), now, parse_stamp(&enabled_at),
+            parse_stamp(&status.last_success_at), failed_at,
+        ).format(STAMP).to_string());
     }
     Ok(status)
 }
@@ -527,6 +557,44 @@ mod tests {
         fs::create_dir(&gone).unwrap();
         let recovered = tick(&db, at("2026-11-21 09:40")).unwrap().unwrap();
         assert_eq!(recovered.last_status.as_deref(), Some("OK"));
+    }
+
+    #[test]
+    fn next_run_shows_due_backups_and_retry_after_removable_disk_failure() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-19 10:00")).unwrap();
+        let check = |when: &str| {
+            let conn = db.conn.lock().unwrap();
+            status(&conn, at(when)).unwrap().next_run_at.unwrap()
+        };
+        assert_eq!(check("2026-11-21 09:05"), "2026-11-21T09:05:00",
+            "an overdue backup must not be advertised as tomorrow's run");
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE backup_schedule SET last_attempt_at='2026-11-21T09:06:00',
+                 last_status='ERROR',last_message='Disco scollegato' WHERE singleton=1", [],
+            ).unwrap();
+        }
+        assert_eq!(check("2026-11-21 09:20"), "2026-11-21T09:36:00",
+            "the artist should see the 30-minute retry, not the next day");
+        assert_eq!(check("2026-11-21 09:36"), "2026-11-21T09:36:00");
+        let completed = run_core(&db, at("2026-11-21 09:37")).unwrap();
+        assert_eq!(completed.last_status.as_deref(), Some("OK"));
+        assert_eq!(check("2026-11-21 09:38"), "2026-11-22T09:00:00",
+            "a completed backup must restore the regular schedule");
+    }
+
+    #[test]
+    fn next_run_respects_enable_time_and_reports_no_run_when_disabled() {
+        let (_dir, db, destination) = setup();
+        let saved = save_core(&db, input(&destination, 0), at("2026-11-21 12:00")).unwrap();
+        assert_eq!(saved.next_run_at.as_deref(), Some("2026-11-22T09:00:00"),
+            "enabling a schedule must not backfill earlier slots");
+        let mut disabled = input(&destination, 0);
+        disabled.enabled = false;
+        let off = save_core(&db, disabled, at("2026-11-21 13:00")).unwrap();
+        assert!(off.next_run_at.is_none());
     }
 
     #[test]
