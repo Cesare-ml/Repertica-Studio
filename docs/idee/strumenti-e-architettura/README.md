@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **34 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **35 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -40,6 +40,14 @@ Data ricognizione: **2026-11-22** (trentunesima ricognizione). Stato uniforme: *
 | [REPS-TECH-032](REPS-TECH-032-pdf-brochure-unicode-font-incorporati-offline.md) | Brochure PDF offline: preservazione di nomi/testi Unicode, diagnostica dei glifi non rappresentabili, font incorporabili con licenze verificate e impaginazione misurata; senza toccare il contenuto delle opere | P1–P2 condizionata | Proposta — da valutare |
 | [REPS-TECH-033](REPS-TECH-033-salvataggio-condizionale-schede-obsolete.md) | Salvataggio condizionale di schede obsolete: impedire sovrascritture silenziose di opere e collezionisti; senza cronologia obbligatoria o cloud | P1–P2 condizionata | Proposta — da valutare |
 | [REPS-TECH-034](REPS-TECH-034-esportazione-brochure-pdf-atomica-senza-sovrascrittura.md) | Esportazione PDF brochure senza sovrascrittura di documenti esistenti, con eventuale pubblicazione finale sicura e gestione conservativa di errori/temporanei | P1 protezione file; P2 pubblicazione sicura (ipotetiche) | Proposta — da valutare |
+| [REPS-TECH-035](REPS-TECH-035-configurazioni-mcp-client-esterni-conflitti-recupero.md) | Collegamento MCP a client esterni: tutela delle configurazioni JSON/TOML contro modifiche concorrenti, conflitti e recupero, senza sostituire il server già presente | P2 condizionata; P3 se bastano snippet manuali | Proposta — da valutare |
+
+## Trentaduesima ricognizione — 22 novembre 2026 — REPS-TECH-035
+
+- **[REPS-TECH-035 — Configurazioni MCP di client esterni: conflitti e recupero](REPS-TECH-035-configurazioni-mcp-client-esterni-conflitti-recupero.md):** `main` implementa già l'aggiunta/rimozione della voce `repertica-studio` per sei client in file JSON/TOML e protegge le configurazioni malformate. La lettura e la successiva riscrittura del file esterno **non** mostrano però un confronto che intercetti cambiamenti di altri writer nel frattempo; la copia `.repertica-backup` è conservata solo la prima volta. La scheda valuta **anteprima, rilevazione conflitti e recupero prudente** per non sovrascrivere modifiche altrui: **rischio dedotto dal codice, non perdita osservata**.
+- **Distinzione:** [TECH-014](REPS-TECH-014-bridge-mcp-locale-lettura-permessi.md) = limiti di lettura/privacy del server MCP; [TECH-033](REPS-TECH-033-salvataggio-condizionale-schede-obsolete.md) = concorrenza su record **SQLite**; qui solo **integrità dei file di configurazione di software terzi**. Confrontate anche le 39 schede di [Gestione e UX — PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14): nessun duplicato né modifica fuori cartella.
+- **Alternative e cautele:** mantenere le istruzioni manuali, aggiungere semplice avviso, oppure verificare/confermare prima della scrittura; confronti dei digest **da soli non escludono tutti i race**. Nessuna copia di impostazioni/credenziali di assistenti nel backup SQLite+media; collegamento offline, uso successivo dei client potenzialmente online. **P2 soltanto ipotetica**, P3 se non emerge il bisogno.
+- **Esito:** **35 schede**, tutte **«Proposta — da valutare»**. Solo questa scheda e l'indice Markdown in `docs/idee/strumenti-e-architettura/`; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) aperta e in bozza, **nessun merge, nessuna approvazione o attività di sviluppo**.
 
 ## Trentunesima ricognizione — 22 novembre 2026 — REPS-TECH-034
 
