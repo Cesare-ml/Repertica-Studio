@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **38 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentaduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **39 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -44,6 +44,15 @@ Aggiornato: **2026-11-22** (trentunesima ricognizione). Stato delle proposte: **
 | [REPS-UX-036](REPS-UX-036-misure-opere-non-rettangolari.md) | Misure speciali dichiarate (diametro, ingombro, dimensioni variabili), senza alterare campi cm o stime rettangolari; prima valutare nota facoltativa | P2* (P3 se bastano note) | Proposta — da valutare |
 | [REPS-UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) | Scadenze di uscite ricorrenti (affitto studio, assicurazioni, canoni) **distinte dalle spese effettivamente registrate**; prima validare promemoria semplice, senza generare movimenti | P2* (P3 se basta calendario esterno) | Proposta — da valutare |
 | [REPS-UX-038](REPS-UX-038-interessi-dichiarati-collezionisti-richieste-opere.md) | Interessi **dichiarati**, non inferiti: richieste di opere simili o caratteristiche desiderate; nessuna riserva, vendita, profilazione o consenso alle comunicazioni | P2* (P3 se bastano note) | Proposta — da valutare |
+
+## Trentaduesima ricognizione — 22 novembre 2026 — REPS-UX-039
+
+- **[REPS-UX-039 — Ripartizione informativa degli incassi dichiarati per fondo](REPS-UX-039-ripartizione-informativa-incassi-dichiarati.md):** le statistiche su main ripartiscono il **netto delle vendite** per data vendita usando quote storicamente congelate; gli incassi manuali e il loro riepilogo per data di ricezione sono un registro **separato**. La proposta studia una seconda lettura gestionale, derivata e in sola lettura, delle quote sui soli importi **dichiarati incassati**, senza asserire che siano verificati in banca o spendibili. Esempio 1.000 EUR lordi, 200 EUR di detrazioni annotate, quota storica 60/40 e acconto 250 EUR: 120/80 EUR **teorici** attribuibili all'acconto, non 480/320 EUR come nel netto venduto completo.
+- **Distinzione:** [UX-024](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md) ha già parte del nucleo implementata (rate, scadenze, saldo); UX-003 tratta costi di opera; UX-030 verifica facoltativa con estratti bancari; UX-032 budget; UX-034 raggruppamenti delle vendite. [TECH-018 e TECH-025 — PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) trattano i meccanismi di esportazione, non le quote di gestione. Nessuna riprogettazione dei pagamenti né file dell'altro filone.
+- **Guardrail:** percentuali congelate **per vendita**, ripartizione cumulativa deterministica con centesimi e resti, distinzione fra data di vendita e data di incasso, segnalazione delle vendite senza snapshot, nessun nuovo movimento di cassa o di spesa, nessuna detrazione dichiarata come pagata. Prima alternativa minimale: semplice avviso «quote del venduto, non dell'incassato» e collegamento ai saldi già disponibili.
+- **Priorità solo ipotetica P1–P2** per chi usa rate e ripartizioni, altrimenti P3. Offline, SQLite e backup su cartella scelta, CSV esistenti inalterati, lingua OS con fallback inglese, privacy e accessibilità. Nessuna prova desktop o validazione utenti; nessuna idea approvata.
+- **Perimetro:** solo scheda nuova e aggiornamento di questo indice, entrambi Markdown nella cartella Gestione e UX. [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) aperta, in bozza e senza merge.
+
 
 ## Trentunesima ricognizione — 22 novembre 2026 — REPS-UX-038
 
