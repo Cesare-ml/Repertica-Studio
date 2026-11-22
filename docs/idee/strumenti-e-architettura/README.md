@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (ventinovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **32 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentesima ricognizione). Stato uniforme: **Proposta — da valutare**. **33 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -38,6 +38,15 @@ Data ricognizione: **2026-11-22** (ventinovesima ricognizione). Stato uniforme: 
 | [REPS-TECH-030](REPS-TECH-030-vocabolari-locali-tecniche-supporti-interoperabili.md) | Vocabolari locali facoltativi per tecniche/supporti e corrispondenze semantiche confermate, con testi originali invariati, interoperabilità e lingue non obbligatorie | P2–P3 condizionata | Proposta — da valutare |
 | [REPS-TECH-031](REPS-TECH-031-allegati-bozze-posta-ripristinabili.md) | Bozze della posta: preflight dei riferimenti esterni e studio di copie locali gestite, verificabili e ripristinabili; invio sempre manuale | P2 condizionata | Proposta — da valutare |
 | [REPS-TECH-032](REPS-TECH-032-pdf-brochure-unicode-font-incorporati-offline.md) | Brochure PDF offline: preservazione di nomi/testi Unicode, diagnostica dei glifi non rappresentabili, font incorporabili con licenze verificate e impaginazione misurata; senza toccare il contenuto delle opere | P1–P2 condizionata | Proposta — da valutare |
+| [REPS-TECH-033](REPS-TECH-033-salvataggio-condizionale-schede-obsolete.md) | Salvataggio condizionale di schede obsolete: impedire sovrascritture silenziose di opere e collezionisti; senza cronologia obbligatoria o cloud | P1–P2 condizionata | Proposta — da valutare |
+
+## Trentesima ricognizione — 22 novembre 2026 — REPS-TECH-033
+
+- **[REPS-TECH-033 — Salvataggio condizionale delle schede obsolete](REPS-TECH-033-salvataggio-condizionale-schede-obsolete.md):** studio preventivo per non sovrascrivere silenziosamente i valori di un'opera o di un collezionista rimasti aperti in una finestra o maschera dopo altre modifiche. Prima tutela ipotetica: verifica **atomica** della versione letta, rifiuto della scrittura obsoleta e conservazione della bozza. Il confronto dei campi resta fase eventuale, non è richiesto uno storico totale né un servizio remoto. **Priorità P1–P2 soltanto ipotetica**, da validare.
+- **Riscontro su `main` del 22/11/2026:** [`ARCHIVE-EDIT-SAFETY.md`](../../ARCHIVE-EDIT-SAFETY.md) dichiara esplicitamente che è già protetta la modifica di un record cancellato ma **non** quella di un record ancora esistente cambiato nel frattempo. [`commands.rs`](../../../src-tauri/src/commands.rs) e [`collectors.rs`](../../../src-tauri/src/collectors.rs) eseguono UPDATE condizionati all'UUID, non alla revisione della maschera; [`models.ts`](../../../src/app/models.ts) e [`app.component.ts`](../../../src/app/app.component.ts) non passano `expectedRevision` per queste schede. [`business_mail.rs`](../../../src-tauri/src/business_mail.rs) mostra che un controllo di `revision` è **già implementato per le bozze email**, non per opere e collezionisti. Nessun incidente o test runtime accertato.
+- **Anti-doppione:** TECH-010 = **storicizzazione e ripristino** dei metadati; TECH-033 = **prevenzione di sovrascrittura prima del commit**, con o senza cronologia. Riutilizzare un solo token se si approvano entrambe, non due sistemi. TECH-012 riguarda migrazioni; TECH-001 interscambio. Le **37 proposte della [PR Gestione e UX #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14)**, soprattutto UX-018 (catalogazione seriale), UX-014 (rubrica) e UX-013 (rettifiche di vendita), non coprono questa garanzia del backend e **non sono state modificate**.
+- **Salvaguardie:** controllo nel backend e nella stessa transazione SQLite, distinzione tra *conflitto* e *record eliminato*, bozza conservata e nessun override automatico, attenzione alle modifiche di stato causate da vendite, token invalidato dopo ripristino/cambio archivio. Offline, privacy e backup completi a cartella scelta, lingua OS con fallback inglese, supporto tastiera/screen reader, senza nuove dipendenze decise.
+- **Esito:** **33 schede**, tutte **«Proposta — da valutare»**. Aggiunta una sola nuova scheda e aggiornato questo indice esclusivamente nella cartella `docs/idee/strumenti-e-architettura/`; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta documentale, aperta e in bozza, **senza merge**. Nessuna modifica a codice, test, build, workflow, configurazioni o documentazione dell'altro filone.
 
 ## Ventinovesima ricognizione — 22 novembre 2026 — REPS-TECH-032
 
