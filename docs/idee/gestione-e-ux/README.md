@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (quarantaduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **49 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (quarantatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **50 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -55,6 +55,14 @@ Aggiornato: **2026-11-22** (quarantaduesima ricognizione). Stato delle proposte:
 | [REPS-UX-047](REPS-UX-047-budget-consuntivo-mostre-fiere-spese-collegate.md) | Budget e consuntivo economico per mostre e fiere, con collegamenti a spese esistenti senza duplicare i registri | P2* se validato; P3 o nessuno sviluppo se basta Calc | Proposta — da valutare |
 | [REPS-UX-048](REPS-UX-048-identificativi-storici-riferimenti-esterni-opere.md) | Codici storici e identificativi usati da gallerie/archivi terzi, qualificati per fonte, ricercabili senza alterare l'UUID o il codice corrente | P2* per archivi legacy; P3 se bastano note | Proposta — da valutare |
 | [REPS-UX-049](REPS-UX-049-percorso-professionale-artista-cv-portabile.md) | Percorso professionale dell'artista: riconoscimenti, formazione e residenze per un curriculum portabile, senza duplicare mostre e bibliografie delle opere | P2* condizionata; P3 o nessuno sviluppo se basta ODT | Proposta — da valutare |
+| [REPS-UX-050](REPS-UX-050-rendiconto-mensile-snapshot-verifiche.md) | Rendiconto mensile datato con verifica delle registrazioni gestionali e possibile confronto non distruttivo fra istantanee, senza chiusura fiscale | P2 se validato; P3 o nessuno sviluppo se basta Calc | Proposta — da valutare |
+
+## Quarantatreesima ricognizione — 22 novembre 2026 — REPS-UX-050
+
+- **[REPS-UX-050 — Rendiconto mensile datato con verifiche gestionali](REPS-UX-050-rendiconto-mensile-snapshot-verifiche.md):** riesaminati `main`, `docs/MVP.md`, `ECONOMY-I18N.md`, `SALE-RECEIPTS.md`, `DATA-PORTABILITY.md`, `src-tauri/src/finance.rs`, `receipts.rs`, i registri di spese e la vista Economia Angular; confronto con le **49 schede UX** e le **45 proposte tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). Il riepilogo mensile e gli export integrali **esistono già**. Opportunità **ipotetica** diversa: consentire una verifica leggibile e un rendiconto **datato**, distinguendo venduto, netto, spese, margine e incassi dichiarati; solo se necessario conservare in archivio una fotografia dei totali e segnalare le discrepanze con i dati correnti, **senza bloccare correzioni** o inventare audit delle singole righe.
+- **Anti-doppioni:** UX-030 è confronto con CSV bancari; UX-032 e UX-047 sono budget; UX-039 quote informative per incasso. TECH-018/025 affrontano infrastruttura export, TECH-001 portabilità, TECH-010 revisioni **schede opere**. Nessuna modifica al filone tecnico. Non creare un nuovo registro contabile, non modificare saldi/vendite/quote, non attestare pagamenti, non chiamare il rapporto «chiusura fiscale».
+- **Alternativa/priorità:** prima osservare 5–8 report reali e provare il **CSV attuale con un modello LibreOffice Calc offline**. Solo se insufficiente, possibile P2 per consultazione/export mensile; P3 o nessuno sviluppo per snapshot più complessi. Nessun account, cloud o invio automatico, lingua del sistema/fallback EN, backup su percorso scelto, minimizzazione dati.
+- **Esito:** **50 schede**, tutte **«Proposta — da valutare»**. Modificati esclusivamente due Markdown di questa cartella; PR #14 documentale in bozza, senza merge, sviluppo o approvazione.
 
 ## Quarantaduesima ricognizione — 22 novembre 2026 — REPS-UX-049
 
