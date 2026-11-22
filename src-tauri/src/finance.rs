@@ -158,44 +158,68 @@ fn save_expense_core(db:&Database,input:ExpenseInput)->Result<Expense,String>{
         return Err("Purchase link must use HTTPS or HTTP".into());
     }
     let notes=opt_text(input.notes,20000)?;
-    let c=db.conn.lock().map_err(error)?;
-    // An expense is optionally charged to one of the parts that can pay expenses.
+    let mut c=db.conn.lock().map_err(error)?;
+    // The write and its read-back share a transaction: an imported SQLite
+    // archive may have AFTER triggers that change a row without an error.
+    // Returning Err rolls back both a new expense and an attempted edit.
+    let tx=c.transaction().map_err(error)?;
     let fund=input.fund.clone().map(|f|f.trim().to_string()).filter(|f|!f.is_empty());
     if let Some(fund)=&fund {
-        let valid:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM allocation_parts WHERE id=?1 AND pays_expenses=1)",
+        let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM allocation_parts WHERE id=?1 AND pays_expenses=1)",
             params![fund],|r|r.get(0)).map_err(error)?;
         if !valid {return Err("Fondo di spesa non valido".into())}
     }
     let updating=input.id.is_some();
     let id=input.id.unwrap_or_else(||Uuid::new_v4().to_string());
-    let exists:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM expenses WHERE id=?1)",params![id],|r|r.get(0)).map_err(error)?;
+    let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM expenses WHERE id=?1)",
+        params![&id],|r|r.get(0)).map_err(error)?;
     let now=Utc::now().to_rfc3339();
-    if exists {
-        // An externally edited SQLite archive may contain a RAISE(IGNORE) trigger.
-        // SQLite then reports success without changing the row. Never return the
-        // old expense as if the artist's changes had been saved.
-        let changed = c.execute("UPDATE expenses SET expense_date=?2,category=?3,description=?4,amount_cents=?5,fund=?6,supplier=?7,purchase_url=?8,notes=?9,updated_at=?10 WHERE id=?1",
-            params![id,input.expense_date,category,description,input.amount_cents,fund,supplier,purchase_url,notes,now]).map_err(error)?;
-        if changed != 1 {
-            return Err("Expense was not updated by SQLite; reload the record and retry".into());
-        }
+    let written=if exists {
+        tx.execute("UPDATE expenses SET expense_date=?2,category=?3,description=?4,amount_cents=?5,fund=?6,supplier=?7,purchase_url=?8,notes=?9,updated_at=?10 WHERE id=?1",
+            params![&id,&input.expense_date,&category,&description,input.amount_cents,&fund,&supplier,&purchase_url,&notes,&now]).map_err(error)?
     }else{
         if updating {return Err("Expense does not exist".into());}
-        c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
-            params![id,input.expense_date,category,description,input.amount_cents,fund,supplier,purchase_url,notes,now]).map_err(error)?;
+        tx.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
+            params![&id,&input.expense_date,&category,&description,input.amount_cents,&fund,&supplier,&purchase_url,&notes,&now]).map_err(error)?
+    };
+    if written != 1 {
+        return Err("Expense was not updated by SQLite; reload the record and retry".into());
     }
-    c.query_row("SELECT id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at FROM expenses WHERE id=?1",
-        params![id],expense_row).map_err(error)
+    let saved=tx.query_row("SELECT id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at FROM expenses WHERE id=?1",
+        params![&id],expense_row).map_err(|_|"SQLite did not preserve the saved expense".to_string())?;
+    if saved.id != id || saved.expense_date != input.expense_date
+        || saved.category != category || saved.description != description
+        || saved.amount_cents != input.amount_cents || saved.fund != fund
+        || saved.supplier != supplier || saved.purchase_url != purchase_url
+        || saved.notes != notes || saved.updated_at != now
+        || (!exists && saved.created_at != now) {
+        return Err("SQLite did not preserve the saved expense".into());
+    }
+    tx.commit().map_err(error)?;
+    Ok(saved)
 }
 #[tauri::command]
 pub fn save_expense(db:State<'_,Database>,input:ExpenseInput)->Result<Expense,String>{
     save_expense_core(&db,input)
 }
+// Verify the row really disappeared before committing: a trigger may restore
+// it after DELETE while SQLite still reports one affected row.
+fn delete_expense_core(db:&Database,id:&str)->Result<(),String>{
+    let mut c=db.conn.lock().map_err(error)?;
+    let tx=c.transaction().map_err(error)?;
+    if tx.execute("DELETE FROM expenses WHERE id=?1",params![id]).map_err(error)?!=1 {
+        return Err("Expense not found or deletion ignored by SQLite".into());
+    }
+    let still_present:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM expenses WHERE id=?1)",
+        params![id],|r|r.get(0)).map_err(error)?;
+    if still_present {
+        return Err("SQLite did not remove the expense".into());
+    }
+    tx.commit().map_err(error)
+}
 #[tauri::command]
 pub fn delete_expense(db:State<'_,Database>,id:String)->Result<(),String>{
-    let c=db.conn.lock().map_err(error)?;
-    if c.execute("DELETE FROM expenses WHERE id=?1",params![id]).map_err(error)?==0 {return Err("Expense not found".into());}
-    Ok(())
+    delete_expense_core(&db,&id)
 }
 #[derive(Debug,Clone,Serialize)]
 pub struct PartAmount { pub part_id:String, pub share_cents:i64, pub expense_cents:i64 }
@@ -408,6 +432,91 @@ mod tests{
         }
         let updated = save_expense_core(&db, input(Some(original.id), "Paint")).unwrap();
         assert_eq!(updated.description, "Paint", "editing works after the block is removed");
+    }
+
+    #[test]
+    fn expense_insert_and_update_tampering_roll_back_atomically() {
+        let input=|id:Option<String>,description:&str|ExpenseInput{
+            id,expense_date:"2026-11-22".into(),category:"materials".into(),
+            description:description.into(),amount_cents:3500,
+            fund:None,supplier:Some("Art shop".into()),purchase_url:None,notes:None,
+        };
+        for trigger in [
+            "CREATE TRIGGER sabotage AFTER INSERT ON expenses BEGIN
+                 UPDATE expenses SET amount_cents=1 WHERE id=NEW.id; END;",
+            "CREATE TRIGGER sabotage AFTER INSERT ON expenses BEGIN
+                 DELETE FROM expenses WHERE id=NEW.id; END;",
+        ] {
+            let dir=tempfile::tempdir().unwrap();
+            let db=crate::db::open(dir.path().to_owned()).unwrap();
+            db.conn.lock().unwrap().execute_batch(trigger).unwrap();
+            let message=save_expense_core(&db,input(None,"Canvas"))
+                .expect_err("altered expense inserts must fail atomically");
+            assert!(message.contains("preserve"),"{message}");
+            let c=db.conn.lock().unwrap();
+            let count:i64=c.query_row("SELECT count(*) FROM expenses",[],|r|r.get(0)).unwrap();
+            assert_eq!(count,0,"failed insert must roll back completely");
+            c.execute_batch("DROP TRIGGER sabotage").unwrap();
+            drop(c);
+            assert_eq!(save_expense_core(&db,input(None,"Canvas")).unwrap().amount_cents,3500);
+        }
+        for trigger in [
+            "CREATE TRIGGER sabotage AFTER UPDATE ON expenses BEGIN
+                 UPDATE expenses SET amount_cents=1 WHERE id=NEW.id; END;",
+            "CREATE TRIGGER sabotage AFTER UPDATE ON expenses BEGIN
+                 DELETE FROM expenses WHERE id=NEW.id; END;",
+        ] {
+            let dir=tempfile::tempdir().unwrap();
+            let db=crate::db::open(dir.path().to_owned()).unwrap();
+            let original=save_expense_core(&db,input(None,"Canvas")).unwrap();
+            db.conn.lock().unwrap().execute_batch(trigger).unwrap();
+            let message=save_expense_core(&db,input(Some(original.id.clone()),"Paint"))
+                .expect_err("altered expense updates must fail atomically");
+            assert!(message.contains("preserve"),"{message}");
+            let c=db.conn.lock().unwrap();
+            let saved:Expense=c.query_row(
+                "SELECT id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at FROM expenses WHERE id=?1",
+                params![&original.id],expense_row).unwrap();
+            assert_eq!(saved.description,"Canvas");
+            assert_eq!(saved.amount_cents,3500);
+            assert_eq!(saved.updated_at,original.updated_at);
+            c.execute_batch("DROP TRIGGER sabotage").unwrap();
+            drop(c);
+            assert_eq!(save_expense_core(&db,input(Some(original.id),"Paint")).unwrap().description,"Paint");
+        }
+    }
+
+    #[test]
+    fn expense_delete_rejects_silent_resurrection_and_preserves_original() {
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().to_owned()).unwrap();
+        let original=save_expense_core(&db,ExpenseInput{
+            id:None,expense_date:"2026-11-22".into(),category:"materials".into(),
+            description:"Canvas".into(),amount_cents:3500,
+            fund:None,supplier:None,purchase_url:None,notes:None,
+        }).unwrap();
+        let id=original.id.clone();
+        {
+            let c=db.conn.lock().unwrap();
+            c.execute_batch("CREATE TRIGGER resurrect_expense AFTER DELETE ON expenses BEGIN
+                INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,supplier,purchase_url,notes,created_at,updated_at)
+                VALUES(OLD.id,OLD.expense_date,OLD.category,OLD.description,OLD.amount_cents,OLD.fund,
+                       OLD.supplier,OLD.purchase_url,OLD.notes,OLD.created_at,OLD.updated_at);
+                END;").unwrap();
+        }
+        assert!(delete_expense_core(&db,&id).unwrap_err().contains("did not remove"));
+        {
+            let c=db.conn.lock().unwrap();
+            let row:i64=c.query_row("SELECT amount_cents FROM expenses WHERE id=?1",
+                params![&id],|r|r.get(0)).unwrap();
+            assert_eq!(row,3500,"failed deletion must not remove the expense");
+            c.execute_batch("DROP TRIGGER resurrect_expense").unwrap();
+        }
+        delete_expense_core(&db,&id).unwrap();
+        let c=db.conn.lock().unwrap();
+        let count:i64=c.query_row("SELECT count(*) FROM expenses WHERE id=?1",
+            params![&id],|r|r.get(0)).unwrap();
+        assert_eq!(count,0);
     }
 
     #[test]
