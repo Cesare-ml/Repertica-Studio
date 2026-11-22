@@ -199,26 +199,40 @@ fn create_collector_full_core(db: &Database, input: NewCollectorInput) -> Result
         require_regular_media_dir(db)?;
     }
     if input.photo_paths.len() as i64 > MAX_PHOTOS { return Err(format!("Massimo {MAX_PHOTOS} fotografie per collezionista")); }
-    let load = |path: &String| -> Result<(Vec<u8>, &'static str), String> {
-        let bytes = read_image_file(path)?;
-        let (extension, _) = image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
-        Ok((bytes, extension))
-    };
-    let profile = input.profile_path.as_ref().map(load).transpose()?;
-    let photos = input.photo_paths.iter().map(load).collect::<Result<Vec<_>, _>>()?;
+    // Stage files one by one before opening the SQLite transaction. A collector can
+    // have 20 additional 12 MiB pictures: retaining all decoded bytes at once could
+    // consume more than 240 MiB and make the desktop unresponsive.
     let mut written: Vec<std::path::PathBuf> = Vec::new();
+    let mut staged: Vec<(&'static str, String)> = Vec::new();
     let outcome = (|| -> Result<Collector, String> {
+        {
+            let mut stage = |kind: &'static str, source: &str| -> Result<(), String> {
+                let bytes = read_image_file(source)?;
+                let (extension, _) = image_type(&bytes)
+                    .ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
+                let relative = store_media(&db.directory, &bytes, extension)?;
+                written.push(db.directory.join(&relative));
+                staged.push((kind, relative));
+                Ok(())
+            };
+            if let Some(path) = input.profile_path.as_deref() {
+                stage("PROFILE", path)?;
+            }
+            for path in &input.photo_paths {
+                stage("PHOTO", path)?;
+            }
+        }
+        // Neither the slow source reads nor the file copies hold the database mutex.
+        // A failed source read or INSERT removes every staged file below; the
+        // transaction guarantees that no partial collector becomes visible.
         let mut conn = db.conn.lock().map_err(err)?;
         let tx = conn.transaction().map_err(err)?;
         let id = Uuid::new_v4().to_string();
         let stamp = now();
         insert(&tx, &id, &fields, &stamp)?;
-        let entries = profile.iter().map(|p| ("PROFILE", p)).chain(photos.iter().map(|p| ("PHOTO", p)));
-        for (kind, (bytes, extension)) in entries {
-            let relative = store_media(&db.directory, bytes, extension)?;
-            written.push(db.directory.join(&relative));
+        for (kind, relative) in &staged {
             tx.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
-                params![Uuid::new_v4().to_string(), id, kind, relative, stamp]).map_err(err)?;
+                params![Uuid::new_v4().to_string(), id, *kind, relative, stamp]).map_err(err)?;
         }
         let saved = by_id(&tx, &id)?;
         tx.commit().map_err(err)?;
@@ -521,6 +535,40 @@ mod tests {
         }
         let count: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collectors", [], |r| r.get(0)).unwrap();
         assert_eq!((count, media_count(&db)), (1, 3));
+    }
+
+    #[test]
+    fn full_creation_cleans_staged_photos_after_late_read_or_sql_failure() {
+        let (dir, db) = setup();
+        let valid = picture(dir.path(), "ok.jpg", 1);
+        let invalid = dir.path().join("broken.jpg");
+        fs::write(&invalid, b"not an image").unwrap();
+        // The first picture was staged successfully before the second fails.
+        assert!(create_collector_full_core(&db, NewCollectorInput {
+            collector: input("Anna"), profile_path: Some(valid.clone()),
+            photo_paths: vec![invalid.to_string_lossy().into_owned()],
+        }).is_err());
+        assert_eq!(media_count(&db), 0);
+        assert_eq!(db.conn.lock().unwrap().query_row("SELECT count(*) FROM collectors", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+
+        // An INSERT failure after the staging phase must roll back SQLite and
+        // clean every file, not leave an orphaned picture on disk.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER fail_collector_photo BEFORE INSERT ON collector_images
+             BEGIN SELECT RAISE(ABORT, 'test_rejected_photo'); END;",
+        ).unwrap();
+        assert!(create_collector_full_core(&db, NewCollectorInput {
+            collector: input("Anna"), profile_path: Some(valid.clone()), photo_paths: vec![],
+        }).unwrap_err().contains("test_rejected_photo"));
+        assert_eq!(media_count(&db), 0);
+        assert_eq!(db.conn.lock().unwrap().query_row("SELECT count(*) FROM collectors", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER fail_collector_photo").unwrap();
+        let saved = create_collector_full_core(&db, NewCollectorInput {
+            collector: input("Anna"), profile_path: Some(valid), photo_paths: vec![],
+        }).unwrap();
+        assert_eq!(saved.photo_count, 1);
+        assert_eq!(media_count(&db), 1);
     }
 
     #[test]
