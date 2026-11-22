@@ -86,12 +86,41 @@ pub fn attach_sale_finances(tx: &Transaction<'_>,sale_id: &str,gross:i64,taxes:i
         return Err("Taxes and shipping must not exceed the sale amount".into());
     }
     let s=settings_tx(tx)?;
-    tx.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp) VALUES(?1,?2,?3,?4,?5,?6)",
+    // All writes share the caller's sale transaction. Imported SQLite files can
+    // contain triggers with RAISE(IGNORE), or AFTER triggers which erase/rewrite
+    // rows while reporting a successful INSERT. Check both the affected count
+    // and the persisted values before the transaction is allowed to commit.
+    let written=tx.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp) VALUES(?1,?2,?3,?4,?5,?6)",
         params![sale_id,taxes,shipping,s.personal_bp,s.activity_bp,s.savings_bp]).map_err(error)?;
-    // The shares in force today are frozen on this sale; later plan changes never rewrite it.
-    for (part_id,bp) in crate::allocations::shares_for_new_sale(tx)? {
-        tx.execute("INSERT INTO sale_allocations(sale_id,part_id,share_bp) VALUES(?1,?2,?3)",
+    if written != 1 {
+        return Err("SQLite did not save the sale financial details".into());
+    }
+    // The shares in force today are frozen on this sale; later plan changes
+    // never rewrite history, even if the configuration is subsequently disabled.
+    let mut expected=crate::allocations::shares_for_new_sale(tx)?;
+    for (part_id,bp) in &expected {
+        let written=tx.execute("INSERT INTO sale_allocations(sale_id,part_id,share_bp) VALUES(?1,?2,?3)",
             params![sale_id,part_id,bp]).map_err(error)?;
+        if written != 1 {
+            return Err("SQLite did not save the frozen sale allocations".into());
+        }
+    }
+    let saved:(i64,i64,i64,i64,i64)=tx.query_row(
+        "SELECT tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp FROM sale_finances WHERE sale_id=?1",
+        params![sale_id],|r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))
+    ).map_err(|_| "SQLite did not preserve the sale financial details".to_string())?;
+    if saved != (taxes,shipping,s.personal_bp,s.activity_bp,s.savings_bp) {
+        return Err("SQLite did not preserve the sale financial details".into());
+    }
+    let mut statement=tx.prepare(
+        "SELECT part_id,share_bp FROM sale_allocations WHERE sale_id=?1 ORDER BY part_id"
+    ).map_err(error)?;
+    let actual=statement.query_map(params![sale_id],
+        |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?))
+    ).map_err(error)?.collect::<Result<Vec<_>,_>>().map_err(error)?;
+    expected.sort_by(|a,b|a.0.cmp(&b.0));
+    if actual != expected {
+        return Err("SQLite did not preserve the frozen sale allocations".into());
     }
     Ok(())
 }
@@ -379,6 +408,60 @@ mod tests{
         }
         let updated = save_expense_core(&db, input(Some(original.id), "Paint")).unwrap();
         assert_eq!(updated.description, "Paint", "editing works after the block is removed");
+    }
+
+    #[test]
+    fn sale_financial_details_and_frozen_shares_must_survive_sqlite_triggers() {
+        // A valid SQLite page / foreign-key check cannot detect a silently
+        // ignored row or an AFTER trigger deleting/changing a just-written row.
+        for (trigger, expected_error) in [
+            ("CREATE TRIGGER sabotage BEFORE INSERT ON sale_finances
+              BEGIN SELECT RAISE(IGNORE); END;", "sale financial details"),
+            ("CREATE TRIGGER sabotage AFTER INSERT ON sale_finances
+              BEGIN DELETE FROM sale_finances WHERE sale_id=NEW.sale_id; END;", "sale financial details"),
+            ("CREATE TRIGGER sabotage AFTER INSERT ON sale_finances
+              BEGIN UPDATE sale_finances SET tax_cents=0 WHERE sale_id=NEW.sale_id; END;", "sale financial details"),
+            ("CREATE TRIGGER sabotage BEFORE INSERT ON sale_allocations
+              BEGIN SELECT RAISE(IGNORE); END;", "frozen sale allocations"),
+            ("CREATE TRIGGER sabotage AFTER INSERT ON sale_allocations
+              BEGIN DELETE FROM sale_allocations WHERE sale_id=NEW.sale_id AND part_id=NEW.part_id; END;", "frozen sale allocations"),
+        ] {
+            let directory=tempfile::tempdir().unwrap();
+            let db=crate::db::open(directory.path().to_owned()).unwrap();
+            let mut conn=db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','ART-1','Opera','t','t')",[]).unwrap();
+            conn.execute("INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Cliente','t','t')",[]).unwrap();
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',10000,'2026-11-22','t')",[]).unwrap();
+            conn.execute_batch(trigger).unwrap();
+
+            let tx=conn.transaction().unwrap();
+            let message=attach_sale_finances(&tx,"s",10000,1200,300)
+                .expect_err("silently corrupted financial rows must prevent sale commit");
+            assert!(message.contains(expected_error), "{message}");
+            tx.rollback().unwrap();
+            for table in ["sale_finances","sale_allocations"] {
+                let count:i64=conn.query_row(
+                    &format!("SELECT count(*) FROM {table} WHERE sale_id='s'"),
+                    [],|r|r.get(0)).unwrap();
+                assert_eq!(count,0,"failed sale must leave no partial {table}");
+            }
+
+            conn.execute_batch("DROP TRIGGER sabotage").unwrap();
+            let tx=conn.transaction().unwrap();
+            attach_sale_finances(&tx,"s",10000,1200,300).unwrap();
+            tx.commit().unwrap();
+            let saved:(i64,i64)=conn.query_row(
+                "SELECT tax_cents,shipping_cents FROM sale_finances WHERE sale_id='s'",
+                [],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+            assert_eq!(saved,(1200,300));
+            let shares:i64=conn.query_row(
+                "SELECT sum(share_bp) FROM sale_allocations WHERE sale_id='s'",
+                [],|r|r.get(0)).unwrap();
+            assert_eq!(shares,10000);
+        }
     }
 
     #[test]
