@@ -146,15 +146,21 @@ export function filterCollectors(
   collectors: Collector[],
   query: string,
   indexes: SaleIndexes,
-  filter: CollectorFilter = 'all'
+  filter: CollectorFilter = 'all',
+  artworks: Artwork[] = []
 ): Collector[] {
   const base = filter === 'all' ? collectors : collectors.filter(c => filter === 'buyers'
     ? (indexes.byCollector[c.id]?.length ?? 0) > 0
     : !c.email?.trim() && !c.phone?.trim());
   const terms = searchTerms(query);
   if (terms.length === 0) return base;
+  // A collector can be found by the archive code of an artwork they actually
+  // purchased, not by codes belonging to unrelated or unsold works.
+  // Map IDs rather than matching titles: titles can be duplicated or edited.
+  const codeByArtwork = new Map(artworks.map(a => [a.id, a.code]));
   return base.filter(c =>
     matchesTerms(terms, [c.name, c.email, c.phone, c.address, c.notes, c.birth_place,
       c.instagram, c.facebook, c.tiktok, c.website, c.linkedin,
-      ...(indexes.byCollector[c.id] ?? []).map(s => s.artwork_title)], c.phone));
+      ...(indexes.byCollector[c.id] ?? []).flatMap(s =>
+        [s.artwork_title, codeByArtwork.get(s.artwork_id)])], c.phone));
 }

@@ -236,3 +236,29 @@ test('artwork dimensions are searchable in cm with x or × and decimal commas', 
   assert.deepEqual(found('0x0'), []); // Missing measurements are never fabricated.
   assert.deepEqual(found('"senza misure"'), ['d']);
 });
+
+
+test('collector search uses the archive codes of purchased artworks, never unrelated works', () => {
+  const works = [
+    artwork('one', { code: 'ART-0042', title: 'Natura' }),
+    artwork('two', { code: 'ML-2026-014', title: 'Natura' }),
+    artwork('unsold', { code: 'UNSOLD-0001', title: 'Natura' })
+  ];
+  const people = [
+    collector('c1', { name: 'Anna Rossi' }),
+    collector('c2', { name: 'Bruno Verdi' }),
+    collector('c3', { name: 'Carla' })
+  ];
+  const indexes = buildSaleIndexes([
+    sale('one', 'c1', 'Natura', 'Anna Rossi'),
+    sale('two', 'c2', 'Natura', 'Bruno Verdi')
+  ]);
+  const found = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+
+  assert.deepEqual(found('art-0042'), ['c1']);
+  assert.deepEqual(found('"ML-2026-014"'), ['c2']);
+  assert.deepEqual(found('art-0042 anna'), ['c1']);
+  assert.deepEqual(found('art-0042 bruno'), []);
+  assert.deepEqual(found('UNSOLD-0001'), []);
+  assert.deepEqual(filterCollectors(people, 'ART-0042', indexes), []); // Existing callers remain compatible.
+});
