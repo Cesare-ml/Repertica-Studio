@@ -38,7 +38,7 @@ function foldSearch(value: string): string {
     .replace(/(\d),(\d)/gu, '$1.$2')
     .replace(/(\d)\s*[x×]\s*(?=\d)/giu, '$1x')
     // The unit is implicit in the stored dimensions, but may be typed by a user.
-    .replace(/(\d(?:\.\d+)?(?:x\d(?:\.\d+)?){1,2})\s*cm\b/giu, '$1')
+    .replace(/(\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?){1,2})\s*cm\b/giu, '$1')
     .replace(/\s+/gu, ' ').trim();
 }
 
