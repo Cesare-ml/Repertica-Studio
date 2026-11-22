@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **45 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **46 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -51,6 +51,14 @@ Aggiornato: **2026-11-22** (trentasettesima ricognizione). Stato delle proposte:
 | [REPS-UX-043](REPS-UX-043-segnalazioni-assistenza-post-vendita-opere.md) | Richieste di assistenza **sull'opera dopo la vendita**: dichiarazioni, seguito ed esito distinti da resi, perizie e garanzie riconosciute | P2* solo se ricorrenti; P3 se bastano note | Proposta — da valutare |
 | [REPS-UX-044](REPS-UX-044-attrezzature-studio-manutenzioni-garanzie.md) | Registro facoltativo di attrezzature durevoli dello studio: identificazione del singolo bene, verifiche e manutenzioni dichiarate, senza creare spese o certificazioni di sicurezza | P2* per laboratori attrezzati; P3 se bastano note | Proposta — da valutare |
 | [REPS-UX-045](REPS-UX-045-rettifica-sostituzione-certificati-opere.md) | Annotazioni documentali e collegamento esplicito dei certificati sostitutivi: originali e seriali immutabili, nessuna revoca o consegna presunta | P1–P2* solo con casi verificati; altrimenti P2–P3 | Proposta — da valutare |
+| [REPS-UX-046](REPS-UX-046-consegne-spedizioni-post-vendita-checklist.md) | Consegne post-vendita: checklist facoltativa, ritiri e spedizioni con eventi dichiarati, destinatario separato dall'acquirente e nessuna consegna presunta | P2* solo con frequenza verificata; P3 se bastano note | Proposta — da valutare |
+
+## Trentanovesima ricognizione — 22 novembre 2026 — REPS-UX-046
+
+- **[REPS-UX-046 — Consegne e spedizioni post-vendita](REPS-UX-046-consegne-spedizioni-post-vendita-checklist.md):** esaminati `main`, [`models.rs`](../../../src-tauri/src/models.rs), [`models.ts`](../../../src/app/models.ts), [MVP](../../MVP.md), [economia](../../ECONOMY-I18N.md), [incassi](../../SALE-RECEIPTS.md), [portabilità](../../DATA-PORTABILITY.md), le 45 proposte UX precedenti e le 41 idee tecniche della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). Una vendita e il suo costo di spedizione sono registrazioni economiche: **non** attestano preparazione, affidamento a corriere o consegna. Opportunità da verificare con professionisti, non bug osservato.
+- **Confini:** UX-001 è la fonte eventuale dei **movimenti fisici e della custodia**; UX-025 descrive **istruzioni riutilizzabili per opera**; UX-009 riguarda gli eventi espositivi; UX-012 accordi con intermediari; UX-013 resi; UX-043 richieste assistenza; UX-017 vendita multiopera. Qui si ipotizza solo la **gestione operativa facoltativa di una consegna riferita a vendita**, con checklist, data concordata, stato dichiarativo ed eventuali tentativi successivi. Nessuna duplicazione di movimento o pagamento; nessun documento tecnico modificato.
+- **Guardrail e alternativa:** nessun tracking interpretato come prova di recapito, nessuna richiesta automatica ai corrieri, nessun prelievo di indirizzo senza conferma, nessuna vendita/incasso/spesa/restituzione automatica. Prima valutare una **nota e checklist minimale** sulla vendita, senza nuove tabelle; P2 ipotetica solo per chi effettua consegne frequenti, P3 o nessuno sviluppo se i flussi attuali sono sufficienti. Dati locali e backup completi su cartella scelta, export selettivi con privacy e fallback inglese invariati.
+- **Esito:** **46 schede**, tutte **«Proposta — da valutare»**. In questa ricognizione solo nuova scheda e indice Markdown sotto `docs/idee/gestione-e-ux/`; [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza senza merge, approvazione o assegnazione.
 
 ## Trentottesima ricognizione — 22 novembre 2026 — REPS-UX-045
 
