@@ -130,6 +130,7 @@ fn selected_artwork(db: &Database, id: &str, gallery_id: Option<&str>) -> Result
     }
     Ok(artwork)
 }
+#[derive(Clone)]
 struct Photo { jpg: Vec<u8>, width:u32, height:u32 }
 fn load_photo(db: &Database, relative: &str) -> Result<Photo, String> {
     let path=Path::new(relative);
@@ -227,16 +228,116 @@ fn photo_ops(photo:&Photo,x:f32,y:f32,w:f32,h:f32,cover:bool)->String {
     let dy=y+(h-draw_h)/2.0;
     format!("q {x:.2} {y:.2} {w:.2} {h:.2} re W n {draw_w:.2} 0 0 {draw_h:.2} {dx:.2} {dy:.2} cm /Im0 Do Q\n")
 }
-fn cover(b:&Brochure)->Page {
-    let mut out=String::from("0.97 0.96 0.94 rg 0 0 595 842 re f\n0.18 0.27 0.23 rg\n");
-    put_text(&mut out,match b.language.as_str() {"en"=>"SELECTED WORKS","es"=>"OBRAS SELECCIONADAS","fr"=>"ŒUVRES CHOISIES","de"=>"AUSGEWÄHLTE WERKE",_=>"OPERE SELEZIONATE"},66.0,652.0,12.0,true);
-    out.push_str("0.29 0.44 0.38 rg 66 624 68 3 re f\n0.17 0.23 0.20 rg\n");
-    draw_lines(&mut out,&lines(&b.artist,31),66.0,572.0,27.0,36.0);
-    draw_lines(&mut out,&lines(&b.title,30),66.0,425.0,26.0,36.0);
-    draw_lines(&mut out,&lines(&b.subtitle,54),66.0,309.0,15.0,22.0);
-    put_text(&mut out,"REPERTICA  /  STUDIO",66.0,79.0,10.0,true);
-    Page{drawing:out,photo:None}
+// ---- Typography of the cover and closing pages -------------------------------------------------
+// The PDF uses the standard fonts, so there is nothing to embed; widths come from the Adobe font
+// metrics (1/1000 em) and are only used to centre and wrap text.
+#[derive(Clone, Copy, PartialEq)]
+enum Face { Sans, SansBold, Serif, SerifItalic }
+impl Face {
+    fn resource(self)->&'static str { match self { Face::Sans=>"F1", Face::SansBold=>"F2", Face::Serif=>"F3", Face::SerifItalic=>"F4" } }
 }
+const HELVETICA:[u16;95]=[278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,
+    1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,
+    333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const TIMES:[u16;95]=[250,333,408,500,500,833,778,180,333,333,500,564,250,333,250,278,500,500,500,500,500,500,500,500,500,500,278,278,564,564,564,444,
+    921,722,667,667,722,611,556,722,722,333,389,722,611,889,722,722,556,722,667,556,611,722,722,944,722,722,611,333,278,333,469,500,
+    333,444,500,444,500,444,333,500,500,278,278,500,278,778,500,500,500,500,333,389,278,500,500,722,500,500,444,480,200,480,541];
+fn glyph_width(face:Face,c:char)->f32 {
+    let code=win_ansi(c) as usize;
+    let table=if matches!(face,Face::Sans|Face::SansBold){&HELVETICA}else{&TIMES};
+    let base=if (32..=126).contains(&code){table[code-32] as f32}else if matches!(face,Face::Sans|Face::SansBold){556.0}else{500.0};
+    match face { Face::SansBold=>base*1.06, Face::SerifItalic=>base*0.98, _=>base }
+}
+/// Width in points of `text` at `size`, with `tracking` points added after every character.
+fn text_width(text:&str,face:Face,size:f32,tracking:f32)->f32 {
+    text.chars().map(|c| glyph_width(face,c)*size/1000.0+tracking).sum::<f32>()-if text.is_empty(){0.0}else{tracking}
+}
+fn put_styled(out:&mut String,text:&str,x:f32,y:f32,size:f32,face:Face,tracking:f32) {
+    if !text.is_empty() {
+        out.push_str(&format!("BT /{} {size:.1} Tf {tracking:.2} Tc 1 0 0 1 {x:.1} {y:.1} Tm <{}> Tj 0 Tc ET\n",face.resource(),hex_text(text)));
+    }
+}
+fn put_centered(out:&mut String,text:&str,cx:f32,y:f32,size:f32,face:Face,tracking:f32) {
+    put_styled(out,text,cx-text_width(text,face,size,tracking)/2.0,y,size,face,tracking);
+}
+/// Break `text` into lines no wider than `max_width` points (words that are too long are cut).
+fn wrap_width(text:&str,face:Face,size:f32,max_width:f32)->Vec<String> {
+    let mut result=Vec::new();
+    for paragraph in text.split('\n') {
+        let mut current=String::new();
+        for word in paragraph.split_whitespace() {
+            let mut piece=String::new();
+            for c in word.chars() {
+                if text_width(&format!("{piece}{c}"),face,size,0.0)>max_width && !piece.is_empty() {
+                    if !current.is_empty() { result.push(std::mem::take(&mut current)); }
+                    result.push(std::mem::take(&mut piece));
+                }
+                piece.push(c);
+            }
+            let candidate=if current.is_empty(){piece.clone()}else{format!("{current} {piece}")};
+            if text_width(&candidate,face,size,0.0)>max_width && !current.is_empty() {
+                result.push(std::mem::take(&mut current));
+                current=piece;
+            } else { current=candidate; }
+        }
+        if !current.is_empty() { result.push(current); }
+    }
+    result
+}
+const INK:&str="0.141 0.294 0.247";
+const GOLD:&str="0.604 0.463 0.176";
+const MUTED:&str="0.42 0.45 0.43";
+const PAPER:&str="0.973 0.961 0.937";
+/// Cream page with a fine double rule (green outside, gold inside) and a short gold ornament at the top.
+fn elegant_frame(out:&mut String) {
+    out.push_str(&format!("{PAPER} rg 0 0 595 842 re f\n{INK} RG 0.9 w 28 28 539 786 re S\n{GOLD} RG 0.4 w 34 34 527 774 re S\n"));
+}
+fn rule(out:&mut String,cx:f32,y:f32,width:f32,thickness:f32,colour:&str) {
+    out.push_str(&format!("{colour} rg {:.1} {y:.1} {width:.1} {thickness:.2} re f\n",cx-width/2.0));
+}
+fn brand_footer(out:&mut String) {
+    rule(out,297.5,86.0,24.0,0.6,GOLD);
+    out.push_str(&format!("{INK} rg\n"));
+    put_centered(out,"REPERTICA  /  STUDIO",297.5,62.0,7.5,Face::SansBold,3.0);
+}
+fn kicker(b:&Brochure)->&'static str {
+    match b.language.as_str() {"en"=>"SELECTED WORKS","es"=>"OBRAS SELECCIONADAS","fr"=>"ŒUVRES CHOISIES","de"=>"AUSGEWÄHLTE WERKE",_=>"OPERE SELEZIONATE"}
+}
+/// First page: a framed hero picture (the first artwork), the artist in large serif capitals-and-lowercase,
+/// the title in italic and the subtitle; without a picture the text is centred on the page.
+fn cover(b:&Brochure,hero:Option<&Photo>)->Page {
+    let mut out=String::new();
+    elegant_frame(&mut out);
+    out.push_str(&format!("{GOLD} rg\n"));
+    put_centered(&mut out,kicker(b),297.5,758.0,8.5,Face::SansBold,3.4);
+    rule(&mut out,297.5,742.0,36.0,0.8,GOLD);
+    let mut cursor=if hero.is_some() {
+        // Passe-partout: white mount with a hairline gold border around the picture.
+        let (mx,my,mw,mh)=(126.0_f32,352.0_f32,343.0_f32,388.0_f32);
+        out.push_str(&format!("1 1 1 rg {mx} {my} {mw} {mh} re f\n{GOLD} RG 0.5 w {:.1} {:.1} {:.1} {:.1} re S\n",mx+5.0,my+5.0,mw-10.0,mh-10.0));
+        if let Some(photo)=hero { out.push_str(&photo_ops(photo,mx+20.0,my+20.0,mw-40.0,mh-40.0,false)); }
+        314.0
+    } else { 560.0 };
+    out.push_str(&format!("{INK} rg\n"));
+    for line in wrap_width(&b.artist,Face::Serif,31.0,430.0).into_iter().take(2) {
+        put_centered(&mut out,&line,297.5,cursor,31.0,Face::Serif,0.6);
+        cursor-=38.0;
+    }
+    if !b.artist.trim().is_empty() { rule(&mut out,297.5,cursor+14.0,44.0,0.8,GOLD); cursor-=14.0; }
+    out.push_str(&format!("{INK} rg\n"));
+    for line in wrap_width(&b.title,Face::SerifItalic,20.0,430.0).into_iter().take(3) {
+        put_centered(&mut out,&line,297.5,cursor-6.0,20.0,Face::SerifItalic,0.2);
+        cursor-=27.0;
+    }
+    out.push_str(&format!("{MUTED} rg\n"));
+    for line in wrap_width(&b.subtitle,Face::Sans,10.5,420.0).into_iter().take(3) {
+        put_centered(&mut out,&line,297.5,cursor-14.0,10.5,Face::Sans,0.3);
+        cursor-=16.0;
+    }
+    brand_footer(&mut out);
+    Page{drawing:out,photo:hero.cloned()}
+}
+
 fn intro(b:&Brochure)->Page {
     let mut out=String::new();
     frame(&mut out,0);
@@ -245,14 +346,36 @@ fn intro(b:&Brochure)->Page {
     Page{drawing:out,photo:None}
 }
 fn contacts(b:&Brochure)->Page {
-    let mut out=String::from("0.97 0.96 0.94 rg 0 0 595 842 re f\n0.17 0.23 0.20 rg\n");
-    put_text(&mut out,match b.language.as_str(){"en"=>"CONTACTS","es"=>"CONTACTOS","fr"=>"CONTACTS","de"=>"KONTAKT",_=>"CONTATTI"},67.0,652.0,13.0,true);
-    out.push_str("0.29 0.44 0.38 rg 67 626 68 2 re f\n0.17 0.23 0.20 rg\n");
-    draw_lines(&mut out,&lines(&b.artist,30),67.0,564.0,27.0,34.0);
-    for (i,line) in [b.contact_email.as_str(),b.contact_website.as_str(),b.contact_instagram.as_str()].iter().filter(|s|!s.trim().is_empty()).enumerate() {
-        draw_lines(&mut out,&lines(line,65),67.0,418.0-(i as f32)*70.0,13.0,20.0);
+    let mut out=String::new();
+    elegant_frame(&mut out);
+    out.push_str(&format!("{GOLD} rg\n"));
+    let heading=match b.language.as_str(){"en"=>"CONTACTS","es"=>"CONTACTOS","fr"=>"CONTACTS","de"=>"KONTAKT",_=>"CONTATTI"};
+    let artist_lines:Vec<String>=wrap_width(&b.artist,Face::Serif,32.0,430.0).into_iter().take(2).collect();
+    let website=match b.language.as_str(){"it"=>"SITO WEB","es"=>"SITIO WEB","fr"=>"SITE WEB",_=>"WEBSITE"};
+    let entries:Vec<(&str,&str)>=[("EMAIL",b.contact_email.as_str()),(website,b.contact_website.as_str()),("INSTAGRAM",b.contact_instagram.as_str())]
+        .into_iter().filter(|(_,value)|!value.trim().is_empty()).collect();
+    // The block (heading, artist, contacts) is centred vertically on the page.
+    let height=76.0+40.0*artist_lines.len() as f32+34.0+66.0*entries.len() as f32;
+    let top=(421.0+height/2.0+24.0).min(700.0);
+    put_centered(&mut out,heading,297.5,top,9.0,Face::SansBold,3.6);
+    rule(&mut out,297.5,top-16.0,36.0,0.8,GOLD);
+    out.push_str(&format!("{INK} rg\n"));
+    let mut y=top-74.0;
+    for line in artist_lines {
+        put_centered(&mut out,&line,297.5,y,32.0,Face::Serif,0.6);
+        y-=40.0;
     }
-    put_text(&mut out,"REPERTICA  /  STUDIO",67.0,81.0,10.0,true);
+    y-=34.0;
+    for (index,(label,value)) in entries.iter().enumerate() {
+        if index>0 { rule(&mut out,297.5,y+24.0,64.0,0.4,MUTED); }
+        out.push_str(&format!("{GOLD} rg\n"));
+        put_centered(&mut out,label,297.5,y,7.5,Face::SansBold,2.6);
+        out.push_str(&format!("{INK} rg\n"));
+        let shown=wrap_width(value.trim(),Face::Serif,15.0,430.0).into_iter().next().unwrap_or_default();
+        put_centered(&mut out,&shown,297.5,y-22.0,15.0,Face::Serif,0.3);
+        y-=66.0;
+    }
+    brand_footer(&mut out);
     Page{drawing:out,photo:None}
 }
 fn artwork_pages(item:&BrochureItem, art:&ArtPage,photo:Photo,page_num:u32)->Vec<Page> {
@@ -333,6 +456,8 @@ fn render_pdf(pages:Vec<Page>)->Vec<u8>{
     let tree=pdf.reserve();
     let font=pdf.object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec());
     let bold=pdf.object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".to_vec());
+    let serif=pdf.object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>".to_vec());
+    let serif_italic=pdf.object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Italic /Encoding /WinAnsiEncoding >>".to_vec());
     let mut ids=Vec::new();
     for page in pages {
         let image_ref=page.photo.map(|image|{
@@ -342,7 +467,7 @@ fn render_pdf(pages:Vec<Page>)->Vec<u8>{
         let content=pdf.object(Pdf::stream("",page.drawing.as_bytes()));
         let id=pdf.reserve();
         let xobject=image_ref.map_or(String::new(),|r|format!("/XObject << /Im0 {r} 0 R >>"));
-        pdf.put(id,format!("<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> {xobject} >> /Contents {content} 0 R >>").into_bytes());
+        pdf.put(id,format!("<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R /F3 {serif} 0 R /F4 {serif_italic} 0 R >> {xobject} >> /Contents {content} 0 R >>").into_bytes());
         ids.push(id);
     }
     let kids=ids.iter().map(|id|format!("{id} 0 R")).collect::<Vec<_>>().join(" ");
@@ -379,17 +504,21 @@ pub fn export_brochure_pdf(db: State<'_,Database>, brochure_id:String, destinati
     };
     validate(&document)?;
     if document.items.is_empty(){return Err("Aggiungi almeno un'opera prima dell'esportazione".into());}
-    let mut pages=vec![cover(&document)];
+    // Page one is built last, once the first artwork's picture has been loaded for the hero image.
+    let mut pages=vec![Page{drawing:String::new(),photo:None}];
+    let mut hero:Option<Photo>=None;
     if !document.introduction.trim().is_empty(){pages.push(intro(&document));}
     for item in &document.items{
         let artwork=selected_artwork(&db,&item.artwork_id,item.gallery_image_id.as_deref())?;
         let path=artwork.image_path.as_deref()
             .ok_or_else(||format!("Manca la fotografia per l'opera {}",artwork.title))?;
         let photo=load_photo(&db,path)?;
+        if hero.is_none() { hero=Some(photo.clone()); }
         let next_page=pages.len() as u32+1;
         pages.extend(artwork_pages(item,&artwork,photo,next_page));
     }
     pages.push(contacts(&document));
+    pages[0]=cover(&document,hero.as_ref());
     let pdf=render_pdf(pages);
     fs::write(&destination,&pdf).map_err(error)?;
     Ok(destination)
@@ -411,13 +540,56 @@ mod tests{
     #[test]
     fn generated_pdf_has_page_tree_and_xref(){
         let b=Brochure{title:"Ópera".into(),artist:"Artista".into(),language:"es".into(),..Default::default()};
-        let pdf=render_pdf(vec![cover(&b),contacts(&b)]);
+        let pdf=render_pdf(vec![cover(&b,None),contacts(&b)]);
         assert!(pdf.starts_with(b"%PDF-1.4"));
         let text=String::from_utf8_lossy(&pdf);
         assert!(text.contains("/Count 2"));
         assert!(text.contains("xref\n"));
         assert!(text.contains("%%EOF"));
         assert!(text.contains(&hex_text("Ópera")));
+    }
+    #[test]
+    fn centred_text_is_measured_with_the_font_metrics(){
+        // "Hello" in Helvetica 10 pt: H 722 + e 556 + l 222 + l 222 + o 556 = 2278 / 100
+        assert!((text_width("Hello",Face::Sans,10.0,0.0)-22.78).abs()<0.01);
+        assert!((text_width("Hello",Face::Sans,10.0,2.0)-(22.78+8.0)).abs()<0.01,"tracking is added between characters");
+        assert_eq!(text_width("",Face::Serif,12.0,3.0),0.0);
+        let mut out=String::new();
+        put_centered(&mut out,"Hello",100.0,50.0,10.0,Face::Sans,0.0);
+        assert!(out.contains("1 0 0 1 88.6 50.0 Tm"), "{out}");
+    }
+    #[test]
+    fn wrapping_by_width_keeps_every_line_inside_the_box_and_loses_no_text(){
+        let text="Una brochure con un titolo molto lungo che deve andare a capo più volte senza uscire dal riquadro";
+        let lines=wrap_width(text,Face::SerifItalic,20.0,300.0);
+        assert!(lines.len()>=3);
+        assert!(lines.iter().all(|l|text_width(l,Face::SerifItalic,20.0,0.0)<=300.5),"{lines:?}");
+        assert_eq!(lines.join(" "),text);
+        let long=wrap_width(&"W".repeat(80),Face::Serif,20.0,200.0);
+        assert!(long.iter().all(|l|text_width(l,Face::Serif,20.0,0.0)<=200.5) && long.concat().len()==80);
+    }
+    #[test]
+    fn cover_and_closing_page_use_the_elegant_serif_layout(){
+        let b=Brochure{title:"Opere selezionate 2026".into(),subtitle:"Una raccolta".into(),artist:"Maria Rossi".into(),language:"it".into(),
+            contact_email:"maria@example.test".into(),contact_website:"example.test".into(),..Default::default()};
+        // A real (gradient) picture, so the sample PDF can be looked at.
+        let gradient=image::RgbImage::from_fn(400,500,|x,y|image::Rgb([(40+x/3) as u8,(90+y/6) as u8,(150-y/8) as u8]));
+        let mut jpg=Vec::new();
+        JpegEncoder::new_with_quality(&mut jpg,85).encode_image(&image::DynamicImage::ImageRgb8(gradient)).unwrap();
+        let photo=Photo{jpg,width:400,height:500};
+        let with_hero=cover(&b,Some(&photo));
+        assert!(with_hero.photo.is_some() && with_hero.drawing.contains("/Im0 Do"), "the cover shows the first picture");
+        assert!(with_hero.drawing.contains("/F3 ") && with_hero.drawing.contains("/F4 "), "serif artist and italic title");
+        assert!(with_hero.drawing.contains(&hex_text("Maria Rossi")) && with_hero.drawing.contains(&hex_text("OPERE SELEZIONATE")));
+        let plain=cover(&b,None);
+        assert!(plain.photo.is_none() && !plain.drawing.contains("/Im0 Do"));
+        let last=contacts(&b);
+        for label in ["CONTATTI","EMAIL","SITO WEB","maria@example.test"] { assert!(last.drawing.contains(&hex_text(label)), "{label}"); }
+        assert!(!last.drawing.contains(&hex_text("INSTAGRAM")), "empty contacts are left out");
+        // Samples for a visual check when a folder is given.
+        if let Ok(dir)=std::env::var("BROCHURE_SAMPLE_DIR") {
+            fs::write(Path::new(&dir).join("cover-and-contacts.pdf"),render_pdf(vec![with_hero,plain,last])).unwrap();
+        }
     }
     #[test]
     fn line_breaks_do_not_truncate_extremely_long_words(){

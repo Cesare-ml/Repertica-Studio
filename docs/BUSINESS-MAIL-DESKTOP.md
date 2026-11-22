@@ -1,4 +1,4 @@
-# Posta professionale — client desktop IMAP / SMTP
+# Posta — client desktop IMAP / SMTP
 
 ## Provenienza e confine
 
@@ -14,7 +14,7 @@ Questa funzione è **posta individuale**, non il prodotto Email Platform per cam
 
 ## Implementato
 
-- Voce Posta professionale nel menu desktop, impostazioni caselle con account multipli.
+- Voce Posta nel menu desktop, impostazioni caselle con account multipli.
 - Configurazione esplicita IMAP TLS porta 993; SMTP con TLS diretto 465 o STARTTLS obbligatorio 587.
 - Password IMAP e password SMTP facoltativamente separata nel portachiavi di sistema. Configurazione senza segreti in SQLite; i backup non contengono password. Se il portachiavi non è disponibile, le operazioni sulle credenziali falliscono senza fallback in chiaro.
 - Test IMAP e discovery cartelle; lettura di 40 intestazioni più recenti per cartella in modalità EXAMINE / PEEK. Non modifica lo stato di lettura.
@@ -49,7 +49,7 @@ Le connessioni IMAP/SMTP sono autenticazioni reali e quindi richiedono una conne
 
 ## Verifica
 
-1. Avviare npm run tauri:dev dopo npm install; aggiungere una casella da Posta professionale.
+1. Avviare npm run tauri:dev dopo npm install; aggiungere una casella da Posta.
 2. Inserire server IMAP, SMTP, username e password del provider, quindi salvare.
 3. Cliccare Test IMAP; usare Connetti per elencare le cartelle e recuperare le ultime 40 intestazioni.
 4. Aprire un messaggio con parte text/plain e verificare che non cambi il flag letto.

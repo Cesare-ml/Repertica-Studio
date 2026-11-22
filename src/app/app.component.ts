@@ -74,7 +74,7 @@ export class AppComponent implements OnInit {
     { id: 'sales', label: 'Vendite' },
     { id: 'certificates', label: 'Certificati' },
     { id: 'brochures', label: 'Brochure' },
-    { id: 'mail', label: 'Posta professionale' },
+    { id: 'mail', label: 'Posta' },
     { id: 'finance', label: 'Economia' },
     { id: 'settings', label: 'Impostazioni' }
   ];

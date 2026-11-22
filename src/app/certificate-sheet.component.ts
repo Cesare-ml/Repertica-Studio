@@ -36,7 +36,7 @@ import type { Artwork, Certificate } from './models';
     .cs-verify{border-left:2px solid #a8873c;padding-left:5mm}
     .cs-hash{color:#777;font-size:8px;margin-top:3mm;overflow-wrap:anywhere}
     @media print{
-      .print-only .cs-page{margin:-13mm;height:296mm;break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .print-only .cs-page{margin:0;height:296mm;break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     }
   `],
   template: `

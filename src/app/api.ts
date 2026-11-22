@@ -47,6 +47,7 @@ export const api = {
   listArtworkGallery: (artworkId: string) => invoke<GalleryImage[]>('list_artwork_gallery', { artworkId }),
   addArtworkGalleryImageFromPath: (artworkId: string, sourcePath: string, caption: string | null) =>
     invoke<GalleryImage>('add_artwork_gallery_image_from_path', { artworkId, sourcePath, caption }),
+  revealInFolder: (path: string) => invoke<void>('reveal_in_folder', { path }),
   checkForUpdate: () => invoke<UpdateReply>('check_for_update'),
   installUpdate: (version: string, skipBackup: boolean, onProgress: (progress: DownloadProgress) => void) => {
     const progress = new Channel<DownloadProgress>();

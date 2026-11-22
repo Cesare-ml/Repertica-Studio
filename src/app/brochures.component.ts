@@ -29,6 +29,8 @@ export class BrochuresComponent implements OnInit {
   errorMessage = '';
   notice = '';
   previews: Record<string, string> = {};
+  /** Path of the PDF just exported, so its folder can be opened. */
+  exportedPath: string | null = null;
   galleries: Record<string, GalleryImage[]> = {};
   private loadGeneration = 0;
 
@@ -63,6 +65,7 @@ export class BrochuresComponent implements OnInit {
   }
   close(): void { this.draft = null; this.resetEditor(); }
   private resetEditor(): void {
+    this.exportedPath = null;
     this.errorMessage = '';
     this.notice = '';
     this.addedArtworkId = '';
@@ -134,6 +137,7 @@ export class BrochuresComponent implements OnInit {
   }
   private async persist(): Promise<boolean> {
     if (!this.draft || this.busy) return false;
+    this.exportedPath = null;
     if (!this.draft.title.trim()) {
       this.errorMessage = this.tr('Inserisci un titolo per la brochure');
       return false;
@@ -179,6 +183,44 @@ export class BrochuresComponent implements OnInit {
     } catch (error) { this.showError(error); }
     finally { this.busy = false; }
   }
+  /** Show the exported PDF in the file manager. */
+  async openExportFolder(): Promise<void> {
+    if (!this.exportedPath) return;
+    try { await api.revealInFolder(this.exportedPath); }
+    catch (error) { this.showError(error); }
+  }
+  // ---- Preview: the same texts and geometry as the exported PDF -----------------------------
+  get coverImage(): string | null {
+    const first = this.draft?.items[0];
+    return first ? this.previews[first.artwork_id] ?? null : null;
+  }
+  coverKicker(language: string): string {
+    return ({ en: 'SELECTED WORKS', es: 'OBRAS SELECCIONADAS', fr: 'ŒUVRES CHOISIES', de: 'AUSGEWÄHLTE WERKE' } as Record<string, string>)[language] ?? 'OPERE SELEZIONATE';
+  }
+  contactsHeading(language: string): string {
+    return ({ en: 'CONTACTS', es: 'CONTACTOS', fr: 'CONTACTS', de: 'KONTAKT' } as Record<string, string>)[language] ?? 'CONTATTI';
+  }
+  introHeading(language: string): string {
+    return ({ en: 'Introduction', es: 'Introducción', fr: 'Introduction', de: 'Einleitung' } as Record<string, string>)[language] ?? 'Introduzione';
+  }
+  contactEntries(b: Brochure): { label: string; value: string }[] {
+    const website = ({ it: 'SITO WEB', es: 'SITIO WEB', fr: 'SITE WEB' } as Record<string, string>)[b.language] ?? 'WEBSITE';
+    return [
+      { label: 'EMAIL', value: b.contact_email }, { label: website, value: b.contact_website }, { label: 'INSTAGRAM', value: b.contact_instagram },
+    ].filter(entry => entry.value.trim());
+  }
+  /** Code, year, technique / support and size, as printed under the picture. */
+  technicalLine(item: BrochureItem): string {
+    const art = this.artwork(item.artwork_id);
+    if (!art) return '';
+    const material = [art.technique ?? '', art.support ?? ''].filter(Boolean).join(' / ');
+    const size = art.height_cm != null && art.width_cm != null ? `${art.height_cm} × ${art.width_cm} cm` : '';
+    return [art.code, art.year ?? '', material, size].join('  ·  ');
+  }
+  /** Page number of the n-th artwork (cover and introduction come first; continuation pages are not simulated). */
+  pageNumber(index: number): number {
+    return 2 + (this.draft?.introduction.trim() ? 1 : 0) + index;
+  }
   async exportPdf(): Promise<void> {
     if (!this.draft || this.busy) return;
     if (!this.draft.items.length) {
@@ -199,6 +241,7 @@ export class BrochuresComponent implements OnInit {
       this.busy = true;
       const path = await api.exportBrochurePdf(this.draft.id, destination);
       this.notice = this.tr('PDF salvato in') + ' ' + path;
+      this.exportedPath = path;
       this.errorMessage = '';
     } catch (error) { this.showError(error); }
     finally { this.busy = false; }

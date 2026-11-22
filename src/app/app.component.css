@@ -266,7 +266,8 @@ td.money{color:#234f3c;font-weight:700;font-variant-numeric:tabular-nums}
 @media(max-width:770px){.finance-balances{grid-template-columns:1fr}.settings-form-grid{grid-template-columns:1fr}.month-chart-row{grid-template-columns:35px minmax(0,1fr) 80px;gap:6px}.finance-top-actions{align-items:flex-start}}
 
 @media print{
- @page{size:A4;margin:13mm}
+ @page{size:A4;margin:0}
+ html,body{margin:0;padding:0}
  .shell,.overlay{display:none!important}
  .print-only{display:block!important;background:white;color:#243b32;font-family:Georgia,'Times New Roman',serif}
 }

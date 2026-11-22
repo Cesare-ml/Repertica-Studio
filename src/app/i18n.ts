@@ -5,7 +5,7 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
-  "Posta professionale": "Business email",
+  "Posta": "Mail",
   "+ Nuova brochure": "+ New brochure",
   "A tutta pagina": "Full bleed",
   "Aggiungi almeno un’opera prima dell’esportazione": "Add at least one artwork before exporting",
@@ -736,9 +736,10 @@ const EN: Record<string,string> = {
   "Esportazioni": "Exports",
   "Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.": "Copies of the registers in CSV format, which open in Excel or LibreOffice. They are read-only exports: they do not change the archive and cannot be imported back.",
   "Vendite e incassi": "Sales and payments",
+  "Apri cartella": "Open folder",
 };
 const ES:Record<string,string> = {
-  "Posta professionale": "Correo profesional",
+  "Posta": "Correo",
   "+ Nuova brochure": "+ Nuevo folleto",
   "A tutta pagina": "A página completa",
   "Aggiungi almeno un’opera prima dell’esportazione": "Añade al menos una obra antes de exportar",
@@ -1311,9 +1312,10 @@ const ES:Record<string,string> = {
   "Esportazioni": "Exportaciones",
   "Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.": "Copias de los registros en formato CSV, que se abren con Excel o LibreOffice. Son exportaciones de solo lectura: no modifican el archivo y no se pueden volver a importar.",
   "Vendite e incassi": "Ventas y cobros",
+  "Apri cartella": "Abrir carpeta",
 };
 const FR:Record<string,string> = {
-  "Posta professionale": "Courrier professionnel",
+  "Posta": "Courrier",
   "+ Nuova brochure": "+ Nouvelle brochure",
   "A tutta pagina": "Pleine page",
   "Aggiungi almeno un’opera prima dell’esportazione": "Ajoutez au moins une œuvre avant l’export",
@@ -1889,9 +1891,10 @@ const FR:Record<string,string> = {
   "Esportazioni": "Exportations",
   "Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.": "Copies des registres au format CSV, ouvrables avec Excel ou LibreOffice. Ce sont des exportations en lecture seule : elles ne modifient pas l’archive et ne peuvent pas être réimportées.",
   "Vendite e incassi": "Ventes et encaissements",
+  "Apri cartella": "Ouvrir le dossier",
 };
 const DE:Record<string,string> = {
-  "Posta professionale": "Geschäftliche E-Mails",
+  "Posta": "E-Mail",
   "+ Nuova brochure": "+ Neue Broschüre",
   "A tutta pagina": "Ganzseitig",
   "Aggiungi almeno un’opera prima dell’esportazione": "Fügen Sie vor dem Export mindestens ein Werk hinzu",
@@ -2467,6 +2470,7 @@ const DE:Record<string,string> = {
   "Esportazioni": "Exporte",
   "Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.": "Kopien der Register im CSV-Format, die sich mit Excel oder LibreOffice öffnen lassen. Es sind reine Lese-Exporte: Sie ändern das Archiv nicht und können nicht zurück importiert werden.",
   "Vendite e incassi": "Verkäufe und Zahlungen",
+  "Apri cartella": "Ordner öffnen",
 };
 const translations:Record<AppLanguage,Record<string,string>>={en:EN,it:{},es:ES,fr:FR,de:DE};
 export function chooseLanguage(input:string|null|undefined):AppLanguage {

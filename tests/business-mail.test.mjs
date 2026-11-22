@@ -55,8 +55,10 @@ test('every new email label has an English fallback and translations', () => {
       dict.includes("'" + k + "':"), 'Missing email translation: ' + k);
   }
   const main = read('src/app/i18n.ts');
-  for (const label of ['Business email','Correo profesional','Courrier professionnel','Geschäftliche E-Mails'])
+  // The section is simply called "Posta" (Mail) in every language.
+  for (const label of ['"Posta": "Mail"','"Posta": "Correo"','"Posta": "Courrier"','"Posta": "E-Mail"'])
     assert.ok(main.includes(label),label);
+  assert.ok(!main.includes('Posta professionale'), 'the old name is gone');
 });
 test('mail UI requires explicit send confirmation and never embeds remote HTML', () => {
   const src = read('src/app/business-mail.component.ts');

@@ -22,6 +22,7 @@ pub mod mcp;
 mod mcp_client;
 mod receipt_attachments;
 mod updater;
+mod reveal;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -82,6 +83,7 @@ pub fn run() {
             gallery::add_artwork_gallery_image_from_path,
             gallery::update_artwork_gallery_caption,
             gallery::update_artwork_gallery_kind,
+            reveal::reveal_in_folder,
             updater::check_for_update,
             updater::install_update,
             gallery::promote_artwork_gallery_image,
