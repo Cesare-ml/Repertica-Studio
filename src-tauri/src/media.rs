@@ -196,12 +196,16 @@ pub fn is_catalogued(conn: &Connection, relative: &str) -> bool {
 }
 
 // A path may still be used by a legacy row whose media_id was never populated,
-// or by a row whose link was imported incorrectly. Treat SQL failures as in-use.
+// or shared with a RAW file or payment evidence in an imported archive. Each
+// table has its own UNIQUE path constraint, not a cross-table constraint.
+// Treat SQL failures as in-use so deleting a photo never deletes other records' bytes.
 fn path_has_live_references(conn: &Connection, relative: &str) -> Result<bool, String> {
     let referenced: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM artworks WHERE image_path=?1)
           OR EXISTS(SELECT 1 FROM artwork_images WHERE image_path=?1)
-          OR EXISTS(SELECT 1 FROM collector_images WHERE image_path=?1)",
+          OR EXISTS(SELECT 1 FROM collector_images WHERE image_path=?1)
+          OR EXISTS(SELECT 1 FROM artwork_raw_files WHERE media_path=?1)
+          OR EXISTS(SELECT 1 FROM sale_receipt_attachments WHERE media_path=?1)",
         params![relative], |r| r.get(0),
     ).map_err(err)?;
     if referenced { return Ok(true); }
@@ -216,8 +220,9 @@ fn require_regular_media_dir(directory: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Delete a legacy picture only when no catalogue, artwork, gallery, collector or
-/// certificate references remain. Cleanup must fail closed rather than lose history.
+/// Delete a legacy picture only when no catalogue, artwork, gallery, collector,
+/// RAW, receipt attachment or certificate references remain. Cleanup must fail
+/// closed rather than lose history.
 pub fn remove_file_unless_catalogued(conn: &Connection, directory: &Path, relative: &str) {
     if !crate::commands::safe_relative(relative)
         || is_catalogued(conn, relative)
@@ -506,7 +511,7 @@ pub fn purge_core(db: &Database, media_id: &str) -> Result<(), String> {
             return Err("Percorso media non valido: eliminazione annullata".into());
         }
         if path_has_live_references(&conn, &revision.image_path)? {
-            return Err("Una scheda, una galleria, un collezionista o un certificato conserva questa fotografia".into());
+            return Err("Una scheda, una galleria, un collezionista, un RAW, un allegato incasso o un certificato conserva questo file".into());
         }
         match fs::symlink_metadata(db.directory.join(&revision.image_path)) {
             Ok(meta) if !meta.file_type().is_file() => {
@@ -1015,6 +1020,94 @@ mod tests {
             remove_file_unless_catalogued(&conn, &db.directory, &shared);
         }
         assert!(db.directory.join(&shared).exists(), "invalid historical path must never permit deletion");
+    }
+
+
+    #[test]
+    fn cleanup_keeps_files_shared_with_raw_and_receipt_evidence() {
+        let (_dir, db) = setup();
+        let raw = put(&db, "legacy-raw.jpg", &jpeg(12, 12, [8, 4, 3]));
+        let evidence_bytes = jpeg(12, 12, [4, 8, 3]);
+        let evidence = put(&db, "legacy-receipt.jpg", &evidence_bytes);
+        artwork_with_cover(&db, "a", &raw);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE artworks SET image_path=NULL WHERE id='a'", []).unwrap();
+            // Imported or externally edited archives can reuse a filename in
+            // another table; the path constraints are only unique per table.
+            conn.execute(
+                "INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at)
+                 VALUES('a',?1,'source.dng',100,?2,'t')",
+                params![raw, "a".repeat(64)],
+            ).unwrap();
+            remove_file_unless_catalogued(&conn, &db.directory, &raw);
+            assert!(db.directory.join(&raw).is_file(), "RAW reference must preserve the file");
+            conn.execute("DELETE FROM artwork_raw_files WHERE artwork_id='a'", []).unwrap();
+            remove_file_unless_catalogued(&conn, &db.directory, &raw);
+            assert!(!db.directory.join(&raw).exists(), "unreferenced legacy photo can be removed");
+
+            conn.execute_batch(
+                "INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Anna','t','t');
+                 INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','c',1000,'2026-11-21','t');
+                 INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                    VALUES('r','s','2026-11-21',1000,'cash','t');"
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO sale_receipt_attachments(
+                    receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at
+                 ) VALUES('r',?1,'receipt.jpg','image/jpeg',?2,?3,'t')",
+                params![evidence, evidence_bytes.len() as i64, sha256_hex(&evidence_bytes)],
+            ).unwrap();
+            remove_file_unless_catalogued(&conn, &db.directory, &evidence);
+            assert!(db.directory.join(&evidence).is_file(), "receipt evidence must survive photo cleanup");
+            conn.execute("DELETE FROM sale_receipt_attachments WHERE receipt_id='r'", []).unwrap();
+            remove_file_unless_catalogued(&conn, &db.directory, &evidence);
+            assert!(!db.directory.join(&evidence).exists());
+        }
+    }
+
+    #[test]
+    fn media_purge_refuses_raw_or_receipt_refs_even_without_a_media_id_link() {
+        let (_dir, db) = setup();
+        let photo = put(&db, "original.jpg", &jpeg(12, 12, [2, 5, 9]));
+        artwork_with_cover(&db, "a", &photo);
+        sync_references(&db).unwrap();
+        let item = first_item(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE artworks SET image_path=NULL,image_media_id=NULL WHERE id='a'", []).unwrap();
+            conn.execute(
+                "INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at)
+                 VALUES('a',?1,'source.dng',100,?2,'t')",
+                params![photo, "a".repeat(64)],
+            ).unwrap();
+        }
+        set_state_core(&db, &item, true).unwrap();
+        assert!(purge_core(&db, &item).unwrap_err().contains("conserva"));
+        assert!(db.directory.join(&photo).is_file());
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("DELETE FROM artwork_raw_files WHERE artwork_id='a'", []).unwrap();
+            conn.execute_batch(
+                "INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Anna','t','t');
+                 INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','c',1000,'2026-11-21','t');
+                 INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                    VALUES('r','s','2026-11-21',1000,'cash','t');"
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO sale_receipt_attachments(
+                    receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at
+                 ) VALUES('r',?1,'receipt.jpg','image/jpeg',100,?2,'t')",
+                params![photo, "b".repeat(64)],
+            ).unwrap();
+        }
+        assert!(purge_core(&db, &item).unwrap_err().contains("conserva"));
+        assert!(db.directory.join(&photo).is_file());
+        db.conn.lock().unwrap().execute("DELETE FROM sale_receipt_attachments WHERE receipt_id='r'", []).unwrap();
+        purge_core(&db, &item).unwrap();
+        assert!(!db.directory.join(&photo).exists());
     }
 
     #[cfg(unix)]
