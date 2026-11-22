@@ -566,6 +566,20 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
         script.push_str("PRAGMA user_version=18; COMMIT;");
         conn.execute_batch(&script)?;
     }
+    // An archive edited with PRAGMA foreign_keys=OFF can contain orphaned sales,
+    // collector photographs, or gallery items even after a successful migration.
+    // Do not open it as a healthy workspace: normal CRUD operations could then
+    // display incomplete relations or silently exclude records from JOINs.
+    // This is read-only and runs before the application receives the connection.
+    let orphan_table: String = conn.query_row(
+        "SELECT COALESCE((SELECT \"table\" FROM pragma_foreign_key_check LIMIT 1), '')",
+        [], |row| row.get(0)
+    )?;
+    if !orphan_table.is_empty() {
+        return Err(format!(
+            "Archivio SQLite con collegamenti mancanti ({orphan_table}). Ripristina una copia integra prima di continuare."
+        ).into());
+    }
     // Certificates are append-only even when accessed through a raw SQLite client.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
@@ -806,6 +820,61 @@ mod tests {
         assert!(c.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES('k','old','BANNER','media/c.jpg','t')", []).is_err());
         assert!(c.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES('l','nobody','PHOTO','media/d.jpg','t')", []).is_err());
     }
+    #[test]
+    fn externally_imported_orphan_sale_is_rejected_without_deleting_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = open(temp.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            // Simulate an externally modified SQLite archive. Re-opening must
+            // detect the orphan even though this connection normally enforces FKs.
+            c.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+            c.execute(
+                "INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                 VALUES('orphan','missing-artwork','missing-collector',2500,'2026-11-22','now')",
+                [],
+            ).unwrap();
+            assert_eq!(c.query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get::<_, i64>(0)
+            ).unwrap(), 2);
+        }
+        drop(db);
+        let message = open(temp.path().into()).err().expect("must reject an orphan").to_string();
+        assert!(message.contains("collegamenti mancanti"), "{message}");
+        // The failed open is non-destructive. An external repair or recovery
+        // of a valid backup allows normal operation again.
+        let external = Connection::open(temp.path().join("repertica.sqlite")).unwrap();
+        let preserved: i64 = external.query_row(
+            "SELECT COUNT(*) FROM sales WHERE id='orphan'", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(preserved, 1);
+        external.execute("DELETE FROM sales WHERE id='orphan'", []).unwrap();
+        drop(external);
+        assert!(open(temp.path().into()).is_ok());
+    }
+
+    #[test]
+    fn valid_artwork_collector_sale_links_survive_reopening() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = open(temp.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                       VALUES('art','A-1','Opera','now','now')", []).unwrap();
+            c.execute("INSERT INTO collectors(id,name,created_at,updated_at)
+                       VALUES('buyer','Collezionista','now','now')", []).unwrap();
+            c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                       VALUES('sale','art','buyer',5000,'2026-11-22','now')", []).unwrap();
+        }
+        drop(db);
+        let reopened = open(temp.path().into()).unwrap();
+        let c = reopened.conn.lock().unwrap();
+        assert_eq!(c.query_row(
+            "SELECT COUNT(*) FROM sales WHERE artwork_id='art' AND collector_id='buyer'",
+            [], |row| row.get::<_, i64>(0)
+        ).unwrap(), 1);
+    }
+
     #[test]
     fn newer_schema_is_not_downgraded() {
         let dir = tempfile::tempdir().unwrap();
