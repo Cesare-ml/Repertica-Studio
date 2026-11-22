@@ -50,6 +50,29 @@ fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String
             ));
         }
     }
+    // An external SQLite import can bypass the receipt limit triggers. A CSV
+    // reporting negative outstanding money would be misleading even though all
+    // foreign keys still resolve and the underlying database is readable.
+    if matches!(kind, "balances" | "receipts") {
+        let invalid_balance: Option<String> = conn.query_row(
+            "SELECT s.id FROM sales s
+             LEFT JOIN (
+                 SELECT sale_id, SUM(amount_cents) AS received_cents,
+                        MIN(amount_cents) AS minimum_receipt
+                 FROM sale_receipts GROUP BY sale_id
+             ) totals ON totals.sale_id=s.id
+             WHERE s.amount_cents <= 0
+                OR COALESCE(totals.received_cents,0) NOT BETWEEN 0 AND s.amount_cents
+                OR (totals.minimum_receipt IS NOT NULL AND totals.minimum_receipt <= 0)
+             ORDER BY s.id LIMIT 1",
+            [], |row| row.get(0)
+        ).optional().map_err(error)?;
+        if let Some(id) = invalid_balance {
+            return Err(format!(
+                "Esportazione annullata: incassi incoerenti con l'importo della vendita {id}. Verifica l'archivio prima di esportare."
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -389,6 +412,54 @@ seconda riga','t','t')", []).unwrap();
     }
 
 
+
+    #[test]
+    fn balance_and_receipts_csv_reject_overpayment_or_negative_receipts_from_imports() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(r#"
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','A-1','Opera','t','t');
+                INSERT INTO collectors(id,name,created_at,updated_at)
+                    VALUES('c','Cliente','t','t');
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','c',5000,'2026-11-01','t');
+                INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                    VALUES('r1','s','2026-11-01',3000,'cash','t');
+                -- Simulate an imported archive whose normal limit triggers were removed.
+                DROP TRIGGER sale_receipts_limit_insert;
+                DROP TRIGGER sale_receipts_limit_update;
+                INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                    VALUES('r2','s','2026-11-02',3000,'cash','t');
+            "#).unwrap();
+            for kind in ["balances", "receipts"] {
+                let failure = render_csv(&conn, kind).unwrap_err();
+                assert!(failure.contains("incassi incoerenti"), "{kind}: {failure}");
+            }
+        }
+        let destination = dir.path().join("inconsistent-balances.csv");
+        assert!(export_file(&db, "balances", &destination).is_err());
+        assert!(!destination.exists(), "a misleading report must not be published");
+
+        let conn = db.conn.lock().unwrap();
+        conn.execute("DELETE FROM sale_receipts WHERE id='r2'", []).unwrap();
+        // An invalid negative receipt can also be masked by an otherwise
+        // plausible positive total; do not allow it into a financial register.
+        conn.execute_batch(r#"
+            PRAGMA ignore_check_constraints=ON;
+            UPDATE sale_receipts SET amount_cents=-1 WHERE id='r1';
+            PRAGMA ignore_check_constraints=OFF;
+        "#).unwrap();
+        for kind in ["balances", "receipts"] {
+            assert!(render_csv(&conn, kind).unwrap_err().contains("incassi incoerenti"));
+        }
+        conn.execute("UPDATE sale_receipts SET amount_cents=3000 WHERE id='r1'", []).unwrap();
+        for kind in ["balances", "receipts"] {
+            assert!(render_csv(&conn, kind).is_ok(), "{kind} should recover after repair");
+        }
+    }
 
     #[test]
     fn balances_csv_preserves_partial_full_and_unpaid_sales_without_inventing_receipts() {
