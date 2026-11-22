@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (trentaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **41 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (trentacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **42 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -47,6 +47,14 @@ Aggiornato: **2026-11-22** (trentaquattresima ricognizione). Stato delle propost
 | [REPS-UX-039](REPS-UX-039-ripartizione-informativa-incassi-dichiarati.md) | Vista informativa delle **quote per fondo sugli incassi manualmente dichiarati**, distinta dalle quote sul venduto e senza affermare liquidità effettivamente disponibile | P1–P2* per vendite rateali; P3 se bastano avvisi | Proposta — da valutare |
 | [REPS-UX-040](REPS-UX-040-rimborsi-rettifiche-spese-acquisti.md) | Rimborsi, note di credito e rettifiche dichiarate collegate alle spese, senza cancellare l'acquisto né inventare incassi | P2* (P3 se bastano note; P1–P2 solo dopo validazione) | Proposta — da valutare |
 | [REPS-UX-041](REPS-UX-041-titoli-descrizioni-opere-multilingua.md) | Titoli e descrizioni di presentazione riutilizzabili per lingua, senza traduzione automatica né modifica dei testi canonici e dei certificati | P2* (P3 se bastano override brochure; P1–P2 solo dopo validazione) | Proposta — da valutare |
+| [REPS-UX-042](REPS-UX-042-pagamenti-dichiarati-spese-acquisti-differiti.md) | Acquisti a saldo differito: pagamenti manualmente dichiarati e scadenze, distinti dalle spese registrate e dalle uscite bancarie verificate | P2* (P3 se bastano note/calendario; P1–P2 solo dopo validazione) | Proposta — da valutare |
+
+## Trentacinquesima ricognizione — 22 novembre 2026 — REPS-UX-042
+
+- **[REPS-UX-042 — Pagamenti dichiarati su acquisti a saldo differito](REPS-UX-042-pagamenti-dichiarati-spese-acquisti-differiti.md):** su `main` le `expenses` rappresentano costi registrati per data di spesa, non attestazioni di somme già pagate. Un acquisto di 1.200 € con acconto di 300 € e saldo futuro di 900 € non è oggi leggibile come **costo distinto da pagamento dichiarato e previsione di saldo**. Proposta di monitoraggio per **singola spesa**, facoltativo, senza cambiare i totali economici, creare pagamenti o dedurre debiti storici. **P2 soltanto ipotetica**, P3 se bastano note e calendario.
+- **Anti-doppione:** [UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) riguarda scadenze ricorrenti **prima** della spesa, [UX-040](REPS-UX-040-rimborsi-rettifiche-spese-acquisti.md) rettifiche/rimborsi **del valore** di un acquisto, [UX-030](REPS-UX-030-quadratura-facoltativa-estratti-conto-locali.md) corrispondenza facoltativa con movimenti **bancari** da CSV, mentre [UX-024](REPS-UX-024-scadenziario-incassi-piani-pagamento-vendite.md) riguarda le rate della **vendita** già in parte implementate. Qui soltanto versamenti **dichiarati verso il fornitore**, riferiti all'UUID di una spesa esistente; nessun registro parallelo dei costi. Le **37 schede tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) sono state consultate ma **non modificate**.
+- **Tutele:** spese storiche senza monitoraggio = stato **sconosciuto**, non insoluto; importi in centesimi, scadenze previste non equiparate a pagamenti e stato dichiarato mai presentato come prova bancaria/fiscale. Offline SQLite, backup verificato in cartella scelta, portabilità locale, lingua OS e fallback inglese, niente account, cloud, sincronizzazioni o invii.
+- **Esito:** **42 proposte**, tutte «Proposta — da valutare». Modificati soltanto la nuova scheda e questo indice Markdown dentro `docs/idee/gestione-e-ux/`; [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) lasciata aperta e in bozza, **senza merge o autorizzazione allo sviluppo**.
 
 ## Trentaquattresima ricognizione — 22 novembre 2026 — REPS-UX-041
 
