@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-22** (quarantacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **52 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-22** (quarantaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **53 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -58,6 +58,16 @@ Aggiornato: **2026-11-22** (quarantacinquesima ricognizione). Stato delle propos
 | [REPS-UX-050](REPS-UX-050-rendiconto-mensile-snapshot-verifiche.md) | Rendiconto mensile datato con verifica delle registrazioni gestionali e possibile confronto non distruttivo fra istantanee, senza chiusura fiscale | P2 se validato; P3 o nessuno sviluppo se basta Calc | Proposta — da valutare |
 | [REPS-UX-051](REPS-UX-051-anzianita-disponibilita-opere.md) | Revisione delle opere attualmente disponibili e, solo con data di prima offerta dichiarata, tempo trascorso; mai stimare giacenza da anno di produzione o data di catalogazione | P2 se validato; P3 o nessuno sviluppo se bastano filtri/CSV | Proposta — da valutare |
 | [REPS-UX-052](REPS-UX-052-contesto-dichiarato-vendite-canali.md) | Modalità dichiarata di conclusione delle vendite, separata dall'eventuale origine della richiesta; nessuna attribuzione o tracciamento automatico | P2 se validato, P3 o nessuno sviluppo se bastano note/CSV | Proposta — da valutare |
+
+| [REPS-UX-053](REPS-UX-053-didascalie-sala-cartellini-espositivi.md) | Cartellini pubblici di sala generati da opere selezionate, revisionati prima di PDF/stampa, senza etichette QR interne o divulgazione dei dati privati | P2 se usati spesso; P3 o nessuno sviluppo se basta un modello LibreOffice | Proposta — da valutare |
+
+## Quarantaseiesima ricognizione — 22 novembre 2026 — REPS-UX-053
+
+- **[REPS-UX-053 — Didascalie di sala e cartellini espositivi](REPS-UX-053-didascalie-sala-cartellini-espositivi.md):** verificati su `main` README, MVP, modelli/comandi delle opere, brochure PDF esistente e ricerca documentale, confrontando le **52 proposte UX precedenti** e le **48 del filone TECH** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). L'archivio dispone già dei metadati dell'opera e le brochure esportano PDF, ma nei percorsi consultati non emerge un modello specifico di **cartellini sintetici per il pubblico, impaginati in serie con revisione delle omissioni e dei testi lunghi**. È un'opportunità ipotetica, non un bug o una necessità già confermata.
+- **Anti-doppioni:** UX-020 produce **etichette interne inventariali** e QR, UX-007/il modulo brochure produce **dossier editoriali**, UX-009 pianifica **eventi**, UX-041 riguarda **testi multilingua**. Questa proposta tratta soltanto **il documento breve destinato alla parete**, senza creare movimenti, mostre, prezzi, attribuzioni automatiche o nuovi registri. TECH-032 studia la resa Unicode del PDF: vincolo da rispettare, non lavoro tecnico qui assegnato.
+- **Prima alternativa:** usare **CSV e un template LibreOffice Writer/Calc**; misurare su 15–20 opere reali gli errori, il tempo e le stampe. Se basta, **nessuno sviluppo**. In caso contrario, valutare inizialmente un solo layout con preview e PDF locale; tutti gli override restano nel documento e non alterano le opere. **Priorità ipotetica P2** solo dopo riscontri, P3 altrimenti.
+- **Esito:** **53 schede**, tutte **«Proposta — da valutare»**. Solo nuova scheda Markdown e aggiornamento di questo indice nella cartella autorizzata; nessun file TECH o codice modificato. [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza, senza merge o approvazione. Nessun account/cloud, dati locali ed esportabili, backup in cartella scelta, lingua di sistema/fallback EN.
+
 
 ## Quarantacinquesima ricognizione — 22 novembre 2026 — REPS-UX-052
 
