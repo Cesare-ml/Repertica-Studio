@@ -394,13 +394,13 @@ mod tests{
         let mut c=db.conn.lock().unwrap();
         sale(&mut c,"s",10_000,"2026-02-15",0,0);
         c.execute("UPDATE sales SET sold_at='2026-02-31' WHERE id='s'",[]).unwrap();
-        assert!(finance_overview_core(&c,2026).unwrap_err().contains("Invalid sale date"));
+        assert!(finance_overview_core(&c,2026).err().unwrap().contains("Invalid sale date"));
         c.execute("UPDATE sales SET sold_at='2026-02-15' WHERE id='s'",[]).unwrap();
         c.execute("UPDATE sale_finances SET tax_cents=10001 WHERE sale_id='s'",[]).unwrap();
-        assert!(finance_overview_core(&c,2026).unwrap_err().contains("deductions exceed"));
+        assert!(finance_overview_core(&c,2026).err().unwrap().contains("deductions exceed"));
         c.execute("UPDATE sale_finances SET tax_cents=0 WHERE sale_id='s'",[]).unwrap();
         c.execute("UPDATE sale_allocations SET share_bp=3332 WHERE sale_id='s' AND part_id='savings'",[]).unwrap();
-        assert!(finance_overview_core(&c,2026).unwrap_err().contains("frozen allocation"));
+        assert!(finance_overview_core(&c,2026).err().unwrap().contains("frozen allocation"));
     }
     #[test]
     fn financial_report_rejects_overflow_in_imported_sale_totals(){
@@ -413,7 +413,7 @@ mod tests{
             c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
                 VALUES(?1,?1,'c',?2,'2026-03-01','t')",params![id,i64::MAX]).unwrap();
         }
-        assert!(finance_overview_core(&c,2026).unwrap_err().contains("overflow"));
+        assert!(finance_overview_core(&c,2026).err().unwrap().contains("overflow"));
     }
     #[test]
     fn financial_report_rejects_invalid_imported_expense_dates(){
@@ -422,7 +422,7 @@ mod tests{
         let c=db.conn.lock().unwrap();
         c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
             VALUES('e','2026-02-31','materials','Paint',500,'t','t')",[]).unwrap();
-        assert!(finance_overview_core(&c,2026).unwrap_err().contains("Invalid expense date"));
+        assert!(finance_overview_core(&c,2026).err().unwrap().contains("Invalid expense date"));
     }
     #[test]
     fn migration_moves_historical_shares_and_expense_funds_into_the_new_model(){
