@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-22** (trentaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **37 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-22** (trentacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **38 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -43,6 +43,14 @@ Data ricognizione: **2026-11-22** (trentaquattresima ricognizione). Stato unifor
 | [REPS-TECH-035](REPS-TECH-035-configurazioni-mcp-client-esterni-conflitti-recupero.md) | Collegamento MCP a client esterni: tutela delle configurazioni JSON/TOML contro modifiche concorrenti, conflitti e recupero, senza sostituire il server già presente | P2 condizionata; P3 se bastano snippet manuali | Proposta — da valutare |
 | [REPS-TECH-036](REPS-TECH-036-mcp-archivi-grandi-paginazione-limiti-risorse.md) | MCP locale con elenchi continuabili e limiti di risorse misurati per archivi grandi, senza nuova rete né dati sensibili esposti | P2 condizionata; P3 se gli archivi sono piccoli | Proposta — da valutare |
 | [REPS-TECH-037](REPS-TECH-037-recupero-ripristino-interrotto-avvio-protetto.md) | Ripristino interrotto: avvio protetto e recupero assistito di rollback e archivi precedenti, senza inizializzazione o scelta implicita | P1–P2 condizionata (guardia); P2–P3 modalità guidata | Proposta — da valutare |
+| [REPS-TECH-038](REPS-TECH-038-staging-media-backup-concorrenza-snapshot.md) | Media preparati fuori dal lock SQLite: studio della coerenza tra importazioni concorrenti e backup integrali, senza perdere gli orfani storici | P1–P2 solo se il rischio è riproducibile; altrimenti P3 | Proposta — da valutare |
+
+## Trentacinquesima ricognizione — 22 novembre 2026 — REPS-TECH-038
+
+- **[REPS-TECH-038 — Staging media e backup coerenti con importazioni concorrenti](REPS-TECH-038-staging-media-backup-concorrenza-snapshot.md):** riesaminati `main`, [`backup.rs`](../../../src-tauri/src/backup.rs), [`gallery.rs`](../../../src-tauri/src/gallery.rs), [`receipt_attachments.rs`](../../../src-tauri/src/receipt_attachments.rs), [`raw_files.rs`](../../../src-tauri/src/raw_files.rs) e i cataloghi dei due filoni. **Lacuna ipotizzata:** il backup blocca il mutex SQLite mentre scatta lo snapshot e copia `media/`, ma galleria/allegati/RAW preparano i byte **fuori dal lock** e sotto la stessa directory; il file può esistere prima del collegamento al DB. Non è un incidente riprodotto. La scheda propone **innanzitutto test deterministici**, poi solo se necessari staging separato e coordinamento non bloccante dei punti di pubblicazione e backup.
+- **Conservazione:** il backup attuale v1 include intenzionalmente anche media senza FK correnti: una soluzione non deve filtrarli o cancellarli. Manifest SHA-256, verifica SQLite/media, cartelle liberamente scelte e protezione del restore rimangono invarianti. Casi: temporanei `.tmp`, RAW grandi, allegati agli incassi, errore a metà copia, crash, backup automatici, USB/NAS.
+- **Confini:** TECH-003 riguarda diagnostica e ripristino selettivo di media attivi; TECH-009 verifica copie pubblicate; TECH-026 backup compatti; TECH-037 recupero dopo restore interrotto. [Le 42 schede Gestione e UX — PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) non prevedono questa barriera applicativa. Nessun file dell'altro filone è stato toccato.
+- **Priorità ipotetica:** P1–P2 **solo se** la concorrenza dimostra copie ambiguamente valide o problemi reali; P3 se l'esame non evidenzia rischio concreto. Nessun test eseguito, nessuna funzionalità approvata, assegnata o sviluppata. Solo questa scheda e l'indice, Markdown nella cartella autorizzata; [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) aperta e in bozza, senza merge.
 
 ## Trentaquattresima ricognizione — 22 novembre 2026 — REPS-TECH-037
 
