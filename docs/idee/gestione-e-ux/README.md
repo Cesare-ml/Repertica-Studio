@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **70 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **71 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -81,6 +81,13 @@ Aggiornato: **2026-11-23** (sessantatreesima ricognizione). Stato delle proposte
 | [REPS-UX-068](REPS-UX-068-verifica-collezionista-esistente-prima-inserimento.md) | Verifica di un contatto già presente **prima di creare un nuovo collezionista** nel flusso opera+vendita, confronto prudente, selezione UUID solo esplicita; nessuna fusione o collegamento automatico | P2 soltanto se duplicati reali verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-069](REPS-UX-069-ripetizione-manuale-spesa-precedente.md) | Nuova spesa manuale da una registrazione precedente: riuso prudente dei campi, nuova data e importo da verificare, nessuna ricorrenza né pagamento presunto | P2 solo con casi frequenti verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-070](REPS-UX-070-avviso-possibili-incassi-duplicati.md) | Avviso **non bloccante** prima di registrare un possibile incasso già dichiarato della stessa vendita; indizi spiegabili senza confondere coincidenze con pagamenti verificati | P2 se errori ricorrenti osservati, altrimenti P3/nessuna funzione | Proposta — da valutare |
+| [REPS-UX-071](REPS-UX-071-ritorno-contesto-consultazione-archivio.md) | Ritorno contestuale temporaneo dalla scheda del collezionista alle opere filtrate (e viceversa), senza cancellare query e ordine del percorso originario né salvare viste persistenti | P2 solo se la perdita di contesto è verificata; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Sessantaquattresima ricognizione — 23 novembre 2026 — REPS-UX-071
+
+- **[REPS-UX-071 — Ritorno al punto di consultazione dell'archivio](REPS-UX-071-ritorno-contesto-consultazione-archivio.md).** Esaminati su `main` README/MVP, `src/app/app.component.ts/html` e `archive-filters.ts`: `navigate()` azzera ricerca, filtri e ordinamento delle opere anche quando il percorso si è aperto da un collegamento opera↔collezionista. La perdita dei criteri è verificabile nel codice; l'impatto professionale va ancora osservato.
+- **Confine anti-doppione:** non propone viste salvate, query avanzate o persistenza (TECH-008); non introduce la vista attività per opera (UX-060) e non sostituisce il contratto di accessibilità (TECH-020) o la protezione dei moduli non salvati (UX-067). Il ritorno sarebbe esplicito e temporaneo, con criteri ricalcolati e invalidazione in caso di cambio archivio.
+- **Prima della decisione:** prova con 4–6 professionisti su passaggi fra opere filtrate e collezionisti, e confronto con la semplice ricostruzione dei filtri. **P2 solo se utile**, altrimenti P3, guida o nessuna funzione. Stato invariato: **«Proposta — da valutare»**. Nessuna implementazione né approvazione.
 
 ## Sessantatreesima ricognizione — 23 novembre 2026 — REPS-UX-070
 
