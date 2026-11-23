@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **68 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **69 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -77,6 +77,13 @@ Data ricognizione: **2026-11-23** (sessantacinquesima ricognizione). Stato unifo
 | [REPS-TECH-066](REPS-TECH-066-compatibilita-filesystem-destinazioni-backup.md) | Compatibilità della destinazione USB/NAS: limiti del singolo file, verifica prudente delle capacità e diagnosi della pubblicazione senza false promesse di durabilità | P2 solo se limiti reali misurati; altrimenti P3 o sola guida/test | Proposta — da valutare |
 | [REPS-TECH-067](REPS-TECH-067-robustezza-pianificazione-backup-cambi-ora.md) | Backup programmati e ora locale: indagine su DST, cambio fuso, correzione dell'orologio, recuperi e retry senza duplicazioni o omissioni silenziose | P2 solo se rischi reali riproducibili; altrimenti P3/sola guida e QA | Proposta — da valutare |
 | [REPS-TECH-068](REPS-TECH-068-brochure-pdf-esportazione-memoria-limitata.md) | Brochure PDF fino a 100 opere: studio del picco RAM dell'attuale renderer che accumula pagine, oggetti e PDF prima della scrittura; possibili soluzioni progressive, solo dopo benchmark | P2 solo con limiti misurati; altrimenti P3 o nessuna modifica | Proposta — da valutare |
+| [REPS-TECH-069](REPS-TECH-069-protezione-originali-raw-sostituzione.md) | Salvaguardia dei RAW originari alla sostituzione: verifica della rimozione attuale, conferma/export preventivi e soltanto eventualmente cronologia locale recuperabile opt-in | P1–P2 per prevenzione solo se danno confermato; P2–P3 per versioni; altrimenti nessuno sviluppo | Proposta — da valutare |
+
+## Sessantaseiesima ricognizione — 23 novembre 2026 — REPS-TECH-069
+
+- **[REPS-TECH-069 — Protezione degli originali RAW alla sostituzione](REPS-TECH-069-protezione-originali-raw-sostituzione.md).** Esaminati su `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/raw_files.rs`, `db.rs`, `media.rs`, `src/app/app.component.ts/html` e le prove esistenti; confrontati gli indici delle **68 idee tecniche** precedenti e delle **73 idee Gestione e UX** nella [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Un RAW per opera è già supportato; nella sostituzione la riga del vecchio collegamento viene rimossa e la copia precedente è eliminata **soltanto se integra e non più referenziata**. È un comportamento voluto e testato; il file sorgente esterno non viene eliminato. Nel flusso `attachRaw` esaminato non compare la conferma esplicita sulla rimozione della copia interna, già presente per `removeRaw`. **Nessun incidente utente né perdita è stato dimostrato.**
+- **Oggetto distinto dalle proposte precedenti:** questa scheda studia la **salvaguardia prima della sostituzione** del singolo allegato RAW; non la storia esistente delle revisioni fotografiche Media Center (TECH-053), né TIFF/BigTIFF (TECH-046), import di ritocchi da editor (TECH-065), backup generici o il modello delle opere digitali (UX-057). Prima alternativa: testo chiaro, export manuale e backup verificato; valutare una conferma di sostituzione **solo se** gli utenti sono sorpresi dalla cancellazione. La cronologia opt-in è un'opzione separata e onerosa in spazio, non un requisito implicito.
+- **Priorità proposta e perimetro:** P1–P2 solo per una prevenzione minima quando il rischio d'uso venga confermato; P2–P3 per eventuale cronologia RAW; altrimenti documentazione/nessuno sviluppo. **69 proposte tecniche**, tutte **«Proposta — da valutare»**. Nessuna approvazione né incarico, nessuna modifica al codice o ai file dell'altra automazione. La [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) rimane soltanto documentale, aperta in bozza e senza merge.
 
 ## Sessantacinquesima ricognizione — 23 novembre 2026 — REPS-TECH-068
 
