@@ -115,6 +115,21 @@ fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
 // disabled its triggers before adding excessive payment records. Never restore such
 // an archive into the live collection.
 fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
+    // CHECK constraints can be bypassed by a third-party SQLite importer. A
+    // zero/negative receipt can make a partial payment look smaller, while an
+    // oversized receipt can corrupt the accounting even when a later negative
+    // entry happens to cancel it. Validate every entry before aggregating.
+    let invalid_amount: Option<String> = conn.query_row(
+        "SELECT id FROM sale_receipts
+         WHERE amount_cents NOT BETWEEN 1 AND 100000000000
+         ORDER BY id LIMIT 1",
+        [], |row| row.get(0)
+    ).optional().map_err(error)?;
+    if let Some(id) = invalid_amount {
+        return Err(format!(
+            "Il backup contiene un importo di incasso non valido: {id}"
+        ));
+    }
     let invalid: Option<(String, i64, i64)> = conn.query_row(
         "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0)
          FROM sales s LEFT JOIN sale_receipts r ON r.sale_id = s.id
@@ -892,6 +907,63 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1);
         assert!(db.directory.join(DB_FILE).exists());
+    }
+
+    #[test]
+    fn invalid_imported_receipt_amount_cannot_be_backed_up_or_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        seed_receipt_evidence(&db);
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // A third-party importer may disable SQLite CHECK constraints. These
+        // values still pass integrity_check and foreign_key_check, and the
+        // negative amount is not detected by the old overpayment-only check.
+        for amount in [0_i64, -500, 100_000_000_001] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+                snapshot.execute(
+                    "UPDATE sale_receipts SET amount_cents=?1 WHERE id='receipt'",
+                    params![amount],
+                ).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok");
+                let broken: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(broken, 0);
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("importo di incasso non valido"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+        }
+        let unchanged: i64 = db.conn.lock().unwrap().query_row(
+            "SELECT amount_cents FROM sale_receipts WHERE id='receipt'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(unchanged, 500, "a refused restore must preserve the live data");
+
+        // The same verification must reject publishing a new backup of an
+        // already-corrupted active archive; no partial folder may survive.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+            conn.execute("UPDATE sale_receipts SET amount_cents=-1 WHERE id='receipt'", []).unwrap();
+            conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+        }
+        let message = create_backup_core(&db, &destination).unwrap_err();
+        assert!(message.contains("importo di incasso non valido"), "{message}");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1,
+            "failed backup must not publish a partial copy");
     }
 
     #[test]
