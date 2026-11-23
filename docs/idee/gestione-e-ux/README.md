@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **76 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (settantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **77 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -90,6 +90,14 @@ Aggiornato: **2026-11-23** (sessantanovesima ricognizione). Stato delle proposte
 | [REPS-UX-074](REPS-UX-074-ricognizione-copertine-fotografiche-mancanti.md) | Ricognizione discreta di opere **senza copertina collegata**: filtro leggibile combinabile con ricerca/stato, senza confondere immagini assenti per scelta con file danneggiati o imporre una «qualità fotografica» | P2 solo se bisogno verificato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-UX-075](REPS-UX-075-caratteristiche-opera-non-verificate.md) | Distinguere caratteristiche dell'opera non verificate da assenze dichiarate (firma, vernice finale, cornice): prima chiarimento dei booleani legacy, eventuali tre stati solo se necessario | P2 se ambiguità dimostrata; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-UX-076](REPS-UX-076-consultazione-certificati-dati-storici.md) | Ritrovare certificati già emessi per seriale e titolo/codice storico, distinguendo i valori correnti; sola consultazione senza nuovi documenti | P2 solo se bisogno dimostrato; altrimenti P3/CSV/nessuna funzione | Proposta — da valutare |
+| [REPS-UX-077](REPS-UX-077-consultazione-spese-fornitore-perimetro.md) | Ritrovare acquisti per fornitore/descrizione e distinguere le spese integrali da quelle comprese nel riepilogo annuale e nella soglia di tesoreria; filtri temporanei, nessuna nuova registrazione | P2 se bisogno verificato; altrimenti P3/sola etichetta/nessuna funzione | Proposta — da valutare |
+
+## Settantesima ricognizione — 23 novembre 2026 — REPS-UX-077
+
+- **[REPS-UX-077 — Consultazione degli acquisti e perimetro delle spese](REPS-UX-077-consultazione-spese-fornitore-perimetro.md).** Riletti main, finance.rs, template e componente Angular, MVP, economia/i18n e portabilità. La lista delle spese comprende tutti gli anni; il riepilogo applica anno e data iniziale della tesoreria. La tabella non esplicita questo diverso perimetro né offre una ricerca per fornitore/descrizione. Nessun fraintendimento reale accertato.
+- **Alternativa minima:** chiarire il perimetro; ricerca locale temporanea solo se necessaria, eventuale filtro sulle spese incluse nel riepilogo verificato contro il backend. Nessuna modifica a importi, storico, CSV integrali o backup.
+- **Anti-doppioni:** confrontate 76 UX e 72 TECH; UX-069 riuso in nuova spesa, UX-072 categorie, UX-014 rubrica, UX-050/073 rendiconti e confronti, TECH-008 filtri opere. Possibile riuso futuro da UX-050, non un secondo rendiconto. [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) non modificata.
+- **P2 ipotetica** solo dopo verifica; altrimenti P3/nessuna funzione. Tutte le 77 proposte rimangono da valutare. [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) solo Markdown, in bozza, senza merge.
 
 ## Sessantanovesima ricognizione — 23 novembre 2026 — REPS-UX-076
 
