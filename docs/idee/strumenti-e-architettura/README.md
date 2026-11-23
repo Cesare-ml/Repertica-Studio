@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **67 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **68 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -76,6 +76,14 @@ Data ricognizione: **2026-11-23** (sessantaquattresima ricognizione). Stato unif
 | [REPS-TECH-065](REPS-TECH-065-round-trip-revisioni-fotografiche-editor-esterni.md) | Rientro manuale controllato nel Media Center di una fotografia elaborata con editor esterno, come nuova revisione non attiva; niente watchers, editor obbligatori o cambi automatici dei riferimenti | P3; P2 solo dopo validazione professionale | Proposta — da valutare |
 | [REPS-TECH-066](REPS-TECH-066-compatibilita-filesystem-destinazioni-backup.md) | Compatibilità della destinazione USB/NAS: limiti del singolo file, verifica prudente delle capacità e diagnosi della pubblicazione senza false promesse di durabilità | P2 solo se limiti reali misurati; altrimenti P3 o sola guida/test | Proposta — da valutare |
 | [REPS-TECH-067](REPS-TECH-067-robustezza-pianificazione-backup-cambi-ora.md) | Backup programmati e ora locale: indagine su DST, cambio fuso, correzione dell'orologio, recuperi e retry senza duplicazioni o omissioni silenziose | P2 solo se rischi reali riproducibili; altrimenti P3/sola guida e QA | Proposta — da valutare |
+| [REPS-TECH-068](REPS-TECH-068-brochure-pdf-esportazione-memoria-limitata.md) | Brochure PDF fino a 100 opere: studio del picco RAM dell'attuale renderer che accumula pagine, oggetti e PDF prima della scrittura; possibili soluzioni progressive, solo dopo benchmark | P2 solo con limiti misurati; altrimenti P3 o nessuna modifica | Proposta — da valutare |
+
+## Sessantacinquesima ricognizione — 23 novembre 2026 — REPS-TECH-068
+
+- **[REPS-TECH-068 — Esportazione delle brochure PDF a memoria limitata](REPS-TECH-068-brochure-pdf-esportazione-memoria-limitata.md).** Riesaminati `main` ([README](../../../README.md), [Brochure offline](../../BROCHURES-OFFLINE.md), `src-tauri/src/brochures.rs`), le **67 schede tecniche** precedenti e l'indice delle **72 proposte Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il renderer delle brochure accetta fino a **100 opere**, trattiene un `Vec<Page>` con fotografie JPEG, raccoglie gli oggetti PDF in `Vec<Vec<u8>>`, poi materializza l'intero documento come `Vec<u8>` prima di scriverlo. I limiti sui singoli input fotografici sono già presenti e vanno conservati. **Nessuna misura reale del picco RAM né crash riprodotto**: si propone una fase iniziale di benchmark con 5/25/50/100 opere e dataset sintetici.
+- **Possibili esiti:** nessun intervento se i tempi e la memoria sono accettabili; ottimizzazioni circoscritte delle copie interne; solo se la misura lo giustifica, writer PDF incrementale senza alterare fotografie, contenuti o layout. **Priorità P2 solo condizionata**, altrimenti P3 o nessuno sviluppo.
+- **Anti-doppioni:** TECH-034 tutela la pubblicazione/no-clobber dell'output, TECH-062 il progresso/stop delle operazioni lunghe, TECH-032 i font Unicode e TECH-063 l'accessibilità semantica. Questa proposta studia **esclusivamente il costo memoria/risorse del renderer PDF esistente**, non una seconda architettura di pubblicazione né nuovi flussi gestionali. Nessun file UX modificato.
+- **Perimetro:** solo una nuova scheda e questo indice Markdown nella cartella tecnica, PR [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) da conservare **in bozza e senza merge**. **68 proposte**, tutte «Proposta — da valutare», nessuna idea approvata o assegnata. Nessun codice, test, build, workflow, impostazione, dipendenza o issue modificati.
 
 ## Sessantaquattresima ricognizione — 23 novembre 2026 — REPS-TECH-067
 
