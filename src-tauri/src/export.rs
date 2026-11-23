@@ -337,6 +337,8 @@ mod tests {
                       ('i2','s',2,'2026-12-02',2500);
             INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
                 VALUES('cert','a','RS-0001','2026-11-02','Artista','{}','t');
+            -- Simulate an external SQLite edit that disabled historic immutability.
+            DROP TRIGGER certificates_no_update;
         "#).unwrap();
         for (table, column, id, kinds) in [
             ("sales", "sold_at", "s", &["sales", "balances", "allocations"][..]),
