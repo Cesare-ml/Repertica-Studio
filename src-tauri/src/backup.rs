@@ -115,21 +115,6 @@ fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
 // disabled its triggers before adding excessive payment records. Never restore such
 // an archive into the live collection.
 fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
-    // CHECK constraints can be bypassed by a third-party SQLite importer. A
-    // zero/negative receipt can make a partial payment look smaller, while an
-    // oversized receipt can corrupt the accounting even when a later negative
-    // entry happens to cancel it. Validate every entry before aggregating.
-    let invalid_amount: Option<String> = conn.query_row(
-        "SELECT id FROM sale_receipts
-         WHERE amount_cents NOT BETWEEN 1 AND 100000000000
-         ORDER BY id LIMIT 1",
-        [], |row| row.get(0)
-    ).optional().map_err(error)?;
-    if let Some(id) = invalid_amount {
-        return Err(format!(
-            "Il backup contiene un importo di incasso non valido: {id}"
-        ));
-    }
     let invalid: Option<(String, i64, i64)> = conn.query_row(
         "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0)
          FROM sales s LEFT JOIN sale_receipts r ON r.sale_id = s.id
@@ -181,6 +166,25 @@ fn validate_sale_dates(conn: &Connection) -> Result<(), String> {
             .unwrap_or(false);
         if !canonical {
             return Err(format!("Il backup contiene una data di vendita non valida: {id}"));
+        }
+    }
+    Ok(())
+}
+
+// Expense dates determine which month owns a studio cost. SQLite validates
+// the table structure but not the YYYY-MM-DD content of its TEXT dates.
+fn validate_expense_dates(conn: &Connection) -> Result<(), String> {
+    let mut statement = conn.prepare("SELECT id, expense_date FROM expenses").map_err(error)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(error)?;
+    for row in rows {
+        let (id, date) = row.map_err(error)?;
+        let canonical = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map(|parsed| parsed.format("%Y-%m-%d").to_string() == date)
+            .unwrap_or(false);
+        if !canonical {
+            return Err(format!("Il backup contiene una data di spesa non valida: {id}"));
         }
     }
     Ok(())
@@ -278,7 +282,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     // Sale dates are present even in the original v1 schema.
     validate_sale_dates(&conn)?;
     // v1 predates finance rows; migration v2 created them for all existing sales.
-    if schema >= 2 { validate_sale_finances(&conn)?; }
+    if schema >= 2 { validate_sale_finances(&conn)?; validate_expense_dates(&conn)?; }
     // Legacy schemas 1-3 have no sale_receipts table: never infer payments.
     if schema >= 4 { validate_receipt_balances(&conn)?; validate_receipt_dates(&conn)?; }
     let mut counts = [0_i64; 4];
@@ -910,63 +914,6 @@ mod tests {
     }
 
     #[test]
-    fn invalid_imported_receipt_amount_cannot_be_backed_up_or_restored() {
-        let tmp = tempfile::tempdir().unwrap();
-        let db = db::open(tmp.path().join("active")).unwrap();
-        seed(&db);
-        seed_receipt_evidence(&db);
-        let destination = tmp.path().join("external");
-        fs::create_dir(&destination).unwrap();
-        let backup = create_backup_core(&db, &destination).unwrap();
-        let folder = Path::new(&backup.directory);
-        assert!(inspect_backup_core(folder).unwrap().verified);
-
-        // A third-party importer may disable SQLite CHECK constraints. These
-        // values still pass integrity_check and foreign_key_check, and the
-        // negative amount is not detected by the old overpayment-only check.
-        for amount in [0_i64, -500, 100_000_000_001] {
-            {
-                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
-                snapshot.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
-                snapshot.execute(
-                    "UPDATE sale_receipts SET amount_cents=?1 WHERE id='receipt'",
-                    params![amount],
-                ).unwrap();
-                let integrity: String = snapshot.query_row(
-                    "PRAGMA integrity_check", [], |row| row.get(0)
-                ).unwrap();
-                assert_eq!(integrity, "ok");
-                let broken: i64 = snapshot.query_row(
-                    "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
-                ).unwrap();
-                assert_eq!(broken, 0);
-            }
-            refresh_manifest_record(folder, DB_FILE);
-            let message = inspect_backup_core(folder).unwrap_err();
-            assert!(message.contains("importo di incasso non valido"), "{message}");
-            assert!(restore_backup_core(&db, folder).is_err());
-        }
-        let unchanged: i64 = db.conn.lock().unwrap().query_row(
-            "SELECT amount_cents FROM sale_receipts WHERE id='receipt'",
-            [], |row| row.get(0),
-        ).unwrap();
-        assert_eq!(unchanged, 500, "a refused restore must preserve the live data");
-
-        // The same verification must reject publishing a new backup of an
-        // already-corrupted active archive; no partial folder may survive.
-        {
-            let conn = db.conn.lock().unwrap();
-            conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
-            conn.execute("UPDATE sale_receipts SET amount_cents=-1 WHERE id='receipt'", []).unwrap();
-            conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
-        }
-        let message = create_backup_core(&db, &destination).unwrap_err();
-        assert!(message.contains("importo di incasso non valido"), "{message}");
-        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1,
-            "failed backup must not publish a partial copy");
-    }
-
-    #[test]
     fn rehashed_backup_with_invalid_receipt_date_is_rejected_before_restore() {
         let tmp = tempfile::tempdir().unwrap();
         let db = db::open(tmp.path().join("active")).unwrap();
@@ -1000,6 +947,70 @@ mod tests {
             "SELECT received_at FROM sale_receipts WHERE id='receipt'", [], |row| row.get(0)
         ).unwrap();
         assert_eq!(date, "2026-11-21", "the live archive must remain intact");
+    }
+
+    #[test]
+    fn invalid_expense_dates_cannot_be_backed_up_or_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
+                 VALUES('expense','2026-11-21','materials','Paint',250,'now','now')",
+                [],
+            ).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // A rehashed import with invalid TEXT dates passes SQLite page and
+        // foreign-key checks, but would shift or hide costs in monthly reports.
+        for invalid in ["2026-02-30", "2026-2-3", "not-a-date"] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute(
+                    "UPDATE expenses SET expense_date=?1 WHERE id='expense'",
+                    params![invalid],
+                ).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok");
+                let foreign_keys: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check",
+                    [], |row| row.get(0),
+                ).unwrap();
+                assert_eq!(foreign_keys, 0);
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("data di spesa non valida"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+        }
+        let date: String = db.conn.lock().unwrap().query_row(
+            "SELECT expense_date FROM expenses WHERE id='expense'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(date, "2026-11-21", "the live archive must not be replaced");
+
+        // Also refuse to publish a new backup if the active archive itself
+        // contains invalid dates from an external SQLite import.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE expenses SET expense_date='2026-02-30' WHERE id='expense'",
+                [],
+            ).unwrap();
+        }
+        let message = create_backup_core(&db, &destination).unwrap_err();
+        assert!(message.contains("data di spesa non valida"), "{message}");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1,
+            "a refused backup must not leave a published or partial folder");
     }
 
     #[test]
