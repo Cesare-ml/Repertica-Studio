@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **63 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **64 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -72,6 +72,15 @@ Aggiornato: **2026-11-23** (cinquantaseiesima ricognizione). Stato delle propost
 | [REPS-UX-061](REPS-UX-061-revisione-dati-personali-collezionisti.md) | Revisione prudente dei dati personali dei collezionisti: campi attuali, riferimenti storici, copie ed eventuali richieste di rettifica, senza cancellazioni automatiche | P2 se validata; P3 o nessuno sviluppo se basta una guida | Proposta — da valutare |
 | [REPS-UX-062](REPS-UX-062-verifica-coerenza-brochure-rispetto-archivio.md) | Verifica prima di ristampare una brochure già salvata: confronto dei campi effettivamente pubblicati con l'archivio corrente e, solo eventualmente, con una baseline confermata; nessuna riscrittura silenziosa del PDF storico | P2 se ristampe con errori ricorrenti; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-UX-063](REPS-UX-063-riepilogo-economico-prima-registrazione-vendita.md) | Riepilogo **prima** di registrare una vendita singola: lordo, tasse, spedizione, netto gestionale e quote congelabili, distinti da incassi e utile fiscale | P2 se utile nei test; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+| [REPS-UX-064](REPS-UX-064-revisione-guidata-metadati-opere-esistenti.md) | Revisione manuale di tecnica/supporto per una selezione esplicita di **opere già catalogate**: confronto prima/dopo per ogni record, conferma transazionale e protezione contro schede obsolete, senza alterare vendita, certificati, prezzi o file | P2 solo se bisogno ripetitivo dimostrato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+## Cinquantasettesima ricognizione — 23 novembre 2026 — REPS-UX-064
+
+- **[REPS-UX-064 — Revisione guidata dei metadati di più opere già esistenti](REPS-UX-064-revisione-guidata-metadati-opere-esistenti.md).** Riletti su `main` i percorsi di catalogazione e modifica in `src/app/app.component.ts`/`.html`, `src-tauri/src/commands.rs`, `docs/ARCHIVE-EDIT-SAFETY.md`, il README e la documentazione MVP. Il modulo attuale aggiorna **una scheda alla volta**; una correzione ripetuta di *tecnica* o *supporto* su opere già consolidate resta manuale per ciascuna scheda. Esigenza plausibile ma **non dimostrata da richieste utenti**.
+- **Confini e anti-doppioni:** UX-018 riguarda nuove opere/bozze, UX-055 individua possibili doppioni, UX-062 verifica ristampe di brochure, UX-005/011/031/048 modellano relazioni, edizioni, autorialità e codici storici. Nel [filone tecnico — PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), TECH-019 riguarda import da tabelle, TECH-030 vocabolari, TECH-010 revisioni e TECH-033 prevenzione dei salvataggi obsoleti. Qui si analizza **solo una selezione controllata di record già presenti**, con differenze per riga e un unico campo per volta. Nessun file tecnico modificato.
+- **Condizione decisiva:** una preview non può essere applicata con normali salvataggi di moduli completi senza bloccare sovrascritture di dati diventati obsoleti. Da studiare una **transazione tutte-o-nessuna** con riconvalida delle versioni, eventuale riuso dei contratti TECH-033, e rifiuto di status/prezzi/quote/certificati/fotografie. Prima alternativa: editor singolo, filtri e checklist manuale. Osservare 3–5 professionisti prima di decidere se **P2** sia giustificata; altrimenti P3/nessuna implementazione.
+- **Esito:** **64 schede Gestione e UX**, tutte «Proposta — da valutare»; soltanto Markdown nella cartella autorizzata, PR #14 documentale in bozza e senza merge; nessuna approvazione, incarico, codice o workflow modificato.
 
 ## Cinquantaseiesima ricognizione — 23 novembre 2026 — REPS-UX-063
 
