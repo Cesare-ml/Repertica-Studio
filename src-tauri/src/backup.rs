@@ -110,20 +110,30 @@ fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
     std::io::copy(&mut input, &mut output).map_err(error)?;
     output.sync_all().map_err(error)
 }
-// Verify a cross-row financial invariant independently of the SQLite write triggers.
-// An exported database can have valid pages, hashes and foreign keys even if someone
-// disabled its triggers before adding excessive payment records. Never restore such
-// an archive into the live collection.
+// Validate each amount as well as the overall sale balance: a corrupt receipt
+// with a negative value can be hidden by other positive payments. Imported SQLite
+// databases can bypass CHECK constraints and triggers without breaking their pages.
 fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
-    let invalid: Option<(String, i64, i64)> = conn.query_row(
-        "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0)
+    let invalid: Option<(String, i64, i64, Option<i64>, Option<i64>)> = conn.query_row(
+        "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0),
+                MIN(r.amount_cents), MAX(r.amount_cents)
          FROM sales s LEFT JOIN sale_receipts r ON r.sale_id = s.id
          GROUP BY s.id
-         HAVING COALESCE(SUM(r.amount_cents), 0) > s.amount_cents
+         HAVING s.amount_cents <= 0
+            OR COALESCE(SUM(r.amount_cents), 0) NOT BETWEEN 0 AND s.amount_cents
+            OR MIN(r.amount_cents) <= 0
+            OR MAX(r.amount_cents) > 100000000000
          LIMIT 1",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?,
+                       row.get(3)?, row.get(4)?))
     ).optional().map_err(error)?;
-    if let Some((id, sale, received)) = invalid {
+    if let Some((id, sale, received, minimum, maximum)) = invalid {
+        if minimum.is_some_and(|v| v <= 0) || maximum.is_some_and(|v| v > 100_000_000_000) {
+            return Err(format!("Il backup contiene incassi con importi non validi per la vendita {id}"));
+        }
+        if sale <= 0 || received < 0 {
+            return Err(format!("Il backup contiene importi incoerenti per la vendita {id}"));
+        }
         return Err(format!(
             "Il backup contiene incassi superiori al valore della vendita {id} ({received} > {sale} centesimi)"
         ));
@@ -911,6 +921,73 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1);
         assert!(db.directory.join(DB_FILE).exists());
+    }
+
+    #[test]
+    fn rehashed_backup_rejects_invalid_receipt_amounts_without_touching_live_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        seed_receipt_evidence(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('second','sale','2026-11-22',400,'cash','now')", []).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // A rehashed snapshot with valid pages and foreign keys can still have
+        // invalid receipts; even a -50 receipt is masked by a valid +400.
+        for amount in [0_i64, -50, 100_000_000_001] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute_batch("DROP TRIGGER IF EXISTS sale_receipts_limit_update;
+                                        PRAGMA ignore_check_constraints=ON;").unwrap();
+                snapshot.execute("UPDATE sale_receipts SET amount_cents=?1 WHERE id='receipt'",
+                    params![amount]).unwrap();
+                snapshot.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok");
+                let fk_issues: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(fk_issues, 0);
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let error = inspect_backup_core(folder).unwrap_err();
+            assert!(error.contains("incassi con importi non validi"), "{amount}: {error}");
+            assert!(restore_backup_core(&db, folder).is_err());
+        }
+        {
+            let conn = db.conn.lock().unwrap();
+            let live_amount: i64 = conn.query_row(
+                "SELECT amount_cents FROM sale_receipts WHERE id='receipt'", [], |r| r.get(0)
+            ).unwrap();
+            let count: i64 = conn.query_row(
+                "SELECT count(*) FROM sale_receipts", [], |r| r.get(0)
+            ).unwrap();
+            assert_eq!(live_amount, 500, "failed restores must not alter live receipts");
+            assert_eq!(count, 2);
+        }
+        // The same validation rejects creation of a fresh, misleading backup.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+            conn.execute("UPDATE sale_receipts SET amount_cents=0 WHERE id='receipt'", []).unwrap();
+            conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+        }
+        let new_destination = tmp.path().join("new-backups");
+        fs::create_dir(&new_destination).unwrap();
+        let failure = create_backup_core(&db, &new_destination).unwrap_err();
+        assert!(failure.contains("incassi con importi non validi"), "{failure}");
+        assert_eq!(fs::read_dir(&new_destination).unwrap().count(), 0,
+            "invalid data must not leave a partial backup folder");
     }
 
     #[test]
