@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **71 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **72 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -80,6 +80,14 @@ Data ricognizione: **2026-11-23** (sessantottesima ricognizione). Stato uniforme
 | [REPS-TECH-069](REPS-TECH-069-protezione-originali-raw-sostituzione.md) | Salvaguardia dei RAW originari alla sostituzione: verifica della rimozione attuale, conferma/export preventivi e soltanto eventualmente cronologia locale recuperabile opt-in | P1–P2 per prevenzione solo se danno confermato; P2–P3 per versioni; altrimenti nessuno sviluppo | Proposta — da valutare |
 | [REPS-TECH-070](REPS-TECH-070-prestazioni-consultazione-archivio-liste-grandi.md) | Consultazione fluida degli archivi grandi: misurazione del costo dei getter di ricerca e del rendering della tabella opere, prima di valutare derivazioni stabili, paginazione accessibile o eventuali query Rust | P2 solo dopo misure e bisogno reale; altrimenti P3/QA o nessuno sviluppo | Proposta — da valutare |
 | [REPS-TECH-071](REPS-TECH-071-posta-limiti-temporali-esiti-invio.md) | Posta su reti instabili: scadenze IMAP effettive e distinzione fra accettazione SMTP, esito sconosciuto e copia Inviati; nessun reinvio automatico | P2 solo se blocchi riprodotti; P1–P2 se rischio concreto di reinvio; altrimenti P3/guida | Proposta — da valutare |
+| [REPS-TECH-072](REPS-TECH-072-coerenza-snapshot-singola-risposta-mcp.md) | Coerenza della singola risposta MCP durante modifiche concorrenti della GUI: stessa vista SQLite per più SELECT, senza snapshot fra chiamate o ampliamento dei dati esposti | P2 solo se discrepanza significativa riprodotta; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+## Sessantanovesima ricognizione — 23 novembre 2026 — REPS-TECH-072
+
+- **[REPS-TECH-072 — Coerenza della singola risposta MCP durante le modifiche dell'archivio](REPS-TECH-072-coerenza-snapshot-singola-risposta-mcp.md).** Riletti README, MVP, MCP, db.rs e mcp.rs su main; overview e get_artwork eseguono più SELECT senza una transazione di lettura esplicita per risposta. La GUI usa WAL e una connessione distinta. Possibile disallineamento fra aggregati o campi se una modifica viene committata tra le letture; nessun incidente o test concorrente eseguito.
+- **Perimetro minimo:** riproduzione deterministica prima di ogni intervento; valutare una query unica o breve transazione di sola lettura, rilasciata prima dell'output STDIO. Nessun nuovo tool, cache, migrazione, permesso, file o snapshot persistente. Misurare l'impatto sul WAL e sulle scritture.
+- **Anti-doppioni:** TECH-036 pagine tra chiamate, TECH-055 insieme di CSV, TECH-064 ripristino interprocesso, TECH-014/049 privacy. Confrontate 76 proposte Gestione e UX; PR #14 intatta.
+- **Priorità ipotetica:** P2 solo se il rischio è riprodotto e significativo; altrimenti P3/guida o nessuno sviluppo. 72 schede **«Proposta — da valutare»**, PR #16 in bozza, senza merge, solo Markdown.
 
 ## Sessantottesima ricognizione — 23 novembre 2026 — REPS-TECH-071
 
