@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **62 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **63 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -71,6 +71,15 @@ Aggiornato: **2026-11-23** (cinquantacinquesima ricognizione). Stato delle propo
 | [REPS-UX-060](REPS-UX-060-attivita-registrate-opera-vista-unificata.md) | Vista prudente delle attività **già registrate** per una singola opera (vendite, incassi, certificati, galleria): sola lettura, collegamenti ai registri autorevoli, nessuna storia o consegna inventata | P2 solo se la navigazione fra registri è un problema confermato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-UX-061](REPS-UX-061-revisione-dati-personali-collezionisti.md) | Revisione prudente dei dati personali dei collezionisti: campi attuali, riferimenti storici, copie ed eventuali richieste di rettifica, senza cancellazioni automatiche | P2 se validata; P3 o nessuno sviluppo se basta una guida | Proposta — da valutare |
 | [REPS-UX-062](REPS-UX-062-verifica-coerenza-brochure-rispetto-archivio.md) | Verifica prima di ristampare una brochure già salvata: confronto dei campi effettivamente pubblicati con l'archivio corrente e, solo eventualmente, con una baseline confermata; nessuna riscrittura silenziosa del PDF storico | P2 se ristampe con errori ricorrenti; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+| [REPS-UX-063](REPS-UX-063-riepilogo-economico-prima-registrazione-vendita.md) | Riepilogo **prima** di registrare una vendita singola: lordo, tasse, spedizione, netto gestionale e quote congelabili, distinti da incassi e utile fiscale | P2 se utile nei test; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Cinquantaseiesima ricognizione — 23 novembre 2026 — REPS-UX-063
+
+- **[REPS-UX-063 — Riepilogo economico prima della registrazione della vendita](REPS-UX-063-riepilogo-economico-prima-registrazione-vendita.md).** Esaminati su `main` `README.md`, `docs/ECONOMY-I18N.md`, `src/app/app.component.html`/`.ts`, `src-tauri/src/commands.rs` e `allocations.rs`: oggi le quote attive vengono congelate al momento della vendita e il modulo consente già tasse, spedizione, rate e incasso iniziale, ma non espone una scomposizione delle quote *prima* del salvataggio. La vendita comporta il passaggio dell'opera a `sold`; non è sempre irreversibile, ma può essere complicato annullarla quando esistono incassi registrati.
+- **Idea strettamente UX:** anticipare, senza modificare le formule, un riepilogo che separi lordo, tasse, spedizione, netto gestionale, quote sul venduto e incassi manualmente dichiarati. **Prima** provare un pannello informativo nel form corrente (nessun click aggiuntivo); solo se insufficiente valutare una conferma a due passi, in entrambe le vie di registrazione (da catalogo e da nuova opera). Il backend resta autorevole e impedisce snapshot inattuali.
+- **Anti-doppioni:** UX-017 (multiopera), UX-023 (listini), UX-024 (rate), UX-039 (quote su *incassi*), UX-059 (certificati), UX-050 (rendiconto post-vendita). Confrontate **62 schede UX precedenti** e **58 tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), senza alterare alcun loro file. Non si progettano commissioni nuove, fatture, servizi cloud, modifiche alle percentuali o nuovi registri.
+- **Prima validazione senza sviluppo:** simulare 4–6 registrazioni con dati fittizi, confrontare pannello e foglio Calc; verificare errori, comprensione delle quote e tempo richiesto. **P2 solo se un bisogno ricorrente è osservato**, altrimenti P3 o nessuna implementazione. Nessun test reale o feedback utente verificato.
+- **Perimetro:** una scheda e questo indice, solo Markdown in `docs/idee/gestione-e-ux/`; tutte **63 proposte «Proposta — da valutare»**, nessuna approvata o assegnata. PR #14 in bozza, senza merge e senza modificare codice, test, workflow, configurazioni, dipendenze o documenti del filone tecnico.
 
 ## Cinquantacinquesima ricognizione — 23 novembre 2026 — REPS-UX-062
 
