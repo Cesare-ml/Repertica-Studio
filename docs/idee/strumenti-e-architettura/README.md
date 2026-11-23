@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **64 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **65 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -73,6 +73,14 @@ Data ricognizione: **2026-11-23** (sessantunesima ricognizione). Stato uniforme:
 | [REPS-TECH-062](REPS-TECH-062-progresso-annullamento-sicuro-operazioni-locali.md) | Contratto comune per progresso reale e richiesta di annullamento nei punti sicuri di backup/ripristino/esportazioni, senza riscrivere pipeline o promettere recuperi automatici | P2 solo con attese problematiche confermate; altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-TECH-063](REPS-TECH-063-brochure-pdf-accessibili-lettura-assistita.md) | Brochure PDF per lettori assistivi: studio di tag semantici, ordine di lettura e alternative umane delle immagini; non equivale a Unicode, PDF/A o conformità PDF/UA dichiarata | P3; P2 solo dopo requisiti di destinatari reali e fattibilità dimostrata | Proposta — da valutare |
 | [REPS-TECH-064](REPS-TECH-064-coordinamento-processi-archivio-attivo.md) | Accesso concorrente di più processi allo stesso archivio: seconda GUI, lettori MCP, migrazione e ripristino con esclusività prudente; nessun server né collaborazione in rete | P1–P2 solo con rischio riproducibile; altrimenti P2–P3 o sola documentazione | Proposta — da valutare |
+| [REPS-TECH-065](REPS-TECH-065-round-trip-revisioni-fotografiche-editor-esterni.md) | Rientro manuale controllato nel Media Center di una fotografia elaborata con editor esterno, come nuova revisione non attiva; niente watchers, editor obbligatori o cambi automatici dei riferimenti | P3; P2 solo dopo validazione professionale | Proposta — da valutare |
+
+## Sessantaduesima ricognizione — 23 novembre 2026 — REPS-TECH-065
+
+- **[REPS-TECH-065 — Rientro controllato delle fotografie elaborate con editor esterni](REPS-TECH-065-round-trip-revisioni-fotografiche-editor-esterni.md).** Esaminati sul branch `main` README, MVP, portabilità, `media.rs` (revisioni, export, import, riferimenti condivisi) e `imaging.rs`. La libreria dispone già di editor non distruttivo, import e export; `import_core` registra un nuovo elemento, mentre non emerge nel perimetro esaminato un flusso per **aggiungere esplicitamente un file ritoccato in un editor esterno alla storia di revisioni della fotografia originale**. Non è un bug dimostrato né un'esigenza professionale ancora misurata.
+- **Perimetro proposto:** export già esistente → modifica con qualunque editor fuori da Repertica → scelta manuale file → preflight e confronto → aggiunta come **revisione non corrente**, lasciando invariati copertine, fotografie condivise, profili dei collezionisti e certificati. Eventuale promozione a revisione corrente solo come decisione separata dopo avviso sugli utilizzi; nessun watch automatico o servizio esterno.
+- **Anti-doppioni:** TECH-053 esporta la storia delle revisioni senza reimport, TECH-021 gestisce colore, TECH-024 IPTC/XMP, TECH-013 copie condivisibili, TECH-045 collegamento di foto a opere; UX-057 riguarda i file costitutivi delle opere digitali, non le fotografie documentarie. L'altra cartella non è stata modificata.
+- **Prima alternativa senza codice:** verificare con 4–6 professionisti se l'export seguito dall'import di una fotografia distinta, già disponibile, sia sufficiente. Solo se la relazione formale tra revisioni è indispensabile valutare la funzione. **Priorità P3 ipotetica**, P2 soltanto con casi ricorrenti confermati e fattibilità sicura. **65 schede**, tutte «Proposta — da valutare», nessuna approvazione, assegnazione, issue, implementazione o merge.
 
 ## Sessantunesima ricognizione — 23 novembre 2026 — REPS-TECH-064
 
