@@ -24,7 +24,7 @@ fn opt_text(v: Option<String>, max: usize) -> Result<Option<String>, String> {
 fn text(v: String, max: usize) -> Result<String,String> {
     opt_text(Some(v), max)?.ok_or_else(||"Required field is empty".to_string())
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct StudioSettings {
     pub artist_coefficient: f64,
     pub base_price_cm2_cents: i64,
@@ -70,15 +70,33 @@ pub fn get_studio_settings(db:State<'_,Database>) -> Result<StudioSettings,Strin
     let c=db.conn.lock().map_err(error)?;
     settings_tx(&c)
 }
-#[tauri::command]
-pub fn save_studio_settings(db:State<'_,Database>,mut input:StudioSettings)->Result<StudioSettings,String>{
+// Persist certificate identity, price parameters and allocation defaults together.
+// SQLite files imported from another application can contain triggers that ignore
+// updates or silently rewrite values. Check the exact stored row before committing.
+fn save_studio_settings_core(db: &Database, mut input: StudioSettings) -> Result<StudioSettings, String> {
     valid_settings(&input)?;
-    input.artist_name=crate::commands::clean(input.artist_name,240)?;
-    input.artist_alias=crate::commands::clean(input.artist_alias,240)?;
-    let c=db.conn.lock().map_err(error)?;
-    c.execute("UPDATE studio_settings SET artist_coefficient=?1,base_price_cm2_cents=?2,personal_bp=?3,activity_bp=?4,savings_bp=?5,treasury_start_date=?6,default_tax_bp=?7,ui_language=?8,artist_name=?9,artist_alias=?10 WHERE singleton=1",
-    params![input.artist_coefficient,input.base_price_cm2_cents,input.personal_bp,input.activity_bp,input.savings_bp,input.treasury_start_date,input.default_tax_bp,input.ui_language,input.artist_name,input.artist_alias]).map_err(error)?;
-    settings_tx(&c)
+    input.artist_name = crate::commands::clean(input.artist_name, 240)?;
+    input.artist_alias = crate::commands::clean(input.artist_alias, 240)?;
+    let mut conn = db.conn.lock().map_err(error)?;
+    let tx = conn.transaction().map_err(error)?;
+    let updated = tx.execute(
+        "UPDATE studio_settings SET artist_coefficient=?1,base_price_cm2_cents=?2,personal_bp=?3,activity_bp=?4,savings_bp=?5,treasury_start_date=?6,default_tax_bp=?7,ui_language=?8,artist_name=?9,artist_alias=?10 WHERE singleton=1",
+        params![input.artist_coefficient,input.base_price_cm2_cents,input.personal_bp,input.activity_bp,input.savings_bp,input.treasury_start_date,input.default_tax_bp,input.ui_language,input.artist_name,input.artist_alias]
+    ).map_err(error)?;
+    if updated != 1 {
+        return Err("SQLite did not save studio settings; reload and retry".into());
+    }
+    let saved = settings_tx(&tx)?;
+    if saved != input {
+        return Err("SQLite did not preserve studio settings; no changes were saved".into());
+    }
+    tx.commit().map_err(error)?;
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn save_studio_settings(db: State<'_, Database>, input: StudioSettings) -> Result<StudioSettings, String> {
+    save_studio_settings_core(&db, input)
 }
 
 pub fn attach_sale_finances(tx: &Transaction<'_>,sale_id: &str,gross:i64,taxes:i64,shipping:i64)->Result<(),String>{
@@ -394,6 +412,52 @@ mod tests{
         }
         assert_eq!(price_cents(Some(1e5),Some(1e5),100000,1.0,None,None),None,"absurd totals are refused");
     }
+    #[test]
+    fn ignored_studio_settings_write_is_reported_and_does_not_claim_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_owned()).unwrap();
+        let before = settings_tx(&db.conn.lock().unwrap()).unwrap();
+        let mut wanted = before.clone();
+        wanted.default_tax_bp = 850;
+        wanted.artist_name = Some("Autrice del certificato".into());
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER skip_studio_settings BEFORE UPDATE ON studio_settings
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        let message = save_studio_settings_core(&db, wanted.clone()).unwrap_err();
+        assert!(message.contains("did not save studio settings"), "{message}");
+        assert_eq!(settings_tx(&db.conn.lock().unwrap()).unwrap(), before);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER skip_studio_settings").unwrap();
+        let saved = save_studio_settings_core(&db, wanted.clone()).unwrap();
+        assert_eq!(saved, wanted);
+        assert_eq!(settings_tx(&db.conn.lock().unwrap()).unwrap(), wanted);
+    }
+
+    #[test]
+    fn tampered_certificate_identity_rolls_back_all_studio_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_owned()).unwrap();
+        let before = settings_tx(&db.conn.lock().unwrap()).unwrap();
+        let mut wanted = before.clone();
+        wanted.artist_name = Some("Nome certificante".into());
+        wanted.artist_alias = Some("  Firma artistica  ".into());
+        wanted.default_tax_bp = 1200;
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER change_studio_identity AFTER UPDATE ON studio_settings
+             BEGIN UPDATE studio_settings SET artist_alias='Sostituito'
+                   WHERE singleton=1; END;"
+        ).unwrap();
+        let message = save_studio_settings_core(&db, wanted.clone()).unwrap_err();
+        assert!(message.contains("did not preserve studio settings"), "{message}");
+        assert_eq!(settings_tx(&db.conn.lock().unwrap()).unwrap(), before,
+            "even unrelated tax and artist-name changes must be rolled back");
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER change_studio_identity").unwrap();
+        let saved = save_studio_settings_core(&db, wanted).unwrap();
+        assert_eq!(saved.artist_name.as_deref(), Some("Nome certificante"));
+        assert_eq!(saved.artist_alias.as_deref(), Some("Firma artistica"));
+        assert_eq!(saved.default_tax_bp, 1200);
+    }
+
     #[test]
     fn settings_validate_exact_percentages(){
         let good=StudioSettings{artist_coefficient:1.0,base_price_cm2_cents:16,personal_bp:3334,activity_bp:3333,savings_bp:3333,
