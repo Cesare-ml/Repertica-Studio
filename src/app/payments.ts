@@ -33,15 +33,27 @@ export function emptyPayment(today: string): PaymentDraft {
     count: 3, first_due: today, installments: [] };
 }
 
+/** Enforce SQLite's sale/payment ceiling before sending values to Rust. */
 export function toCents(value: number | null | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.round((value + Number.EPSILON) * 100) : NaN;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return NaN;
+  const cents = Math.round((value + Number.EPSILON) * 100);
+  return Number.isSafeInteger(cents) && Math.abs(cents) <= 100_000_000_000 ? cents : NaN;
 }
 
 export function installmentsTotalCents(rows: InstallmentRow[]): number {
   return rows.reduce((sum, row) => sum + (Number.isFinite(toCents(row.amount_eur)) ? toCents(row.amount_eur) : 0), 0);
 }
 
-const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+/** Match the native canonical YYYY-MM-DD check; never normalize impossible dates. */
+const validDate = (value: string): boolean => {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!parts) return false;
+  const [year, month, day] = parts.slice(1).map(Number);
+  const date = new Date(0);
+  date.setUTCHours(12, 0, 0, 0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
 
 /** Rows ready for the native plan command, or an error (an interface message key). */
 export function installmentRows(rows: InstallmentRow[], saleCents: number):
@@ -72,8 +84,11 @@ export function paymentToInput(draft: PaymentDraft, saleCents: number): PaymentR
   }
   const plan = installmentRows(draft.installments, saleCents);
   if (!plan.ok) return plan;
-  const advance = toCents(draft.received_eur);
-  if (Number.isFinite(advance) && advance !== 0 && !(advance > 0 && advance < saleCents)) {
+  // A blank optional advance means no receipt. A supplied non-finite or out-of-range
+  // amount must never silently turn into a missing receipt.
+  const advance = draft.received_eur == null ? 0 : toCents(draft.received_eur);
+  if (!Number.isFinite(advance) || (draft.received_eur != null && draft.received_eur < 0) ||
+      (advance !== 0 && !(advance > 0 && advance < saleCents))) {
     return { ok: false, error: 'Acconto non valido' };
   }
   return { ok: true, input: { mode: 'INSTALLMENTS', received_cents: advance > 0 ? advance : null, ...base, installments: plan.items } };
