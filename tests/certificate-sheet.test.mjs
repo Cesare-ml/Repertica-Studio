@@ -35,6 +35,17 @@ test('dates, sizes and values are written for the printed sheet', () => {
   assert.equal(localizedValue(null, 'en', english), '');
 });
 
+test('historical certificate dates never roll over to an invented day', () => {
+  assert.match(formatIssueDate('2028-02-29', 'it'), /29 febbraio 2028/);
+  assert.match(formatIssueDate('2028-02-29', 'en'), /29 February 2028/);
+  assert.match(formatIssueDate('2026-11-12T07:35:00Z', 'it'), /12 novembre 2026/);
+  for (const invalid of ['2026-02-29', '2026-04-31', '2026-13-01', '2026-00-15', '0000-12-01']) {
+    assert.equal(formatIssueDate(invalid, 'it'), invalid, invalid);
+    assert.equal(formatIssueDate(invalid, 'en'), invalid, invalid);
+  }
+  assert.equal(formatIssueDate('2026-04-31T10:00:00Z', 'it'), '2026-04-31');
+});
+
 test('the SHA-256 of the issued record is the standard one', async () => {
   assert.equal(await sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
 });

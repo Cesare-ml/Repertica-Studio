@@ -54,12 +54,24 @@ export function certificateTexts(language: string | null | undefined, artist: st
   };
 }
 
-/** "12 novembre 2026" / "12 November 2026"; an unreadable value is returned as it is. */
+/** "12 novembre 2026" / "12 November 2026"; never normalize a corrupt historical date. */
 export function formatIssueDate(value: string | null | undefined, language: string | null | undefined): string {
   if (!value) return '';
-  const date = new Date(`${String(value).slice(0, 10)}T12:00:00`);
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
-  return new Intl.DateTimeFormat(certificateTexts(language, '').locale, { day: '2-digit', month: 'long', year: 'numeric' }).format(date);
+  const original = String(value);
+  const raw = original.slice(0, 10);
+  const parts = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(original);
+  if (!parts) return raw;
+  const [year, month, day] = parts.slice(1).map(Number);
+  if (year === 0) return raw;
+  // Use UTC and an explicit calendar round-trip: JS Date silently rolls 31 April
+  // into May, which would print a different issue date on an immutable certificate.
+  const date = new Date(0);
+  date.setUTCHours(12, 0, 0, 0);
+  date.setUTCFullYear(year, month - 1, day);
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return raw;
+  return new Intl.DateTimeFormat(certificateTexts(language, '').locale, {
+    day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC',
+  }).format(date);
 }
 
 /** Technique/support as written on the work, in the certificate's language (bilingual: "Olio / Oil"). */
