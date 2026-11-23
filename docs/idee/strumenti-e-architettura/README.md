@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **72 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (settantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **73 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -81,6 +81,14 @@ Data ricognizione: **2026-11-23** (sessantanovesima ricognizione). Stato uniform
 | [REPS-TECH-070](REPS-TECH-070-prestazioni-consultazione-archivio-liste-grandi.md) | Consultazione fluida degli archivi grandi: misurazione del costo dei getter di ricerca e del rendering della tabella opere, prima di valutare derivazioni stabili, paginazione accessibile o eventuali query Rust | P2 solo dopo misure e bisogno reale; altrimenti P3/QA o nessuno sviluppo | Proposta — da valutare |
 | [REPS-TECH-071](REPS-TECH-071-posta-limiti-temporali-esiti-invio.md) | Posta su reti instabili: scadenze IMAP effettive e distinzione fra accettazione SMTP, esito sconosciuto e copia Inviati; nessun reinvio automatico | P2 solo se blocchi riprodotti; P1–P2 se rischio concreto di reinvio; altrimenti P3/guida | Proposta — da valutare |
 | [REPS-TECH-072](REPS-TECH-072-coerenza-snapshot-singola-risposta-mcp.md) | Coerenza della singola risposta MCP durante modifiche concorrenti della GUI: stessa vista SQLite per più SELECT, senza snapshot fra chiamate o ampliamento dei dati esposti | P2 solo se discrepanza significativa riprodotta; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+| [REPS-TECH-073](REPS-TECH-073-scansione-somiglianza-fotografica-scalabile.md) | Ricerca fotografica già esistente: copertura dichiarata, misurazione dei confronti quadratici e contenimento del volume delle coppie dHash, senza deduplica automatica | P2 se bisogno misurato; altrimenti P3/QA o nessuno sviluppo | Proposta — da valutare |
+
+## Settantesima ricognizione — 23 novembre 2026 — REPS-TECH-073
+
+- **[REPS-TECH-073 — Ricerca di immagini simili: scansione scalabile e copertura dichiarata](REPS-TECH-073-scansione-somiglianza-fotografica-scalabile.md).** Riletti su main README, MVP, media.rs e media-center.component.ts. Il confronto dHash esistente enumera tutte le coppie e accumula i risultati completi; errori di lettura/calcolo saltano immagini senza contatore restituito alla UI. Nessun incidente o rallentamento reale accertato; conteggio teorico e studio di benchmark, non prove eseguite.
+- **Ipotesi minima:** distinguere esiti completi e parziali, misurare CPU/RAM/IPC; solo se necessario valutare coppie compatte, pagine con limiti dichiarati e indice Hamming esatto in memoria. Nessuna modifica a originali, certificati, soglia o deduplica automatica.
+- **Anti-doppioni:** TECH-003 integrità, TECH-005 miniature, TECH-062 progresso, TECH-070 liste opere, UX-055 schede-opera duplicate. Consultati gli indici di 72 TECH e 77 UX; PR #14 intatta.
+- **Priorità ipotetica:** P2 solo se bisogno verificato; altrimenti P3/QA o nessuna funzione. 73 proposte **«Proposta — da valutare»**, PR #16 in bozza, senza merge, solo Markdown.
 
 ## Sessantanovesima ricognizione — 23 novembre 2026 — REPS-TECH-072
 
