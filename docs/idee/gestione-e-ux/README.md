@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **72 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **73 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -83,6 +83,15 @@ Aggiornato: **2026-11-23** (sessantacinquesima ricognizione). Stato delle propos
 | [REPS-UX-070](REPS-UX-070-avviso-possibili-incassi-duplicati.md) | Avviso **non bloccante** prima di registrare un possibile incasso già dichiarato della stessa vendita; indizi spiegabili senza confondere coincidenze con pagamenti verificati | P2 se errori ricorrenti osservati, altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-071](REPS-UX-071-ritorno-contesto-consultazione-archivio.md) | Ritorno contestuale temporaneo dalla scheda del collezionista alle opere filtrate (e viceversa), senza cancellare query e ordine del percorso originario né salvare viste persistenti | P2 solo se la perdita di contesto è verificata; altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-072](REPS-UX-072-categorie-spesa-personalizzabili-storico.md) | Categorie delle spese personalizzabili, con etichette stabili, archiviazione senza perdere lo storico e compatibilità dei codici CSV; nessun budget né riclassificazione automatica | P2 se validata; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+| [REPS-UX-073](REPS-UX-073-confronto-anni-periodi-economici-omogenei.md) | Confronto economico **anno su anno su mesi omogenei**: vendite, spese e incassi dichiarati distinti, senza percentuali ingannevoli su basi zero o periodi incompleti e senza nuove registrazioni | P2 solo dopo verifica del bisogno; altrimenti P3/Calc/nessuna funzione | Proposta — da valutare |
+
+## Sessantaseiesima ricognizione — 23 novembre 2026 — REPS-UX-073
+
+- **[REPS-UX-073 — Confronto tra anni su periodi economici omogenei](REPS-UX-073-confronto-anni-periodi-economici-omogenei.md).** Esaminati `main` (`README.md`, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `docs/SALE-RECEIPTS.md`, `src/app/app.component.html/ts`, `src/app/models.ts`, `src-tauri/src/finance.rs` e `receipts.rs`). Economia mostra oggi un **solo anno per volta** con dodici mesi di venduto, spese, margine e incassi dichiarati distinti. La proposta studia un confronto **2026 gennaio–ottobre vs 2025 gennaio–ottobre** (a novembre 2026), non «anno corrente parziale vs anno precedente completo»; due anni conclusi possono usare dodici mesi completi. Nessuna analisi esterna o incidente dimostrato: l'esigenza professionale va validata.
+- **Semantica e prudenza:** vendita per data `sold_at`, spesa per `expense_date`, incasso per `received_at`, senza sommare insieme le tre misure. Se il denominatore è zero/negativo o `treasury_start_date` rende i dati disomogenei, niente crescita percentuale ingannevole. L'overview degli incassi ha criteri propri: non presumerne la stessa soglia temporale del prospetto vendite/spese. Nella fase minima, solo lettura, niente database aggiuntivo, nessun export obbligatorio o conclusione fiscale.
+- **Anti-doppioni:** UX-050 riguarda i rendiconti **datati/snapshot**; UX-032/047 budget, UX-034 analisi per attributi dell'opera, UX-039 ripartizione incassi, UX-027 valute e UX-030 quadratura bancaria. Confrontato l'indice tecnico della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), senza modificarne i file. **P2 solo dopo prove con professionisti**, altrimenti P3, semplice foglio Calc o nessuna nuova funzione.
+- **Perimetro:** esclusivamente nuova scheda e questo indice Markdown in `docs/idee/gestione-e-ux/`; **73 idee tutte «Proposta — da valutare»**, non approvate, assegnate o autorizzate allo sviluppo. PR #14 documentale in bozza, senza merge.
 
 ## Sessantacinquesima ricognizione — 23 novembre 2026 — REPS-UX-072
 
