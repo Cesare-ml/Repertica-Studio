@@ -193,9 +193,14 @@ pub fn status(conn: &Connection, now: NaiveDateTime) -> Result<ScheduleStatus, S
 
 pub fn save_core(db: &Database, input: ScheduleInput, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
     validate(&input)?;
-    let conn = db.conn.lock().map_err(err)?;
+    let mut conn = db.conn.lock().map_err(err)?;
     let destination = input.destination.as_deref().map(str::trim).filter(|d| !d.is_empty()).map(String::from);
-    conn.execute(
+    // An imported SQLite archive may contain triggers that ignore an UPDATE or
+    // silently rewrite its values. A false success could leave automatic backups
+    // disabled, or send copies to the wrong external disk with the wrong quota.
+    // Read back every user-selected field before making this change permanent.
+    let tx = conn.transaction().map_err(err)?;
+    let updated = tx.execute(
         "UPDATE backup_schedule SET enabled=?1,frequency=?2,time_of_day=?3,weekday=?4,day_of_month=?5,
             destination=?6,keep_last=?7,
             enabled_at=CASE WHEN ?1=1 AND (enabled=0 OR enabled_at IS NULL) THEN ?8 ELSE enabled_at END,
@@ -207,10 +212,22 @@ pub fn save_core(db: &Database, input: ScheduleInput, now: NaiveDateTime) -> Res
             last_message=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_message END,
             last_directory=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_directory END
          WHERE singleton=1",
-        params![i64::from(input.enabled), input.frequency, input.time_of_day, input.weekday, input.day_of_month,
-            destination, input.keep_last, now.format(STAMP).to_string()],
+        params![i64::from(input.enabled), &input.frequency, &input.time_of_day, input.weekday, input.day_of_month,
+            &destination, input.keep_last, now.format(STAMP).to_string()],
     ).map_err(err)?;
-    status(&conn, now)
+    if updated != 1 {
+        return Err("SQLite non ha salvato la configurazione dei backup; controlla l'archivio".into());
+    }
+    let saved = status(&tx, now)?;
+    if saved.enabled != input.enabled || saved.frequency != input.frequency
+        || saved.time_of_day != input.time_of_day || saved.weekday != input.weekday
+        || saved.day_of_month != input.day_of_month || saved.destination != destination
+        || saved.keep_last != input.keep_last
+    {
+        return Err("SQLite ha alterato la configurazione dei backup: modifica annullata".into());
+    }
+    tx.commit().map_err(err)?;
+    Ok(saved)
 }
 
 /// Keep only the newest `keep` automatic backups **in this destination**.
@@ -526,6 +543,45 @@ mod tests {
         assert!(!save_core(&db, off, now).unwrap().enabled);
         let saved = save_core(&db, good, now).unwrap();
         assert!(saved.enabled);
+        assert_eq!(saved.next_run_at.as_deref(), Some("2026-11-22T09:00:00"));
+    }
+
+    #[test]
+    fn backup_schedule_save_rolls_back_ignored_and_rewritten_sqlite_updates() {
+        let (_dir, db, destination) = setup();
+        let now = at("2026-11-21 10:00");
+        let expected = input(&destination, 2);
+        {
+            let conn = db.conn.lock().unwrap();
+            // A third-party SQLite import can leave triggers behind. IGNORE does
+            // not raise an SQL error; without a row-count check, the UI lies.
+            conn.execute_batch("CREATE TRIGGER ignore_backup_schedule BEFORE UPDATE ON backup_schedule
+                BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+        let rejected = save_core(&db, input(&destination, 2), now).unwrap_err();
+        assert!(rejected.contains("SQLite"), "{rejected}");
+        {
+            let conn = db.conn.lock().unwrap();
+            assert!(!status(&conn, now).unwrap().enabled);
+            conn.execute_batch("DROP TRIGGER ignore_backup_schedule;").unwrap();
+            // AFTER triggers can change a valid destination and retention limit
+            // while reporting a successful update of the singleton row.
+            conn.execute_batch("CREATE TRIGGER rewrite_backup_schedule AFTER UPDATE ON backup_schedule
+                BEGIN UPDATE backup_schedule SET destination='/wrong/external/disk',keep_last=365 WHERE singleton=1; END;").unwrap();
+        }
+        let rejected = save_core(&db, input(&destination, 2), now).unwrap_err();
+        assert!(rejected.contains("alterato"), "{rejected}");
+        {
+            let conn = db.conn.lock().unwrap();
+            let unchanged = status(&conn, now).unwrap();
+            assert!(!unchanged.enabled && unchanged.destination.is_none());
+            assert_eq!(unchanged.keep_last, 0, "rollback must restore retention too");
+            conn.execute_batch("DROP TRIGGER rewrite_backup_schedule;").unwrap();
+        }
+        let saved = save_core(&db, expected, now).unwrap();
+        assert!(saved.enabled);
+        assert_eq!(saved.destination.as_deref(), Some(destination.to_str().unwrap()));
+        assert_eq!(saved.keep_last, 2);
         assert_eq!(saved.next_run_at.as_deref(), Some("2026-11-22T09:00:00"));
     }
 
