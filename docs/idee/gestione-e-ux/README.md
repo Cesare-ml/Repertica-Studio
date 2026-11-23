@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **57 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **58 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -66,6 +66,14 @@ Aggiornato: **2026-11-23** (cinquantesima ricognizione). Stato delle proposte: *
 | [REPS-UX-055](REPS-UX-055-revisione-possibili-doppioni-schede-opera.md) | Revisione volontaria di possibili schede-opera duplicate con indizi spiegabili e confronto, senza fusione né modifiche ai record | P2 se validata; P3 o nessuno sviluppo se bastano ricerca e CSV | Proposta — da valutare |
 | [REPS-UX-056](REPS-UX-056-indirizzi-multipli-contatti-destinazioni.md) | Indirizzi plurimi di contatti già noti, usi e destinazioni **dichiarati**, conferma prima di un eventuale impiego e compatibilità con indirizzo legacy | P2 se validata; P3 o nessuno sviluppo se bastano note/due campi | Proposta — da valutare |
 | [REPS-UX-057](REPS-UX-057-opere-digitali-file-master-istruzioni-presentazione.md) | Opere digitali: distinzione fra master costitutivi, versioni espositive e fotografie documentali; requisiti di presentazione dichiarati e portabilità senza promesse di riproducibilità | P3 generale; P2 solo con domanda specialistica verificata | Proposta — da valutare |
+| [REPS-UX-058](REPS-UX-058-distinta-imballaggio-trasferimenti-multiopera.md) | Distinta di imballaggio locale per gruppi di opere e colli in trasferimenti temporanei, con assegnazioni dichiarate, revisione e stampa prudente senza generare movimentazioni o consegne | P2 se bisogno reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+
+## Cinquantunesima ricognizione — 23 novembre 2026 — REPS-UX-058
+
+- **[REPS-UX-058 — Distinta di imballaggio per trasferimenti temporanei di più opere](REPS-UX-058-distinta-imballaggio-trasferimenti-multiopera.md):** riletti su `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `docs/BROCHURES-OFFLINE.md`, `src/app/models.ts` e `src/app/archive-filters.ts`. Confrontate **57 schede UX** precedenti e le **53 proposte tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). Le opere hanno identificativi stabili, ma i CSV integrali e le brochure non descrivono l'assegnazione concreta di più opere a più colli per una singola partenza temporanea.
+- **Confine per evitare doppioni:** UX-001 registra *movimenti fisici*, UX-009 gestisce *partecipazioni a mostre*, UX-046 *consegne post-vendita*, UX-022 *parti costitutive dell'opera* e UX-025 *istruzioni permanenti di allestimento*. Questa proposta si limita a **distinta di preparazione e contenuto dichiarato di casse/collo per un lotto**; «pronto/verificato» non significa consegnato, venduto, assicurato o trasportato.
+- **Prima verifica senza sviluppo:** esportare opere in CSV e produrre 3–5 distinte in LibreOffice Calc per individuare se la gestione dei colli ricorre davvero. Solo se una stampa dedicata evita errori/duplicazioni, valutare fase minima (selezione opere, colli, assegnazione, anteprima); **P2 condizionata**, altrimenti **P3 o nessuna nuova funzione**. Non sono stati svolti test con professionisti.
+- **Esito:** **58 proposte Gestione e UX**, tutte «Proposta — da valutare»; solo scheda e indice Markdown nella cartella autorizzata. [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) rimane in bozza, senza merge, approvazioni né sviluppo. Nessun file del filone tecnico è stato modificato.
 
 ## Cinquantesima ricognizione — 23 novembre 2026 — REPS-UX-057
 
