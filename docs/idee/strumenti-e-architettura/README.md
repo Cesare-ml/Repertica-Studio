@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **57 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **58 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -65,6 +65,14 @@ Data ricognizione: **2026-11-23** (cinquantaquattresima ricognizione). Stato uni
 | [REPS-TECH-056](REPS-TECH-056-autenticazione-oauth2-posta-facoltativa.md) | OAuth 2.0 **facoltativo** per autenticarsi alle caselle IMAP/SMTP esistenti, senza account Repertica: browser OS/PKCE, token solo in portachiavi e valutazione preventiva di scope e costi di verifica dei provider | P2 condizionata; P1–P2 solo se blocchi utenti verificati; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 
 | [REPS-TECH-057](REPS-TECH-057-contratto-schemi-csv-dizionario-dati.md) | Contratto versionato e dizionario leggibile anche da strumenti esterni per i dodici registri CSV esistenti: tipi, unità, privacy, relazioni, limiti e compatibilità delle colonne, senza cambiare gli export | P2 solo con consumer ricorrenti verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+| [REPS-TECH-058](REPS-TECH-058-ricognizione-post-ripristino-nuovo-computer.md) | Ricognizione dopo ripristino su un altro computer: destinazione backup assoluta, credenziali posta nel keyring OS, collegamenti MCP esterni e preferenze WebView, senza cambiare archivio né configurazioni automaticamente | P2 solo se bisogno ricorrente; altrimenti P3 o sola guida | Proposta — da valutare |
+
+## Cinquantacinquesima ricognizione — 23 novembre 2026 — REPS-TECH-058
+
+- **[REPS-TECH-058 — Ricognizione post-ripristino su un nuovo computer](REPS-TECH-058-ricognizione-post-ripristino-nuovo-computer.md).** Verificati su `main` backup/ripristino, `backup_schedule` e `auto_backup.rs`, configurazione posta e portachiavi OS, MCP locale e file esterni dei client, `localStorage` della WebView. Un backup valido rende recuperabili SQLite e media, **non** automaticamente le password della posta, i collegamenti degli assistenti o la pertinenza dei percorsi assoluti salvati nel database. Nessun malfunzionamento presso utenti è stato riprodotto.
+- **Confini:** non ripropone verifiche di backup (TECH-009/052), protezioni contro ripristino interrotto (TECH-037), upgrade/downgrade (TECH-042), edit sicuro delle configurazioni MCP (TECH-035) o OAuth posta (TECH-056). Consultate le **57 schede tecniche precedenti** e le **62 proposte Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14); nessun file dell'altro filone modificato.
+- **Prima alternativa senza codice:** guida «Cambiare computer in sicurezza» con checklist manuale; eventuale pannello soltanto read-only e non bloccante, dopo validazione con 3–5 studi. **P2 condizionata** al bisogno; altrimenti P3 o nessun nuovo sviluppo. Stato «Proposta — da valutare», nessuna approvazione/assegnazione/merge.
 
 ## Cinquantaquattresima ricognizione — 23 novembre 2026 — REPS-TECH-057
 
