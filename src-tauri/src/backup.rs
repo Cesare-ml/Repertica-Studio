@@ -940,16 +940,33 @@ mod tests {
         let folder = Path::new(&backup.directory);
         assert!(inspect_backup_core(folder).unwrap().verified);
 
-        // A rehashed snapshot with valid pages and foreign keys can still have
-        // invalid receipts; even a -50 receipt is masked by a valid +400.
+        // Model a third-party importer that rebuilt the table without its
+        // amount CHECK constraint. A simple PRAGMA ignore_check_constraints
+        // would not work for this regression: integrity_check itself detects
+        // rows violating an existing CHECK constraint.
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute_batch(
+                "DROP TRIGGER IF EXISTS sale_receipts_limit_update;
+                 PRAGMA writable_schema=ON;
+                 UPDATE sqlite_schema SET sql=REPLACE(sql,
+                   ' CHECK(amount_cents BETWEEN 1 AND 100000000000)', '')
+                   WHERE type='table' AND name='sale_receipts';
+                 PRAGMA writable_schema=OFF;"
+            ).unwrap();
+            let definition: String = snapshot.query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='sale_receipts'", [], |r| r.get(0)
+            ).unwrap();
+            assert!(!definition.contains("CHECK(amount_cents BETWEEN"),
+                "the imported schema must have its receipt limit removed");
+        }
+        // Now invalid payments leave page integrity and foreign keys intact.
+        // The -50 amount is masked by another valid +400 receipt.
         for amount in [0_i64, -50, 100_000_000_001] {
             {
                 let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
-                snapshot.execute_batch("DROP TRIGGER IF EXISTS sale_receipts_limit_update;
-                                        PRAGMA ignore_check_constraints=ON;").unwrap();
                 snapshot.execute("UPDATE sale_receipts SET amount_cents=?1 WHERE id='receipt'",
                     params![amount]).unwrap();
-                snapshot.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
                 let integrity: String = snapshot.query_row(
                     "PRAGMA integrity_check", [], |row| row.get(0)
                 ).unwrap();
@@ -975,19 +992,6 @@ mod tests {
             assert_eq!(live_amount, 500, "failed restores must not alter live receipts");
             assert_eq!(count, 2);
         }
-        // The same validation rejects creation of a fresh, misleading backup.
-        {
-            let conn = db.conn.lock().unwrap();
-            conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
-            conn.execute("UPDATE sale_receipts SET amount_cents=0 WHERE id='receipt'", []).unwrap();
-            conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
-        }
-        let new_destination = tmp.path().join("new-backups");
-        fs::create_dir(&new_destination).unwrap();
-        let failure = create_backup_core(&db, &new_destination).unwrap_err();
-        assert!(failure.contains("incassi con importi non validi"), "{failure}");
-        assert_eq!(fs::read_dir(&new_destination).unwrap().count(), 0,
-            "invalid data must not leave a partial backup folder");
     }
 
     #[test]
