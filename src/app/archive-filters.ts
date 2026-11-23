@@ -120,7 +120,7 @@ export function filterArtworks(
     (filters.status === 'all' || a.status === filters.status) &&
     (acquiredIds === null || acquiredIds.has(a.id)) &&
     matchesTerms(terms, [a.title, a.code, a.year, a.technique, a.support,
-      a.description, indexes.byArtwork[a.id]?.collector_name,
+      a.description, a.location, indexes.byArtwork[a.id]?.collector_name,
       ...artworkDimensionFields(a)]));
 
   if (filters.order === 'title') {
