@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **59 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **60 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -68,6 +68,14 @@ Data ricognizione: **2026-11-23** (cinquantaseiesima ricognizione). Stato unifor
 
 | [REPS-TECH-058](REPS-TECH-058-ricognizione-post-ripristino-nuovo-computer.md) | Ricognizione dopo ripristino su un altro computer: destinazione backup assoluta, credenziali posta nel keyring OS, collegamenti MCP esterni e preferenze WebView, senza cambiare archivio né configurazioni automaticamente | P2 solo se bisogno ricorrente; altrimenti P3 o sola guida | Proposta — da valutare |
 | [REPS-TECH-059](REPS-TECH-059-acquisizione-fotografie-smartphone-rete-locale.md) | Acquisizione temporanea e consapevole di fotografie da smartphone al Media Center via LAN, **solo se un pairing cifrato e sicuro è fattibile**; prima sperimentare USB/AirDrop/Quick Share + import multiplo già esistente | P3 iniziale, P2 solo con bisogno verificato e revisione sicurezza; altrimenti nessuna funzione | Proposta — da valutare |
+| [REPS-TECH-060](REPS-TECH-060-identita-destinazione-backup-programmati.md) | Backup automatici su USB/NAS: controllo facoltativo della destinazione effettiva quando il percorso resta uguale ma cambia supporto, senza confondere verifica del disco e integrità delle copie | P2 solo con scenario riproducibile e bisogno reale; P3 o guida altrimenti | Proposta — da valutare |
+
+## Cinquantasettesima ricognizione — 23 novembre 2026 — REPS-TECH-060
+
+- **[REPS-TECH-060 — Identità della destinazione dei backup automatici](REPS-TECH-060-identita-destinazione-backup-programmati.md).** Verificato su `main` in `auto_backup.rs` e `backup.rs`: i backup programmati usano una cartella assoluta, controllata per esistenza e canonicalizzazione, con copia temporanea, manifest SHA-256 e verifica completa già implementati. Questi controlli non distinguono un disco USB/NAS inatteso che riutilizzi lo stesso percorso. Studio di una **verifica facoltativa e trasparente dell'effettiva destinazione prima di scrivere**, con riconferma esplicita e senza creare marcature sulla cartella senza consenso. **Non è stato rilevato alcun incidente reale**.
+- **Limite fondamentale:** una lettera del disco o un file sentinella non danno da soli una garanzia contro supporti clonati/sostituzioni durante l'operazione; fattibilità OS per OS e rischio di false sicurezze devono essere verificati. Con destinazione non verificabile, preferire avviso/blocco prudente nella modalità protetta rispetto a una finta spunta verde. La funzione di backup/ripristino e i suoi hash restano invariati.
+- **Anti-doppioni:** TECH-009 verifica copie *già prodotte*, TECH-022 lo spazio disponibile, TECH-058 le impostazioni *dopo un trasferimento su altro computer*, TECH-006 i backup cifrati. Qui riguarda lo **stesso computer fra esecuzioni periodiche**. Consultato anche l'indice Gestione e UX fino a UX-064 ([PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14)), senza modificarlo.
+- **Prima validazione senza sviluppo:** ricreare con dati sintetici la riassegnazione di un mount/lettera e intervistare 3–5 studi che usano backup automatici su USB/NAS. **P2 condizionata**; P3 o guida se una funzione non è giustificata. Totale **60 schede**, tutte **«Proposta — da valutare»**, nessuna approvata o assegnata. PR #16 solo Markdown in bozza e senza merge.
 
 ## Cinquantaseiesima ricognizione — 23 novembre 2026 — REPS-TECH-059
 
