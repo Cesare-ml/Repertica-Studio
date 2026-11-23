@@ -344,12 +344,12 @@ fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
 
 fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
-    // Report the sales restriction only when a real sale exists. A disk error,
-    // database lock or an import-specific SQLite trigger must not be mislabeled
-    // as a sale relationship. This also protects imported archives where FK
-    // enforcement was disabled before the record was created.
-    let has_sales: bool = conn.query_row(
+    let mut conn = db.conn.lock().map_err(err)?;
+    // Keep both the sales preflight and the deletion in one SQLite transaction.
+    // A trigger in an imported database may ignore a DELETE or recreate its row;
+    // never remove photo files before the final database state is verified.
+    let tx = conn.transaction().map_err(err)?;
+    let has_sales: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM sales WHERE collector_id=?1)",
         params![id], |row| row.get(0),
     ).map_err(err)?;
@@ -357,16 +357,32 @@ fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
         return Err("Non puoi eliminare un collezionista collegato a una vendita".into());
     }
     let paths: Vec<String> = {
-        let mut statement = conn.prepare("SELECT image_path FROM collector_images WHERE collector_id=?1").map_err(err)?;
-        let paths = statement.query_map(params![id], |r| r.get(0)).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
-        paths
+        let mut statement = tx.prepare("SELECT image_path FROM collector_images WHERE collector_id=?1").map_err(err)?;
+        statement.query_map(params![id], |r| r.get(0))
+            .map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?
     };
-    let affected = conn.execute("DELETE FROM collectors WHERE id=?1", params![id]).map_err(err)?;
-    if affected == 0 { return Err("Collezionista non trovato".into()); }
+    let affected = tx.execute("DELETE FROM collectors WHERE id=?1", params![id]).map_err(err)?;
+    if affected != 1 {
+        return Err("Collezionista non trovato o non eliminato: verifica l'archivio SQLite".into());
+    }
+    let still_exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collectors WHERE id=?1)",
+        params![id], |row| row.get(0),
+    ).map_err(err)?;
+    let remaining_images: i64 = tx.query_row(
+        "SELECT count(*) FROM collector_images WHERE collector_id=?1",
+        params![id], |row| row.get(0),
+    ).map_err(err)?;
+    if still_exists || remaining_images != 0 {
+        // Rolling back restores both the collector and its cascaded image rows.
+        return Err("Collezionista non eliminato completamente: verifica l'archivio SQLite".into());
+    }
+    tx.commit().map_err(err)?;
+    // Cleanup only after a successful commit; never remove a file referenced
+    // elsewhere in the media catalogue.
     for path in paths { remove_media_file(&conn, db, &path); }
     Ok(())
 }
-
 #[tauri::command]
 pub fn list_collectors(db: State<'_, Database>) -> Result<Vec<Collector>, String> {
     let conn = db.conn.lock().map_err(err)?;
@@ -811,6 +827,47 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM collector_images", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM collectors", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    }
+
+    #[test]
+    fn collector_deletion_keeps_photos_when_imported_triggers_ignore_or_undo_it() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        let photo = add_image_core(
+            &db, &collector.id, &picture(dir.path(), "collector.jpg", 1), "PHOTO",
+        ).unwrap();
+        let stored = db.directory.join(&photo.image_path);
+
+        // BEFORE DELETE RAISE(IGNORE) returns Ok(0) instead of an SQL error.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_collector_delete BEFORE DELETE ON collectors
+             BEGIN SELECT RAISE(IGNORE); END;",
+        ).unwrap();
+        let failure = delete_collector_core(&db, &collector.id).unwrap_err();
+        assert!(failure.contains("non eliminato"), "{failure}");
+        assert!(stored.is_file());
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, 1);
+        db.conn.lock().unwrap().execute_batch(
+            "DROP TRIGGER ignore_collector_delete;
+             CREATE TRIGGER restore_collector_after_delete AFTER DELETE ON collectors
+             BEGIN INSERT INTO collectors(id,name,created_at,updated_at)
+                  VALUES(OLD.id,OLD.name,OLD.created_at,OLD.updated_at); END;",
+        ).unwrap();
+
+        // SQLite reports one deleted row, but this trigger resurrects the
+        // collector after ON DELETE CASCADE has already removed its photos.
+        // Verification must roll the entire delete back, including cascade.
+        let failure = delete_collector_core(&db, &collector.id).unwrap_err();
+        assert!(failure.contains("non eliminato completamente"), "{failure}");
+        assert!(stored.is_file(), "failed delete cannot remove the real photograph");
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, 1);
+        db.conn.lock().unwrap().execute_batch(
+            "DROP TRIGGER restore_collector_after_delete",
+        ).unwrap();
+
+        delete_collector_core(&db, &collector.id).unwrap();
+        assert!(!stored.exists(), "successful deletion cleans unreferenced media");
+        assert!(by_id(&db.conn.lock().unwrap(), &collector.id).is_err());
     }
 
     #[cfg(unix)]
