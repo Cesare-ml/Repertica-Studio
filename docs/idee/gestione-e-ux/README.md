@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **65 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **66 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -75,6 +75,15 @@ Aggiornato: **2026-11-23** (cinquantottesima ricognizione). Stato delle proposte
 
 | [REPS-UX-064](REPS-UX-064-revisione-guidata-metadati-opere-esistenti.md) | Revisione manuale di tecnica/supporto per una selezione esplicita di **opere già catalogate**: confronto prima/dopo per ogni record, conferma transazionale e protezione contro schede obsolete, senza alterare vendita, certificati, prezzi o file | P2 solo se bisogno ripetitivo dimostrato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-UX-065](REPS-UX-065-anteprima-impatto-tariffa-coefficiente-catalogo.md) | Anteprima **non distruttiva** dell'effetto di tariffa/cm² e coefficiente artista sui prezzi suggeriti delle opere reali: prima/dopo e cause delle esclusioni, senza nuovi listini, vendite o modifiche massive | P2 se utilità osservata; P3/nessuna funzione se bastano esempi | Proposta — da valutare |
+
+| [REPS-UX-066](REPS-UX-066-servizi-esterni-lavorazioni-opere.md) | Lavorazioni commissionate **dallo studio** a corniciai, stampatori e fonderie: richiesta, scadenza ed esito dichiarati per opera, distinti da spese, movimenti fisici e incarichi ricevuti | P2 solo con casi ricorrenti verificati; altrimenti P3/checklist/nessuna funzione | Proposta — da valutare |
+
+## Cinquantanovesima ricognizione — 23 novembre 2026 — REPS-UX-066
+
+- **[REPS-UX-066 — Lavorazioni affidate a laboratori esterni](REPS-UX-066-servizi-esterni-lavorazioni-opere.md).** Riletti su `main` `README.md`, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `src-tauri/src/models.rs`, `db.rs` e `src/app/models.ts`. Il gestionale distingue opera, stato commerciale, spese per fornitore e attributo `framed`; non emerge dai percorsi verificati un flusso dedicato a **incarichi che lo studio affida a un laboratorio** con lavori aperti e scadenze. Esigenza plausibile, **non richiesta documentata di utenti**.
+- **Perimetro:** incarichi manuali e opzionali collegati all'UUID di un'opera, con fornitore testuale, data prevista e conclusione dichiarata. Nessuna spesa, pagamento, consegna fisica, cambiamento di stato commerciale, `framed`, certificato o email generati dall'atto di registrazione. Complessità media per registro leggero, medio-alta per integrazioni. **Prima opzione:** checklist locale senza nuove tabelle.
+- **Anti-doppioni:** UX-006 riguarda gli incarichi **ricevuti dall'artista**; UX-003 l'attribuzione di costi; UX-014 la rubrica dei fornitori; UX-001 i movimenti e la custodia; UX-004 la conservazione; UX-026 il diario di lavorazione; UX-046 la consegna all'acquirente. Confrontate le **65 schede UX** precedenti e le **61 proposte TECH** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), non modificate. Come riferimento metodologico esterno consultati [Object exit](https://collectionstrust.org.uk/spectrum/primary-procedures/object-exit-spectrum-5-0-primary-procedures/) e [Collections care and conservation](https://collectionstrust.org.uk/spectrum/procedures/collections-care-and-conservation-spectrum-5-0/) di Collections Trust: non si propone certificazione di conformità museale.
+- **Decisione lasciata al proprietario:** verificare 3–5 casi di corniciai, stampatori, fonderie e gallerie prima di qualsiasi priorità P2; altrimenti P3 o nessuna funzione. **66 schede**, tutte «Proposta — da valutare»; nessuna approvazione, incarico, codice o merge. Aggiornati soltanto file Markdown del filone `docs/idee/gestione-e-ux/`.
 
 ## Cinquantottesima ricognizione — 23 novembre 2026 — REPS-UX-065
 
