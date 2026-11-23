@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (settantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **77 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (settantunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **78 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -91,6 +91,14 @@ Aggiornato: **2026-11-23** (settantesima ricognizione). Stato delle proposte: **
 | [REPS-UX-075](REPS-UX-075-caratteristiche-opera-non-verificate.md) | Distinguere caratteristiche dell'opera non verificate da assenze dichiarate (firma, vernice finale, cornice): prima chiarimento dei booleani legacy, eventuali tre stati solo se necessario | P2 se ambiguità dimostrata; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-UX-076](REPS-UX-076-consultazione-certificati-dati-storici.md) | Ritrovare certificati già emessi per seriale e titolo/codice storico, distinguendo i valori correnti; sola consultazione senza nuovi documenti | P2 solo se bisogno dimostrato; altrimenti P3/CSV/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-077](REPS-UX-077-consultazione-spese-fornitore-perimetro.md) | Ritrovare acquisti per fornitore/descrizione e distinguere le spese integrali da quelle comprese nel riepilogo annuale e nella soglia di tesoreria; filtri temporanei, nessuna nuova registrazione | P2 se bisogno verificato; altrimenti P3/sola etichetta/nessuna funzione | Proposta — da valutare |
+| [REPS-UX-078](REPS-UX-078-riepilogo-incassi-per-collezionista.md) | Riepilogo privato per collezionista delle vendite registrate, incassi dichiarati e residui, aggregati solo se completi e coerenti; nessun giudizio creditizio | P2 condizionata; P3/nessuna funzione altrimenti | Proposta — da valutare |
+
+## Settantunesima ricognizione — 23 novembre 2026 — REPS-UX-078
+
+- **[REPS-UX-078 — Riepilogo privato delle vendite e degli incassi per collezionista](REPS-UX-078-riepilogo-incassi-per-collezionista.md).** Riletti main, template, indici vendite, modelli e SALE-RECEIPTS. L'espansione dei contatti mostra opere e date; le tre cifre sono già disponibili per singola vendita, ma non per contatto. Nessun bisogno o errore osservato direttamente.
+- **Ipotesi minima:** elenco privato su richiesta, con eventuale totale storico per UUID solo se tutti i saldi sono disponibili e coerenti; non usare fallback zero. Nessuna scadenza presunta, nuovo incasso, export o giudizio sul cliente.
+- **Anti-doppioni:** UX-014/024/060/061/070/071/073 e TECH-008/025/055/072. Consultate 77 UX e 73 TECH, PR #16 intatta.
+- **Priorità:** P2 solo dopo validazione con professionisti; altrimenti P3/CSV/nessuna funzione. 78 proposte «Proposta — da valutare», nessuna approvazione o merge.
 
 ## Settantesima ricognizione — 23 novembre 2026 — REPS-UX-077
 
