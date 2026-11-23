@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **58 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **59 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -67,6 +67,13 @@ Data ricognizione: **2026-11-23** (cinquantacinquesima ricognizione). Stato unif
 | [REPS-TECH-057](REPS-TECH-057-contratto-schemi-csv-dizionario-dati.md) | Contratto versionato e dizionario leggibile anche da strumenti esterni per i dodici registri CSV esistenti: tipi, unità, privacy, relazioni, limiti e compatibilità delle colonne, senza cambiare gli export | P2 solo con consumer ricorrenti verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
 
 | [REPS-TECH-058](REPS-TECH-058-ricognizione-post-ripristino-nuovo-computer.md) | Ricognizione dopo ripristino su un altro computer: destinazione backup assoluta, credenziali posta nel keyring OS, collegamenti MCP esterni e preferenze WebView, senza cambiare archivio né configurazioni automaticamente | P2 solo se bisogno ricorrente; altrimenti P3 o sola guida | Proposta — da valutare |
+| [REPS-TECH-059](REPS-TECH-059-acquisizione-fotografie-smartphone-rete-locale.md) | Acquisizione temporanea e consapevole di fotografie da smartphone al Media Center via LAN, **solo se un pairing cifrato e sicuro è fattibile**; prima sperimentare USB/AirDrop/Quick Share + import multiplo già esistente | P3 iniziale, P2 solo con bisogno verificato e revisione sicurezza; altrimenti nessuna funzione | Proposta — da valutare |
+
+## Cinquantaseiesima ricognizione — 23 novembre 2026 — REPS-TECH-059
+
+- **[REPS-TECH-059 — Acquisizione temporanea di fotografie da smartphone sulla rete locale](REPS-TECH-059-acquisizione-fotografie-smartphone-rete-locale.md).** Sul `main` esistono già selezione multipla dei JPEG/PNG/WebP, importazione nel Media Center, libreria locale e backup media; **non** un flusso di consegna diretta da telefono. Studio di una sessione LAN esplicita e temporanea **senza cloud**, ma soltanto dopo aver misurato il bisogno e verificato fattibilità di cifratura, pairing, permessi firewall e protezione del desktop. Un URL/QR su HTTP in chiaro **non** è considerato sicuro. Nessun difetto o richiesta utenti è stato provato.
+- **Anti-doppioni:** TECH-027 (codec HEIC, non trasporto), TECH-045 (associazione media *già presenti* a opere), TECH-038 (staging/backup) e TECH-013/024 (privacy/metadati); UX-018/055/057 dell'altra [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) restano distinti. Nessuna modifica al server MCP STDIO e nessun file Gestione e UX toccato.
+- **Alternativa preferita prima del codice:** provare il trasferimento via USB/AirDrop/Quick Share/cartella condivisa e poi l'import multiplo già disponibile, con 3–5 studi reali. **P3** iniziale: eventualmente P2 solo se vantaggio netto e sicurezza dimostrabili. Stato «Proposta — da valutare», nessuna approvazione/implementazione/merge.
 
 ## Cinquantacinquesima ricognizione — 23 novembre 2026 — REPS-TECH-058
 
