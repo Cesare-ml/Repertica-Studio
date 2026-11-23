@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **66 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **67 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -75,6 +75,15 @@ Data ricognizione: **2026-11-23** (sessantatreesima ricognizione). Stato uniform
 | [REPS-TECH-064](REPS-TECH-064-coordinamento-processi-archivio-attivo.md) | Accesso concorrente di più processi allo stesso archivio: seconda GUI, lettori MCP, migrazione e ripristino con esclusività prudente; nessun server né collaborazione in rete | P1–P2 solo con rischio riproducibile; altrimenti P2–P3 o sola documentazione | Proposta — da valutare |
 | [REPS-TECH-065](REPS-TECH-065-round-trip-revisioni-fotografiche-editor-esterni.md) | Rientro manuale controllato nel Media Center di una fotografia elaborata con editor esterno, come nuova revisione non attiva; niente watchers, editor obbligatori o cambi automatici dei riferimenti | P3; P2 solo dopo validazione professionale | Proposta — da valutare |
 | [REPS-TECH-066](REPS-TECH-066-compatibilita-filesystem-destinazioni-backup.md) | Compatibilità della destinazione USB/NAS: limiti del singolo file, verifica prudente delle capacità e diagnosi della pubblicazione senza false promesse di durabilità | P2 solo se limiti reali misurati; altrimenti P3 o sola guida/test | Proposta — da valutare |
+| [REPS-TECH-067](REPS-TECH-067-robustezza-pianificazione-backup-cambi-ora.md) | Backup programmati e ora locale: indagine su DST, cambio fuso, correzione dell'orologio, recuperi e retry senza duplicazioni o omissioni silenziose | P2 solo se rischi reali riproducibili; altrimenti P3/sola guida e QA | Proposta — da valutare |
+
+## Sessantaquattresima ricognizione — 23 novembre 2026 — REPS-TECH-067
+
+- **[REPS-TECH-067 — Robustezza temporale dei backup programmati](REPS-TECH-067-robustezza-pianificazione-backup-cambi-ora.md).** Riletti sul branch `main` il README, `docs/MVP.md`, `src-tauri/src/auto_backup.rs` e `src-tauri/src/db.rs`: lo scheduler giornaliero/settimanale/mensile, già funzionante e disattivato di default, confronta `NaiveDateTime` locali (`last_success_at`, `last_attempt_at`, `enabled_at`) con `Local::now().naive_local()`; esistono già test per scadenze e retry di 30 minuti. Non emerge nei percorsi letti una semantica esplicita per **ore inesistenti/ripetute, cambio fuso o correzione arbitraria dell'orologio**. Non è stato riprodotto un guasto, né eseguito un test sul sistema reale.
+- **Priorità/alternativa:** fase iniziale solo ricognizione e casi sintetici, senza sviluppo. `P2` soltanto se un'omissione o un avviso fuorviante sono riproducibili e rilevanti per utenti; altrimenti `P3` o documentazione/QA senza nuova funzione. Conservare backup completi, retention conservativa, recupero una sola volta e possibilità di esecuzione manuale.
+- **Anti-doppioni:** TECH-060 (identità supporto), TECH-066 (capacità filesystem), TECH-062 (progresso operazioni), TECH-009/052 (verifica copie), TECH-058 (nuovo computer). Confrontato l'indice Gestione e UX della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), senza modificare file dell'altro filone.
+- **Perimetro:** soltanto una nuova scheda e questo indice Markdown sotto `docs/idee/strumenti-e-architettura/`. **67 proposte**, tutte «Proposta — da valutare», nessuna approvata né assegnata; PR #16 documentale in bozza, senza merge e senza modifiche a codice, test, workflow, configurazioni o dipendenze.
+
 
 ## Sessantatreesima ricognizione — 23 novembre 2026 — REPS-TECH-066
 
