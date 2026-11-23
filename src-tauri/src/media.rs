@@ -356,13 +356,25 @@ fn current_path(conn: &Connection, media_id: &str) -> Result<String, String> {
         .optional().map_err(err)?.ok_or_else(|| "Immagine non trovata nella libreria".to_string())
 }
 
-fn read_media_file(directory: &Path, relative: &str) -> Result<Vec<u8>, String> {
+/// Validate a stored photo path without following a symlink. Use the same
+/// checks for reading a revision and for restoring it to an artwork.
+fn regular_media_path(directory: &Path, relative: &str) -> Result<std::path::PathBuf, String> {
     if !crate::commands::safe_relative(relative) { return Err("Percorso media non valido".into()); }
     require_regular_media_dir(directory)?;
     let full = directory.join(relative);
-    let metadata = fs::symlink_metadata(&full).map_err(err)?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() { return Err("File media non valido".into()); }
-    fs::read(full).map_err(err)
+    let metadata = fs::symlink_metadata(&full).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            "Il file di questa versione non è più disponibile".to_string()
+        } else {
+            err(error)
+        }
+    })?;
+    if !metadata.file_type().is_file() { return Err("File media non valido".into()); }
+    Ok(full)
+}
+
+fn read_media_file(directory: &Path, relative: &str) -> Result<Vec<u8>, String> {
+    fs::read(regular_media_path(directory, relative)?).map_err(err)
 }
 
 /// Create a new revision by applying `operations` to the current version. Returns the new file path.
@@ -404,7 +416,9 @@ pub fn restore_revision_core(db: &Database, media_id: &str, revision_id: &str) -
     let tx = conn.transaction().map_err(err)?;
     let path: String = tx.query_row("SELECT image_path FROM media_revisions WHERE id=?1 AND media_id=?2", params![revision_id, media_id], |r| r.get(0))
         .optional().map_err(err)?.ok_or("Versione non trovata")?;
-    if !db.directory.join(&path).is_file() { return Err("Il file di questa versione non è più disponibile".into()); }
+    // Never repoint a cover or gallery to a path that escaped the media store,
+    // including a symlink substituted for an older revision's file.
+    regular_media_path(&db.directory, &path)?;
     set_current(&tx, media_id, revision_id, &path)?;
     tx.commit().map_err(err)?;
     detail_core(&conn, media_id)
@@ -921,6 +935,52 @@ mod tests {
         assert!(restore_revision_core(&db, &id, "inesistente").is_err());
         assert!(apply_edit_core(&db, &id, &[]).is_err());
         assert!(apply_edit_core(&db, "sconosciuto", &rotate()).is_err());
+    }
+
+    #[test]
+    fn restoring_missing_revision_never_repoints_an_artwork() {
+        let (_dir, db) = setup();
+        let cover = put(&db, "cover.jpg", &split_jpeg(40, 20));
+        artwork_with_cover(&db, "a", &cover);
+        sync_references(&db).unwrap();
+        let id = first_item(&db);
+        let edited = apply_edit_core(&db, &id, &rotate()).unwrap();
+        let original_revision_id = edited.revisions[1].id.clone();
+        fs::remove_file(db.directory.join(&cover)).unwrap();
+
+        assert!(restore_revision_core(&db, &id, &original_revision_id).unwrap_err().contains("non è più disponibile"));
+        let current = detail_core(&db.conn.lock().unwrap(), &id).unwrap();
+        assert_eq!(current.item.current_revision_id, edited.item.current_revision_id);
+        let linked: String = db.conn.lock().unwrap().query_row(
+            "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(linked, edited.item.image_path, "a failed restore must leave the current cover intact");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restoring_symlinked_revision_rejects_external_file_and_preserves_links() {
+        let (_dir, db) = setup();
+        let cover = put(&db, "cover.jpg", &split_jpeg(40, 20));
+        artwork_with_cover(&db, "a", &cover);
+        sync_references(&db).unwrap();
+        let id = first_item(&db);
+        let edited = apply_edit_core(&db, &id, &rotate()).unwrap();
+        let original_revision_id = edited.revisions[1].id.clone();
+        let external = tempfile::tempdir().unwrap();
+        let outside = external.path().join("outside.jpg");
+        let outside_bytes = jpeg(20, 20, [7, 9, 11]);
+        fs::write(&outside, &outside_bytes).unwrap();
+        fs::remove_file(db.directory.join(&cover)).unwrap();
+        std::os::unix::fs::symlink(&outside, db.directory.join(&cover)).unwrap();
+
+        assert!(restore_revision_core(&db, &id, &original_revision_id).unwrap_err().contains("File media non valido"));
+        assert!(read_media_file(&db.directory, &cover).is_err());
+        let current = detail_core(&db.conn.lock().unwrap(), &id).unwrap();
+        assert_eq!(current.item.current_revision_id, edited.item.current_revision_id);
+        let linked: String = db.conn.lock().unwrap().query_row(
+            "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(linked, edited.item.image_path);
+        assert_eq!(fs::read(outside).unwrap(), outside_bytes, "external files must remain untouched");
     }
 
     #[test]
