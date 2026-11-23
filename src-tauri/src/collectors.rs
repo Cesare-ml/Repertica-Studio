@@ -276,6 +276,22 @@ where
     F: FnOnce(&Path, &[u8], &str) -> Result<String, String>,
 {
     if !["PROFILE", "PHOTO"].contains(&kind) { return Err("Tipo di fotografia non valido".into()); }
+    // A stale collector dialog or a full gallery should fail *before* opening
+    // a potentially large photo or copying it to a removable/slow media folder.
+    // Recheck both conditions inside the transaction below: another edit could
+    // change the collector or gallery while the file is being staged.
+    {
+        let conn = db.conn.lock().map_err(err)?;
+        let photo_count: Option<i64> = conn.query_row(
+            "SELECT (SELECT count(*) FROM collector_images WHERE collector_id=?1 AND kind='PHOTO')
+             FROM collectors WHERE id=?1",
+            params![collector_id], |row| row.get(0),
+        ).optional().map_err(err)?;
+        let count = photo_count.ok_or("Collezionista non trovato")?;
+        if kind == "PHOTO" && count >= MAX_PHOTOS {
+            return Err(format!("Massimo {MAX_PHOTOS} fotografie per collezionista"));
+        }
+    }
     require_regular_media_dir(db)?;
     let bytes = read_image_file(source_path)?;
     let (extension, _) = image_type(&bytes).ok_or_else(|| "Sono consentite solo immagini JPEG, PNG e WebP".to_string())?;
@@ -579,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn photo_staging_runs_without_sqlite_lock_and_failed_links_leave_no_media() {
+    fn photo_staging_runs_without_sqlite_lock_and_preflight_skips_missing_collectors() {
         let (dir, db) = setup();
         let collector = save_collector_core(&db, input("Anna")).unwrap();
         let source = picture(dir.path(), "portrait.jpg", 1);
@@ -594,16 +610,37 @@ mod tests {
         assert!(db.directory.join(&first.image_path).is_file());
 
         let rejected = add_image_core_with_stage(
-            &db, "missing-collector", &source, "PROFILE",
-            |directory, bytes, extension| {
-                assert!(db.conn.try_lock().is_ok(), "even rejected uploads stage without locking SQLite");
-                store_media(directory, bytes, extension)
+            &db, "missing-collector", "missing-photo.jpg", "PROFILE",
+            |_, _, _| -> Result<String, String> {
+                panic!("a missing collector must be rejected before staging media");
             },
         ).unwrap_err();
         assert!(rejected.contains("non trovato"));
-        assert_eq!(media_count(&db), 1, "failed post-staging validation must remove the new file");
+        assert_eq!(media_count(&db), 1, "an invalid collector must not stage new media");
         let saved = by_id(&db.conn.lock().unwrap(), &collector.id).unwrap();
         assert_eq!(saved.profile_image_id.as_deref(), Some(first.id.as_str()));
+    }
+
+    #[test]
+    fn a_full_collector_gallery_is_rejected_without_reading_or_staging_a_photo() {
+        let (dir, db) = setup();
+        let collector = save_collector_core(&db, input("Anna")).unwrap();
+        let source = picture(dir.path(), "photo.jpg", 1);
+        for _ in 0..MAX_PHOTOS {
+            add_image_core(&db, &collector.id, &source, "PHOTO").unwrap();
+        }
+        assert_eq!(media_count(&db), MAX_PHOTOS as usize);
+        // The source is intentionally missing: the limit check must win over
+        // an unnecessary filesystem read or a slow write to the media store.
+        let message = add_image_core_with_stage(
+            &db, &collector.id, "missing-photo.jpg", "PHOTO",
+            |_, _, _| -> Result<String, String> {
+                panic!("a full gallery must never stage another photo");
+            },
+        ).unwrap_err();
+        assert!(message.contains("Massimo"), "{message}");
+        assert_eq!(media_count(&db), MAX_PHOTOS as usize);
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, MAX_PHOTOS);
     }
 
     #[test]
