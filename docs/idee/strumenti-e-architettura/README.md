@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (settantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **73 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (settantunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **74 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -82,6 +82,13 @@ Data ricognizione: **2026-11-23** (settantesima ricognizione). Stato uniforme: *
 | [REPS-TECH-071](REPS-TECH-071-posta-limiti-temporali-esiti-invio.md) | Posta su reti instabili: scadenze IMAP effettive e distinzione fra accettazione SMTP, esito sconosciuto e copia Inviati; nessun reinvio automatico | P2 solo se blocchi riprodotti; P1–P2 se rischio concreto di reinvio; altrimenti P3/guida | Proposta — da valutare |
 | [REPS-TECH-072](REPS-TECH-072-coerenza-snapshot-singola-risposta-mcp.md) | Coerenza della singola risposta MCP durante modifiche concorrenti della GUI: stessa vista SQLite per più SELECT, senza snapshot fra chiamate o ampliamento dei dati esposti | P2 solo se discrepanza significativa riprodotta; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-TECH-073](REPS-TECH-073-scansione-somiglianza-fotografica-scalabile.md) | Ricerca fotografica già esistente: copertura dichiarata, misurazione dei confronti quadratici e contenimento del volume delle coppie dHash, senza deduplica automatica | P2 se bisogno misurato; altrimenti P3/QA o nessuno sviluppo | Proposta — da valutare |
+| [REPS-TECH-074](REPS-TECH-074-orientamento-fotografie-brochure-pdf.md) | Orientamento coerente delle fotografie nelle brochure PDF: verifica del decoder separato e dei casi EXIF ruotati/specchiati, senza modificare gli originali | P2 se riprodotto; altrimenti P3/QA o nessuno sviluppo | Proposta — da valutare |
+
+## Settantunesima ricognizione — 23 novembre 2026 — REPS-TECH-074
+
+- **[REPS-TECH-074 — Orientamento coerente delle fotografie nelle brochure PDF](REPS-TECH-074-orientamento-fotografie-brochure-pdf.md).** Su main imaging.rs applica esplicitamente l'orientamento EXIF, mentre brochures.rs load_photo usa image::open, thumbnail e ricodifica JPEG in un percorso separato. Possibile discrepanza fra preview e PDF, non ancora riprodotta. Prima matrice sintetica EXIF 1–8 e prova dei layout; solo se necessario allineamento minimo del decoder, senza ampliare i limiti di risorse o modificare gli originali.
+- Anti-doppioni: TECH-013/021/024/034/068 e UX-062; confrontate 73 schede TECH e 78 UX, PR #14 intatta. Nessun test, codice o implementazione eseguito.
+- Priorità ipotetica P2 se discrepanza riprodotta, altrimenti P3/QA o nessuno sviluppo. 74 schede **«Proposta — da valutare»**, PR #16 in bozza, senza merge, solo Markdown.
 
 ## Settantesima ricognizione — 23 novembre 2026 — REPS-TECH-073
 
