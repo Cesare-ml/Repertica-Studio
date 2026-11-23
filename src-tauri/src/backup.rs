@@ -218,6 +218,22 @@ fn validate_expense_amounts(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+// SQLite INTEGER affinity still accepts fractional REAL values. Check the
+// original sales table even for schema v1, before finance or receipt queries.
+fn validate_sale_amounts(conn: &Connection) -> Result<(), String> {
+    let invalid: Option<String> = conn.query_row(
+        "SELECT id FROM sales
+         WHERE typeof(amount_cents) != 'integer'
+            OR amount_cents NOT BETWEEN 1 AND 100000000000
+         ORDER BY id LIMIT 1",
+        [], |row| row.get(0)
+    ).optional().map_err(error)?;
+    if let Some(id) = invalid {
+        return Err(format!("Il backup contiene un importo di vendita non valido: {id}"));
+    }
+    Ok(())
+}
+
 // SQLite page integrity and foreign keys alone cannot detect an imported sale
 // without its financial row, or taxes/shipping exceeding the agreed price.
 // All schema versions >= 2 populate sale_finances for every historical sale.
@@ -226,6 +242,11 @@ fn validate_sale_finances(conn: &Connection) -> Result<(), String> {
         "SELECT s.id FROM sales s
          LEFT JOIN sale_finances f ON f.sale_id=s.id
          WHERE f.sale_id IS NULL OR s.amount_cents <= 0
+            OR typeof(f.tax_cents) != 'integer'
+            OR typeof(f.shipping_cents) != 'integer'
+            OR typeof(f.personal_bp) != 'integer'
+            OR typeof(f.activity_bp) != 'integer'
+            OR typeof(f.savings_bp) != 'integer'
             OR f.tax_cents NOT BETWEEN 0 AND s.amount_cents
             OR f.shipping_cents NOT BETWEEN 0 AND (s.amount_cents - f.tax_cents)
             OR f.personal_bp NOT BETWEEN 0 AND 10000
@@ -309,6 +330,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     if !(1..=crate::db::SCHEMA_VERSION).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
     // Sale dates are present even in the original v1 schema.
     validate_sale_dates(&conn)?;
+    validate_sale_amounts(&conn)?;
     // v1 predates finance rows; migration v2 created them for all existing sales.
     if schema >= 2 { validate_sale_finances(&conn)?; validate_expense_dates(&conn)?; validate_expense_amounts(&conn)?; }
     // Legacy schemas 1-3 have no sale_receipts table: never infer payments.
@@ -1433,6 +1455,66 @@ mod tests {
         let tax: i64 = conn.query_row("SELECT tax_cents FROM sale_finances WHERE sale_id='sale'",
             [], |row| row.get(0)).unwrap();
         assert_eq!(tax, 0, "the live archive must not be replaced by the corrupt snapshot");
+    }
+
+    #[test]
+    fn fractional_or_oversized_sale_money_is_rejected_even_with_valid_sqlite_pages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('sale','a','c',1000,'2026-11-21','now');
+                 INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                    VALUES('sale',0,0,3334,3333,3333);"
+            ).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        for (sql, expected) in [
+            ("UPDATE sales SET amount_cents=1000.5", "importo di vendita"),
+            ("UPDATE sales SET amount_cents=100000000001", "importo di vendita"),
+            ("UPDATE sale_finances SET tax_cents=0.5", "dettagli economici"),
+            ("UPDATE sale_finances SET shipping_cents=0.5", "dettagli economici"),
+            ("UPDATE sale_finances SET personal_bp=3334.5,activity_bp=3332.5", "dettagli economici"),
+        ] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute_batch(
+                    "UPDATE sales SET amount_cents=1000;
+                     UPDATE sale_finances SET tax_cents=0,shipping_cents=0,
+                        personal_bp=3334,activity_bp=3333,savings_bp=3333;"
+                ).unwrap();
+                snapshot.execute(sql, []).unwrap();
+                let integrity: String = snapshot.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+                assert_eq!(integrity, "ok");
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains(expected), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+            let conn = db.conn.lock().unwrap();
+            let live: (i64, i64, i64, i64, i64) = conn.query_row(
+                "SELECT s.amount_cents,f.tax_cents,f.shipping_cents,f.personal_bp,f.activity_bp
+                 FROM sales s JOIN sale_finances f ON f.sale_id=s.id",
+                [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))
+            ).unwrap();
+            assert_eq!(live, (1000,0,0,3334,3333));
+        }
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute_batch(
+                "UPDATE sales SET amount_cents=100000000000;
+                 UPDATE sale_finances SET tax_cents=0,shipping_cents=0,
+                    personal_bp=3334,activity_bp=3333,savings_bp=3333;"
+            ).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        assert!(inspect_backup_core(folder).unwrap().verified);
     }
 
     #[test]
