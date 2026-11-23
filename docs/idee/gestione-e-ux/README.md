@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **66 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **67 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -77,6 +77,14 @@ Aggiornato: **2026-11-23** (cinquantanovesima ricognizione). Stato delle propost
 | [REPS-UX-065](REPS-UX-065-anteprima-impatto-tariffa-coefficiente-catalogo.md) | Anteprima **non distruttiva** dell'effetto di tariffa/cm² e coefficiente artista sui prezzi suggeriti delle opere reali: prima/dopo e cause delle esclusioni, senza nuovi listini, vendite o modifiche massive | P2 se utilità osservata; P3/nessuna funzione se bastano esempi | Proposta — da valutare |
 
 | [REPS-UX-066](REPS-UX-066-servizi-esterni-lavorazioni-opere.md) | Lavorazioni commissionate **dallo studio** a corniciai, stampatori e fonderie: richiesta, scadenza ed esito dichiarati per opera, distinti da spese, movimenti fisici e incarichi ricevuti | P2 solo con casi ricorrenti verificati; altrimenti P3/checklist/nessuna funzione | Proposta — da valutare |
+| [REPS-UX-067](REPS-UX-067-protezione-modifiche-non-salvate-moduli.md) | Protezione non invasiva dei campi modificati e non ancora salvati nei moduli opera, collezionista e spesa, con uscita consapevole; nessuna bozza persistente o autosave | P2 se rischio verificato; P3/nessuna funzione altrimenti | Proposta — da valutare |
+
+## Sessantesima ricognizione — 23 novembre 2026 — REPS-UX-067
+
+- **[REPS-UX-067 — Protezione delle modifiche non salvate nei moduli](REPS-UX-067-protezione-modifiche-non-salvate-moduli.md).** Esaminati su `main` `src/app/app.component.html`, `app.component.ts`, `business-mail.component.ts`, `docs/MVP.md` e README; rilevati percorsi che chiudono direttamente maschere opera/collezionista/spesa. La posta ha già un controllo delle modifiche in sospeso. Non è stata eseguita una prova nativa, né esistono evidenze di frequenza degli incidenti: proposta da verificare con professionisti.
+- **Flusso minimo:** uscita immediata se nessun campo è cambiato; altrimenti resta/scarta/salva con attenzione agli import fotografici temporanei e a eventuali edit media già persistiti. Nessun autosave o bozza di opera: quelli appartengono eventualmente a UX-018.
+- **Anti-doppioni:** UX-018 riguarda nuove schede in serie e bozze, UX-064 revisioni su più opere; TECH-033 riguarda conflitti con record SQLite obsoleti, TECH-062 progresso/annullamento delle operazioni native. Confrontate **66 schede UX** e **62 tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16); nessun documento tecnico modificato.
+- **Esito:** priorità P2 soltanto dopo verifica; altrimenti P3/nessuna funzione. **67 proposte** tutte «Proposta — da valutare». Solo due Markdown nel proprio filone, PR documentale in bozza, nessun merge o incarico.
 
 ## Cinquantanovesima ricognizione — 23 novembre 2026 — REPS-UX-066
 
