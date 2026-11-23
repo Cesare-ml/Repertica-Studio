@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **61 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **62 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -70,6 +70,14 @@ Data ricognizione: **2026-11-23** (cinquantottesima ricognizione). Stato uniform
 | [REPS-TECH-059](REPS-TECH-059-acquisizione-fotografie-smartphone-rete-locale.md) | Acquisizione temporanea e consapevole di fotografie da smartphone al Media Center via LAN, **solo se un pairing cifrato e sicuro è fattibile**; prima sperimentare USB/AirDrop/Quick Share + import multiplo già esistente | P3 iniziale, P2 solo con bisogno verificato e revisione sicurezza; altrimenti nessuna funzione | Proposta — da valutare |
 | [REPS-TECH-060](REPS-TECH-060-identita-destinazione-backup-programmati.md) | Backup automatici su USB/NAS: controllo facoltativo della destinazione effettiva quando il percorso resta uguale ma cambia supporto, senza confondere verifica del disco e integrità delle copie | P2 solo con scenario riproducibile e bisogno reale; P3 o guida altrimenti | Proposta — da valutare |
 | [REPS-TECH-061](REPS-TECH-061-esportazione-metadati-museali-lido-11.md) | Consegna selettiva di metadati delle opere in LIDO 1.1 XML per musei, con mapping dichiarato e validazione offline; non backup, non IIIF, non pubblicazione o import | P3; P2 solo con partner e profilo museale verificati | Proposta — da valutare |
+| [REPS-TECH-062](REPS-TECH-062-progresso-annullamento-sicuro-operazioni-locali.md) | Contratto comune per progresso reale e richiesta di annullamento nei punti sicuri di backup/ripristino/esportazioni, senza riscrivere pipeline o promettere recuperi automatici | P2 solo con attese problematiche confermate; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Cinquantanovesima ricognizione — 23 novembre 2026 — REPS-TECH-062
+
+- **[REPS-TECH-062 — Operazioni locali lunghe: avanzamento affidabile e annullamento nei soli punti sicuri](REPS-TECH-062-progresso-annullamento-sicuro-operazioni-locali.md).** Riletti su `main` README, MVP, portabilità, `src/app/app.component.ts`, `api.ts`, `src-tauri/src/backup.rs`, `export.rs`, `updater.rs`, insieme alle **61 proposte tecniche** esistenti e alle **66 schede Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). L'interfaccia delle copie usa un generico `busy`, i comandi di backup/ispezione/ripristino attendono il risultato, e soltanto il download degli aggiornamenti dispone già di eventi `Channel`; non si è dimostrato un problema su utenti reali.
+- **Perimetro anti-doppioni:** specificare **fasi, contatori non ingannevoli, esiti verificati e semantica del solo stop cooperativo** come possibile contratto trasversale. Non duplicare TECH-003 (scansione media), TECH-009 (retention), TECH-018 (CSV atomico), TECH-022 (preflight spazio), TECH-037 (recupero dopo crash) o TECH-038 (coerenza dei media durante snapshot). Ripristino nella fase critica di rinomina/rollback **non annullabile**; nessun cambio a manifest backup v1, SQLite o copie già pubblicate.
+- **Validazione prima dello sviluppo:** misurare lavori su archivi sintetici e SSD/NAS, verificare con 3–5 professionisti se basti l'indicazione della fase; stressare stop prima della pubblicazione, distacco USB, errori di scrittura e crash, senza equiparare richiesta di annullamento a cancellazione avvenuta. **Priorità solo ipotetica P2**, P3 o nessuna funzione se i tempi non creano difficoltà. Complessità medio-alta per uno stop veramente sicuro.
+- Tutte le **62 schede** restano **«Proposta — da valutare»**. Nessuna approvazione, assegnazione, implementazione, issue, merge o modifica fuori da `docs/idee/strumenti-e-architettura/`.
 
 ## Cinquantottesima ricognizione — 23 novembre 2026 — REPS-TECH-061
 
