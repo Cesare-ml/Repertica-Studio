@@ -62,12 +62,27 @@ fn normalize_caption(caption: Option<String>) -> Result<Option<String>, String> 
 }
 fn update_caption_core(db: &Database, image_id: &str, caption: Option<String>) -> Result<GalleryImage, String> {
     let caption = normalize_caption(caption)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let updated = conn.execute("UPDATE artwork_images SET caption=?2 WHERE id=?1",
-        params![image_id, caption]).map_err(err)?;
-    if updated == 0 { return Err("Fotografia non trovata".into()); }
-    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
-        params![image_id], row).map_err(err)
+    let mut conn = db.conn.lock().map_err(err)?;
+    // A restored/imported SQLite archive may contain triggers that silently
+    // ignore an UPDATE or rewrite its value (or its media link). Verify the
+    // persisted row before commit, so even trigger side effects are rolled back.
+    let tx = conn.transaction().map_err(err)?;
+    let original = tx.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
+        params![image_id], row).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    let updated = tx.execute("UPDATE artwork_images SET caption=?2 WHERE id=?1",
+        params![image_id, &caption]).map_err(err)?;
+    if updated != 1 { return Err("Didascalia non aggiornata: verifica l'archivio SQLite".into()); }
+    let saved = tx.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
+        params![image_id], row).optional().map_err(err)?
+        .ok_or("Fotografia scomparsa durante la modifica: verifica l'archivio SQLite")?;
+    if saved.caption != caption || saved.artwork_id != original.artwork_id
+        || saved.image_path != original.image_path || saved.created_at != original.created_at
+        || saved.sort_order != original.sort_order || saved.kind != original.kind
+    {
+        return Err("Didascalia non salvata correttamente: verifica l'archivio SQLite".into());
+    }
+    tx.commit().map_err(err)?;
+    Ok(saved)
 }
 fn list_core(db: &Database, artwork_id: &str) -> Result<Vec<GalleryImage>, String> {
     let conn = db.conn.lock().map_err(err)?;
@@ -178,10 +193,24 @@ where
 }
 fn update_kind_core(db: &Database, image_id: &str, kind: &str) -> Result<GalleryImage, String> {
     let kind = normalize_kind(Some(kind))?;
-    let conn = db.conn.lock().map_err(err)?;
-    let updated = conn.execute("UPDATE artwork_images SET kind=?2 WHERE id=?1", params![image_id, kind]).map_err(err)?;
-    if updated == 0 { return Err("Fotografia non trovata".into()); }
-    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"), params![image_id], row).map_err(err)
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let original = tx.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
+        params![image_id], row).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    let updated = tx.execute("UPDATE artwork_images SET kind=?2 WHERE id=?1",
+        params![image_id, &kind]).map_err(err)?;
+    if updated != 1 { return Err("Tipo fotografia non aggiornato: verifica l'archivio SQLite".into()); }
+    let saved = tx.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
+        params![image_id], row).optional().map_err(err)?
+        .ok_or("Fotografia scomparsa durante la modifica: verifica l'archivio SQLite")?;
+    if saved.kind != kind || saved.artwork_id != original.artwork_id
+        || saved.image_path != original.image_path || saved.created_at != original.created_at
+        || saved.sort_order != original.sort_order || saved.caption != original.caption
+    {
+        return Err("Tipo fotografia non salvato correttamente: verifica l'archivio SQLite".into());
+    }
+    tx.commit().map_err(err)?;
+    Ok(saved)
 }
 #[tauri::command]
 pub fn update_artwork_gallery_kind(db: State<'_, Database>, image_id: String, kind: String) -> Result<GalleryImage, String> {
@@ -931,6 +960,76 @@ mod tests {
         assert!(relative_media_path("media/picture.png"));
         assert!(mime(b"not a picture").is_none());
     }
+    #[test]
+    fn imported_sqlite_triggers_cannot_silently_corrupt_gallery_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','ART','Artwork','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,kind,created_at)
+                VALUES('photo','art','media/photo.jpg','Original','OTHER','t')", []).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER ignore_caption BEFORE UPDATE OF caption ON artwork_images
+                 BEGIN SELECT RAISE(IGNORE); END;"
+            ).unwrap();
+        }
+        assert!(update_caption_core(&db, "photo", Some("New".into())).unwrap_err().contains("non aggiornata"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER ignore_caption;
+                 CREATE TRIGGER undo_caption AFTER UPDATE OF caption ON artwork_images
+                 BEGIN
+                   UPDATE artwork_images SET caption='Original' WHERE id=NEW.id;
+                   UPDATE artworks SET title='Unexpected' WHERE id=NEW.artwork_id;
+                 END;"
+            ).unwrap();
+        }
+        assert!(update_caption_core(&db, "photo", Some("New".into())).unwrap_err().contains("non salvata"));
+        {
+            let conn = db.conn.lock().unwrap();
+            let title: String = conn.query_row("SELECT title FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+            assert_eq!(title, "Artwork", "trigger side effects must roll back");
+            conn.execute_batch(
+                "DROP TRIGGER undo_caption;
+                 CREATE TRIGGER rewrite_link AFTER UPDATE OF caption ON artwork_images
+                 BEGIN UPDATE artwork_images SET image_path='media/other.jpg' WHERE id=NEW.id; END;"
+            ).unwrap();
+        }
+        assert!(update_caption_core(&db, "photo", Some("New".into())).unwrap_err().contains("non salvata"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER rewrite_link;
+                 CREATE TRIGGER ignore_kind BEFORE UPDATE OF kind ON artwork_images
+                 BEGIN SELECT RAISE(IGNORE); END;"
+            ).unwrap();
+        }
+        assert!(update_kind_core(&db, "photo", "DETAIL").unwrap_err().contains("non aggiornato"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER ignore_kind;
+                 CREATE TRIGGER undo_kind AFTER UPDATE OF kind ON artwork_images
+                 BEGIN UPDATE artwork_images SET kind='OTHER' WHERE id=NEW.id; END;"
+            ).unwrap();
+        }
+        assert!(update_kind_core(&db, "photo", "DETAIL").unwrap_err().contains("non salvato"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("DROP TRIGGER undo_kind;").unwrap();
+        }
+        let preserved = list_core(&db, "art").unwrap();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(preserved[0].caption.as_deref(), Some("Original"));
+        assert_eq!(preserved[0].kind, "OTHER");
+        assert_eq!(preserved[0].image_path, "media/photo.jpg");
+        assert_eq!(update_caption_core(&db, "photo", Some("New".into())).unwrap().caption.as_deref(), Some("New"));
+        assert_eq!(update_kind_core(&db, "photo", "DETAIL").unwrap().kind, "DETAIL");
+    }
+
     #[test]
     fn captions_can_be_changed_or_cleared_without_touching_media_or_other_artworks() {
         let dir = tempfile::tempdir().unwrap();
