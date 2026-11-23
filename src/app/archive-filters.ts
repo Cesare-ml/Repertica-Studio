@@ -165,13 +165,18 @@ export function filterCollectors(
     : !c.email?.trim() && !c.phone?.trim());
   const terms = searchTerms(query);
   if (terms.length === 0) return base;
-  // A collector can be found by the archive code of an artwork they actually
-  // purchased, not by codes belonging to unrelated or unsold works.
-  // Map IDs rather than matching titles: titles can be duplicated or edited.
-  const codeByArtwork = new Map(artworks.map(a => [a.id, a.code]));
+  // Search the current metadata of works actually acquired by this collector.
+  // Index by UUID: identical titles must not leak details from another buyer's
+  // work, and unsold works must never affect this collector's search results.
+  const detailsByArtwork = new Map(artworks.map(a => [a.id, [
+    a.code, a.title, a.year, a.technique, a.support, a.description, a.location,
+    ...artworkDimensionFields(a)
+  ]] as const));
   return base.filter(c =>
     matchesTerms(terms, [c.name, c.email, c.phone, c.address, c.notes, c.birth_place,
       c.instagram, c.facebook, c.tiktok, c.website, c.linkedin,
       ...(indexes.byCollector[c.id] ?? []).flatMap(s =>
-        [s.artwork_title, codeByArtwork.get(s.artwork_id)])], c.phone));
+        // Preserve the recorded sale title even when the artwork list has not
+        // been loaded; otherwise use current linked artwork metadata as well.
+        [s.artwork_title, ...(detailsByArtwork.get(s.artwork_id) ?? [])])], c.phone));
 }
