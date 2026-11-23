@@ -18,7 +18,7 @@ Un artista o una piccola galleria registra spesso **nuove spese simili a precede
 ## 2. Differenze rispetto alle idee già documentate
 
 - [REPS-UX-037](REPS-UX-037-scadenze-spese-ricorrenti-senza-registrazioni-presunte.md) riguarda **impegni futuri e scadenze** con cadenza; qui non esiste alcuna regola di ricorrenza, previsione o avviso. Si usa soltanto una **riga già registrata come modello per un nuovo inserimento manuale**.
-- [REPS-UX-042](REPS-UX-042-acquisti-a-saldo-differito-pagamenti-manuali.md) riguarda scadenze e pagamenti relativi a un acquisto; qui non si inventano pagamenti o rate.
+- [REPS-UX-042](REPS-UX-042-pagamenti-dichiarati-spese-acquisti-differiti.md) riguarda scadenze e pagamenti relativi a un acquisto; qui non si inventano pagamenti o rate.
 - [REPS-UX-028](REPS-UX-028-giustificativi-locali-spese-acquisti.md) tratta documenti probatori: non copiare automaticamente giustificativi del vecchio acquisto su quello nuovo.
 - [REPS-UX-008](REPS-UX-008-scorte-materiali-consumi.md) tratta quantità fisiche/consumi. La ripetizione della spesa **non** aggiunge scorte né attribuisce consumi a un'opera.
 - [REPS-UX-067](REPS-UX-067-protezione-modifiche-non-salvate-moduli.md) propone un'eventuale protezione trasversale dei form sporchi: se approvata in futuro, dovrebbe applicarsi anche a questo nuovo form; non implementarla qui.
