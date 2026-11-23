@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **58 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantacinquesima ricognizione). Stato uniforme: **Proposta — da valutare**. **58 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
