@@ -66,6 +66,25 @@ fn persisted_flag(value: i64, field: &str) -> Result<bool, String> {
     }
 }
 
+// Imported databases can also bypass the allocation_parts CHECK constraints.
+// Reject invalid history before displaying funds or freezing a distribution on
+// a new sale; do not silently expose an invented percentage or an empty label.
+// Historical inactive parts may share positions, so only require a positive
+// position rather than globally unique/contiguous numbering.
+fn validate_persisted_part(name: &str, share_bp: i64, position: i64) -> Result<(), String> {
+    let length = name.trim().chars().count();
+    if !(1..=60).contains(&length) {
+        return Err("Invalid allocation part name in imported SQLite data; repair the archive".into());
+    }
+    if !(0..=10_000).contains(&share_bp) {
+        return Err("Invalid allocation share_bp in imported SQLite data; repair the archive".into());
+    }
+    if position < 1 {
+        return Err("Invalid allocation position in imported SQLite data; repair the archive".into());
+    }
+    Ok(())
+}
+
 pub fn enabled(conn: &Connection) -> Result<bool, String> {
     let value = conn.query_row(
         "SELECT enabled FROM allocation_settings WHERE singleton=1",
@@ -85,6 +104,7 @@ pub fn all_parts(conn: &Connection) -> Result<Vec<Part>, String> {
     let mut parts = Vec::new();
     for row in rows {
         let (id, name, share_bp, pays_expenses, position, active) = row.map_err(err)?;
+        validate_persisted_part(&name, share_bp, position)?;
         parts.push(Part {
             id, name, share_bp,
             pays_expenses: persisted_flag(pays_expenses, "pays_expenses")?,
@@ -262,6 +282,34 @@ mod tests {
 
         assert_eq!(load_plan(&conn).unwrap(), before);
         assert_eq!(shares_for_new_sale(&conn).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn invalid_imported_part_fields_cannot_be_shown_as_valid_funds() {
+        let (_dir, db) = setup();
+        let conn = db.conn.lock().unwrap();
+        let original = all_parts(&conn).unwrap();
+        // Simulate imports that bypass SQLite CHECK constraints.
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+        for (column, sql, expected) in [
+            ("share_bp", "UPDATE allocation_parts SET share_bp=10001 WHERE id='activity'", "share_bp"),
+            ("share_bp", "UPDATE allocation_parts SET share_bp=-1 WHERE id='activity'", "share_bp"),
+            ("name", "UPDATE allocation_parts SET name='   ' WHERE id='activity'", "name"),
+            ("name", "UPDATE allocation_parts SET name=printf('%061d',0) WHERE id='activity'", "name"),
+            ("position", "UPDATE allocation_parts SET position=0 WHERE id='activity'", "position"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+            let message = all_parts(&conn).unwrap_err();
+            assert!(message.contains(expected), "{column}: {message}");
+            assert!(load_plan(&conn).is_err(), "{column} must not be shown as a valid fund");
+            assert!(shares_for_new_sale(&conn).is_err(), "{column} must not be frozen onto a new sale");
+            conn.execute(
+                "UPDATE allocation_parts SET name='Attività',share_bp=3333,position=2 WHERE id='activity'",
+                [],
+            ).unwrap();
+            assert_eq!(all_parts(&conn).unwrap(), original);
+        }
+        conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
     }
 
     #[test]
