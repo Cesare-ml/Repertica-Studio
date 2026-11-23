@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **71 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **72 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -82,6 +82,14 @@ Aggiornato: **2026-11-23** (sessantaquattresima ricognizione). Stato delle propo
 | [REPS-UX-069](REPS-UX-069-ripetizione-manuale-spesa-precedente.md) | Nuova spesa manuale da una registrazione precedente: riuso prudente dei campi, nuova data e importo da verificare, nessuna ricorrenza né pagamento presunto | P2 solo con casi frequenti verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-070](REPS-UX-070-avviso-possibili-incassi-duplicati.md) | Avviso **non bloccante** prima di registrare un possibile incasso già dichiarato della stessa vendita; indizi spiegabili senza confondere coincidenze con pagamenti verificati | P2 se errori ricorrenti osservati, altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-071](REPS-UX-071-ritorno-contesto-consultazione-archivio.md) | Ritorno contestuale temporaneo dalla scheda del collezionista alle opere filtrate (e viceversa), senza cancellare query e ordine del percorso originario né salvare viste persistenti | P2 solo se la perdita di contesto è verificata; altrimenti P3/nessuna funzione | Proposta — da valutare |
+| [REPS-UX-072](REPS-UX-072-categorie-spesa-personalizzabili-storico.md) | Categorie delle spese personalizzabili, con etichette stabili, archiviazione senza perdere lo storico e compatibilità dei codici CSV; nessun budget né riclassificazione automatica | P2 se validata; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Sessantacinquesima ricognizione — 23 novembre 2026 — REPS-UX-072
+
+- **[REPS-UX-072 — Categorie delle spese personalizzabili senza alterare lo storico](REPS-UX-072-categorie-spesa-personalizzabili-storico.md).** Riletti sul branch `main` README, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `src/app/app.component.ts` e `.html`, `src-tauri/src/finance.rs` e il contratto CSV: l'interfaccia propone otto categorie fisse (incluso «Altro») mentre SQLite conserva una stringa `category` non vincolata a quei codici. La lacuna documentata è **UX e di vocabolario riutilizzabile**, non un bug né una limitazione dimostrata del backend.
+- **Ipotesi prudente:** consentire categorie personali persistenti e archiviabili senza riscrivere le spese, mantenere leggibili codici storici/sconosciuti, localizzare solo le categorie native e preservare il CSV in codici stabili. Nessun budget, ricalcolo, riclassificazione automatica, nuova contabilità o cloud. **Prima alternativa:** verificare se «Altro», descrizione e foglio CSV bastano; **P2 solo dopo bisogno ricorrente verificato**, altrimenti P3/nessun intervento.
+- **Anti-doppioni:** distinte UX-032 (budget), UX-069 (clonazione manuale spese), UX-040/042 (rimborsi e pagamenti), UX-064 (metadati opere) e TECH-030 (vocabolari di tecniche/supporti) / TECH-057 (specifica CSV). Confrontato l'indice della [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), **senza modificarne file**.
+- **Perimetro:** soltanto nuova scheda e indice Markdown sotto `docs/idee/gestione-e-ux/`. **72 proposte**, tutte «Proposta — da valutare», nessuna approvata, assegnata o da implementare per effetto di questa documentazione.
 
 ## Sessantaquattresima ricognizione — 23 novembre 2026 — REPS-UX-071
 
