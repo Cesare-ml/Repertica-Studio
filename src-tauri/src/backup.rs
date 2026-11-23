@@ -196,6 +196,58 @@ fn validate_sale_finances(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+// Imported plans can have well-formed SQLite pages, valid foreign keys and
+// the correct total while containing impossible due dates or non-contiguous
+// positions. The UI allocates payments by position, so never publish or
+// restore such a schedule. Installments appeared in schema v11.
+fn validate_installment_schedule(conn: &Connection) -> Result<(), String> {
+    let mut statement = conn.prepare(
+        "SELECT id,sale_id,position,due_date,amount_cents FROM sale_installments
+         ORDER BY sale_id,position,id"
+    ).map_err(error)?;
+    let rows = statement.query_map([], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+        row.get::<_, i64>(2)?, row.get::<_, String>(3)?, row.get::<_, i64>(4)?
+    ))).map_err(error)?;
+    let mut current_sale = String::new();
+    let mut previous_due = String::new();
+    let mut next_position = 1_i64;
+    let mut has_plan = false;
+    for row in rows {
+        let (id, sale_id, position, due_date, amount_cents) = row.map_err(error)?;
+        if !has_plan || sale_id != current_sale {
+            if has_plan && next_position < 3 {
+                return Err(format!("Il backup contiene un piano con meno di due rate: {current_sale}"));
+            }
+            current_sale = sale_id;
+            previous_due.clear();
+            next_position = 1;
+            has_plan = true;
+        }
+        if !(1..=60).contains(&position) || position != next_position {
+            return Err(format!("Il backup contiene posizioni delle rate non consecutive: {current_sale}"));
+        }
+        if !(1..=100_000_000_000).contains(&amount_cents) {
+            return Err(format!("Il backup contiene un importo di rata non valido: {id}"));
+        }
+        let valid_date = NaiveDate::parse_from_str(&due_date, "%Y-%m-%d")
+            .map(|date| date.format("%Y-%m-%d").to_string() == due_date)
+            .unwrap_or(false);
+        if !valid_date {
+            return Err(format!("Il backup contiene una data di scadenza non valida: {id}"));
+        }
+        if !previous_due.is_empty() && due_date < previous_due {
+            return Err(format!("Il backup contiene rate fuori ordine di scadenza: {current_sale}"));
+        }
+        previous_due = due_date;
+        next_position += 1;
+    }
+    if has_plan && next_position < 3 {
+        return Err(format!("Il backup contiene un piano con meno di due rate: {current_sale}"));
+    }
+    Ok(())
+}
+
 fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String> {
     check_regular(path)?;
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -237,6 +289,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
             .collect::<Result<Vec<_>, _>>().map_err(error)?);
     }
     if schema >= 11 {
+        validate_installment_schedule(&conn)?;
         let inconsistent: i64 = conn.query_row(
             "SELECT count(*) FROM (SELECT i.sale_id FROM sale_installments i JOIN sales s ON s.id=i.sale_id
               GROUP BY i.sale_id HAVING SUM(i.amount_cents)<>MAX(s.amount_cents))",
@@ -918,6 +971,69 @@ mod tests {
             "SELECT sold_at FROM sales WHERE id='sale'", [], |row| row.get(0)
         ).unwrap();
         assert_eq!(date, "2026-11-21", "the live archive must stay intact");
+        assert!(db.directory.join(DB_FILE).is_file());
+    }
+
+    #[test]
+    fn rehashed_backup_with_invalid_installment_schedule_cannot_replace_live_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('sale','a','c',1000,'2026-11-21','now')", []).unwrap();
+            conn.execute("INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                VALUES('sale',0,0,3334,3333,3333)", []).unwrap();
+            conn.execute_batch("INSERT INTO sale_installments(id,sale_id,position,due_date,amount_cents)
+                VALUES('i1','sale',1,'2026-12-01',400);
+                INSERT INTO sale_installments(id,sale_id,position,due_date,amount_cents)
+                VALUES('i2','sale',2,'2027-01-01',600);").unwrap();
+        }
+        let external = tmp.path().join("external");
+        fs::create_dir(&external).unwrap();
+        let backup = create_backup_core(&db, &external).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+        let original_bytes = fs::read(folder.join(DB_FILE)).unwrap();
+
+        // All cases remain valid SQLite and preserve FK relationships. The
+        // manifest is refreshed, so semantic validation must reject them.
+        for (sql, expected) in [
+            ("UPDATE sale_installments SET due_date='2026-02-30' WHERE id='i1'",
+             "data di scadenza non valida"),
+            ("UPDATE sale_installments SET due_date='2026-2-3' WHERE id='i1'",
+             "data di scadenza non valida"),
+            ("UPDATE sale_installments SET position=3 WHERE id='i2'",
+             "posizioni delle rate non consecutive"),
+            ("UPDATE sale_installments SET due_date='2026-01-01' WHERE id='i2'",
+             "fuori ordine di scadenza"),
+            ("DELETE FROM sale_installments WHERE id='i2'",
+             "meno di due rate"),
+        ] {
+            fs::write(folder.join(DB_FILE), &original_bytes).unwrap();
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute_batch(sql).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok", "{sql}");
+                let foreign_keys: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(foreign_keys, 0, "{sql}");
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains(expected), "{sql}: {message}");
+            assert!(restore_backup_core(&db, folder).is_err(), "{sql}");
+        }
+        let conn = db.conn.lock().unwrap();
+        let rows: i64 = conn.query_row(
+            "SELECT count(*) FROM sale_installments WHERE sale_id='sale'", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(rows, 2, "the live installment plan must remain unchanged");
         assert!(db.directory.join(DB_FILE).is_file());
     }
 
