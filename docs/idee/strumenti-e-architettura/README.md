@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **53 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **54 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -60,6 +60,15 @@ Data ricognizione: **2026-11-23** (cinquantesima ricognizione). Stato uniforme: 
 | [REPS-TECH-052](REPS-TECH-052-verifica-indipendente-backup-formato-v1.md) | Specifica pubblica del backup v1 e verifica tecnica indipendente in sola lettura anche senza Repertica avviato; nessun restore né nuova forma di backup | P2 documentazione/prove; P3 verificatore solo se richiesto | Proposta — da valutare |
 
 | [REPS-TECH-053](REPS-TECH-053-manifest-aperto-storia-revisioni-media.md) | Esportazione selettiva della storia delle revisioni Media Center con originali, derivati e manifest JSON/hash aperto: nessun reimport, nessuna pretesa di riprodurre gli edit | P2 se domanda reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+| [REPS-TECH-054](REPS-TECH-054-pacchetto-catalogo-web-statico-offline.md) | Pacchetto locale per cataloghi web statici: selezione consapevole di sole opere e immagini pubblicabili, JSON aperto, hash e zero pubblicazione automatica | P2 solo se richiesto; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+
+## Cinquantunesima ricognizione — 23 novembre 2026 — REPS-TECH-054
+
+- **[REPS-TECH-054 — Pacchetto locale per cataloghi web statici](REPS-TECH-054-pacchetto-catalogo-web-statico-offline.md):** riletti sul branch `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `docs/BROCHURES-OFFLINE.md`, `src-tauri/src/media.rs`, `src-tauri/src/models.rs` e i modelli del catalogo; confrontate **53 schede tecniche precedenti** e **58 del filone Gestione e UX** nella [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il desktop possiede già 12 CSV completi (con informazioni potenzialmente private e senza file media), brochure PDF e foto locali; il suo MVP **esclude Sites**. Nessuna richiesta effettiva da utenti di un export web è stata verificata.
+- **Opportunità specifica:** se professionisti preparano spesso siti vetrina, studio di **un solo pacchetto di pubblicazione manuale e offline**: opere, descrizioni deliberate, immagini selezionate, manifest JSON versionato e hash, nessun account, upload o server. La cartella è una **sorgente per strumenti esterni**, non un sito pronto né un backup. Uno strumento Sites eventuale sarebbe solo un consumatore tra molti, senza lock-in o IA obbligatoria. Nessuna informazione gestionale o di contatto inclusa per default; stato dei diritti dei media da verificare umanamente.
+- **Anti-doppioni:** TECH-001 = portabilità completa con reimport, TECH-025 = esportazione CSV minimizzata, TECH-013/024 = privacy dei byte/metadati media, TECH-029 = scambio tra archivi, TECH-051 = IIIF museale con HTTP(S); UX-007/010/041/053/054 = brochure, diritti, testi, cartellini e vista sullo schermo. Qui si studia **solo un contratto di dati per cataloghi web statici**, senza nuove funzioni di gestione, siti, pubblicazione, sincronizzazione o modifiche al filone UX.
+- **Prima alternativa senza sviluppo:** provare con 4–6 aggiornamenti reali di siti la consegna di CSV delle sole opere **revisionato manualmente** e foto selezionate, oppure brochure PDF quando bastano. Se la differenza non è misurabile, nessuna funzione; **P2 solo con bisogno ripetuto**, altrimenti **P3**. Non sono stati eseguiti test sull'app.
+- **Esito:** **54 schede tecniche**, tutte «Proposta — da valutare», nessuna approvata o assegnata. Solo scheda e indice Markdown nella cartella autorizzata. [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta in bozza verso `main`, senza merge e senza modifica di codice, test, build, workflow, impostazioni, dipendenze, file UX o issue.
 
 ## Cinquantesima ricognizione — 23 novembre 2026 — REPS-TECH-053
 
