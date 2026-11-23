@@ -95,3 +95,8 @@ export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
+
+/** Full SHA-256 of the issued serial and immutable snapshot JSON; not a digital signature. */
+export function certificateFingerprint(serial: string, snapshotJson: string): Promise<string> {
+  return sha256Hex(`${serial}\n${snapshotJson}`);
+}

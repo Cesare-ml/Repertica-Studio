@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { certificateTexts, declarationEn, declarationIt, dimensionsText, formatIssueDate, localizedValue, normalizeLanguage, sha256Hex } from '../src/app/certificate-text.ts';
+import { certificateTexts, declarationEn, declarationIt, dimensionsText, formatIssueDate, localizedValue, normalizeLanguage, sha256Hex, certificateFingerprint } from '../src/app/certificate-text.ts';
 
 const get = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 
@@ -48,6 +48,19 @@ test('historical certificate dates never roll over to an invented day', () => {
 
 test('the SHA-256 of the issued record is the standard one', async () => {
   assert.equal(await sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+});
+
+test('printed verification fingerprint contains the complete SHA-256, not half of it', async () => {
+  const serial = 'CERT-0012';
+  const original = '{"id":"a","title":"Paesaggio"}';
+  const full = await certificateFingerprint(serial, original);
+  assert.match(full, /^[a-f0-9]{64}$/);
+  assert.equal(full, await sha256Hex(`${serial}\n${original}`));
+  assert.notEqual(full, await certificateFingerprint(serial, '{"id":"a","title":"Alterato"}'));
+  assert.notEqual(full, await certificateFingerprint('CERT-0013', original));
+  const sheet = get('src/app/certificate-sheet.component.ts');
+  assert.match(sheet, /this\.hash = hex;/, 'display the complete 64-character digest');
+  assert.doesNotMatch(sheet, /hex\.slice\(0,\s*32\)/, 'a half digest cannot be labelled SHA-256');
 });
 
 test('the certificate keeps the layout of the Gestionale and the artist comes from the settings', () => {
