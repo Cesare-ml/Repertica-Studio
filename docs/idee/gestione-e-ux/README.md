@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **68 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantaduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **69 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -79,6 +79,17 @@ Aggiornato: **2026-11-23** (sessantunesima ricognizione). Stato delle proposte: 
 | [REPS-UX-066](REPS-UX-066-servizi-esterni-lavorazioni-opere.md) | Lavorazioni commissionate **dallo studio** a corniciai, stampatori e fonderie: richiesta, scadenza ed esito dichiarati per opera, distinti da spese, movimenti fisici e incarichi ricevuti | P2 solo con casi ricorrenti verificati; altrimenti P3/checklist/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-067](REPS-UX-067-protezione-modifiche-non-salvate-moduli.md) | Protezione non invasiva dei campi modificati e non ancora salvati nei moduli opera, collezionista e spesa, con uscita consapevole; nessuna bozza persistente o autosave | P2 se rischio verificato; P3/nessuna funzione altrimenti | Proposta — da valutare |
 | [REPS-UX-068](REPS-UX-068-verifica-collezionista-esistente-prima-inserimento.md) | Verifica di un contatto già presente **prima di creare un nuovo collezionista** nel flusso opera+vendita, confronto prudente, selezione UUID solo esplicita; nessuna fusione o collegamento automatico | P2 soltanto se duplicati reali verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
+| [REPS-UX-069](REPS-UX-069-ripetizione-manuale-spesa-precedente.md) | Nuova spesa manuale da una registrazione precedente: riuso prudente dei campi, nuova data e importo da verificare, nessuna ricorrenza né pagamento presunto | P2 solo con casi frequenti verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Sessantaduesima ricognizione — 23 novembre 2026 — REPS-UX-069
+
+- **[REPS-UX-069 — Nuova spesa manuale a partire da una precedente](REPS-UX-069-ripetizione-manuale-spesa-precedente.md).** Riletti su `main` `README.md`, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `docs/SALE-RECEIPTS.md`, `src/app/app.component.ts/html` e `src-tauri/src/finance.rs`: nell'elenco «Acquisti e spese» sono disponibili «Modifica», «Elimina» e «+ Registra spesa»; `editExpense` mantiene l'UUID originale, mentre il nuovo inserimento parte da un form quasi vuoto. **Non esiste nel percorso esaminato una scelta esplicita per usare una spesa già registrata come base di una nuova.** Nessun caso reale di errore o rallentamento è ancora confermato.
+- **Proposta minima:** da una spesa esistente aprire una **nuova bozza** con alcuni campi riutilizzati e UUID vuoto; data nuova, importo da verificare, note vuote, fondo valido, salvare solo dopo conferma manuale. **Nessuna registrazione ricorrente automatica**, nessuna creazione di pagamenti, scorte o collegamenti a vendite. Migrazione SQLite non necessaria nell'ipotesi minima.
+- **Prima alternativa:** testare con 3–5 professionisti quanto spesso copiano realmente categoria/fornitore/descrizione; valutare se basta un inserimento manuale con migliore navigazione. **P2 solo se bisogno frequente**, altrimenti P3 o nessuna funzione.
+- **Non duplicazioni:** UX-037 tratta scadenze ricorrenti future, UX-042 i pagamenti dichiarati su acquisti differiti, UX-028 allegati giustificativi, UX-008 scorte, UX-067 modifiche non salvate; TECH-002 riguarda automazioni locali e non è requisito per l'azione. **69 idee Gestione e UX**, tutte «Proposta — da valutare», senza approvazione né incarichi. Nessun file dell'altra [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) modificato.
+- **Perimetro:** soltanto questa scheda Markdown e l'indice sotto `docs/idee/gestione-e-ux/`, su branch documentale. Nessun codice, test, build, workflow, dipendenza, configurazione, issue di implementazione o merge.
+
+---
 
 ## Sessantunesima ricognizione — 23 novembre 2026 — REPS-UX-068
 
