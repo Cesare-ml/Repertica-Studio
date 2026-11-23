@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **67 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **68 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -78,6 +78,14 @@ Aggiornato: **2026-11-23** (sessantesima ricognizione). Stato delle proposte: **
 
 | [REPS-UX-066](REPS-UX-066-servizi-esterni-lavorazioni-opere.md) | Lavorazioni commissionate **dallo studio** a corniciai, stampatori e fonderie: richiesta, scadenza ed esito dichiarati per opera, distinti da spese, movimenti fisici e incarichi ricevuti | P2 solo con casi ricorrenti verificati; altrimenti P3/checklist/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-067](REPS-UX-067-protezione-modifiche-non-salvate-moduli.md) | Protezione non invasiva dei campi modificati e non ancora salvati nei moduli opera, collezionista e spesa, con uscita consapevole; nessuna bozza persistente o autosave | P2 se rischio verificato; P3/nessuna funzione altrimenti | Proposta — da valutare |
+| [REPS-UX-068](REPS-UX-068-verifica-collezionista-esistente-prima-inserimento.md) | Verifica di un contatto già presente **prima di creare un nuovo collezionista** nel flusso opera+vendita, confronto prudente, selezione UUID solo esplicita; nessuna fusione o collegamento automatico | P2 soltanto se duplicati reali verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Sessantunesima ricognizione — 23 novembre 2026 — REPS-UX-068
+
+- **[REPS-UX-068 — Verifica di un collezionista già presente prima dell'inserimento](REPS-UX-068-verifica-collezionista-esistente-prima-inserimento.md)**: il percorso rapido «Nuova opera + vendita» offre un nuovo contatto per nome, ma non mostra un controllo preventivo sugli omonimi. Proposta circoscritta a un avviso prudente e scelta esplicita dell'UUID esistente oppure «Crea comunque», senza unioni, riscritture o deduzioni di identità. Nessun caso reale di duplicazione verificato.
+- **Prima alternativa da valutare:** un accesso alla ricerca esistente e un promemoria contestuale, con prove d'uso su 4–6 casi sintetici. **P2** solo con errori ripetuti realmente osservati, altrimenti **P3 o nessuno sviluppo**.
+- **Confini:** UX-055 confronta opere esistenti, UX-014 una rubrica futura, UX-061 tutela dei dati personali, TECH-019/040 import e portabilità. Nessun file dell'altra automazione modificato. **68 schede**, tutte «Proposta — da valutare».
+- **Perimetro:** scheda e indice Markdown in `docs/idee/gestione-e-ux/`; [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) aperta in bozza, senza merge, senza approvazioni o attività di implementazione.
 
 ## Sessantesima ricognizione — 23 novembre 2026 — REPS-UX-067
 
