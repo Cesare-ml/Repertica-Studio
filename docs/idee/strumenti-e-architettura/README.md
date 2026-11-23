@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **70 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **71 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -79,6 +79,14 @@ Data ricognizione: **2026-11-23** (sessantasettesima ricognizione). Stato unifor
 | [REPS-TECH-068](REPS-TECH-068-brochure-pdf-esportazione-memoria-limitata.md) | Brochure PDF fino a 100 opere: studio del picco RAM dell'attuale renderer che accumula pagine, oggetti e PDF prima della scrittura; possibili soluzioni progressive, solo dopo benchmark | P2 solo con limiti misurati; altrimenti P3 o nessuna modifica | Proposta — da valutare |
 | [REPS-TECH-069](REPS-TECH-069-protezione-originali-raw-sostituzione.md) | Salvaguardia dei RAW originari alla sostituzione: verifica della rimozione attuale, conferma/export preventivi e soltanto eventualmente cronologia locale recuperabile opt-in | P1–P2 per prevenzione solo se danno confermato; P2–P3 per versioni; altrimenti nessuno sviluppo | Proposta — da valutare |
 | [REPS-TECH-070](REPS-TECH-070-prestazioni-consultazione-archivio-liste-grandi.md) | Consultazione fluida degli archivi grandi: misurazione del costo dei getter di ricerca e del rendering della tabella opere, prima di valutare derivazioni stabili, paginazione accessibile o eventuali query Rust | P2 solo dopo misure e bisogno reale; altrimenti P3/QA o nessuno sviluppo | Proposta — da valutare |
+| [REPS-TECH-071](REPS-TECH-071-posta-limiti-temporali-esiti-invio.md) | Posta su reti instabili: scadenze IMAP effettive e distinzione fra accettazione SMTP, esito sconosciuto e copia Inviati; nessun reinvio automatico | P2 solo se blocchi riprodotti; P1–P2 se rischio concreto di reinvio; altrimenti P3/guida | Proposta — da valutare |
+
+## Sessantottesima ricognizione — 23 novembre 2026 — REPS-TECH-071
+
+- **[REPS-TECH-071 — Posta: attese di rete limitate ed esiti di invio non ambigui per l'utente](REPS-TECH-071-posta-limiti-temporali-esiti-invio.md).** Riletti README, MVP, BUSINESS-MAIL-DESKTOP, MCP, backend business_mail.rs e componente Angular su main; confrontati gli indici delle 70 idee tecniche e 75 UX della PR #14. La documentazione dichiara già l'assenza di timeout applicativo complessivo per la connessione IMAP iniziale; il wrapper esegue connessione, login, azione e logout senza scadenze esplicite visibili, su worker bloccanti. L'interfaccia mantiene busy fino alla fine; SMTP distingue già accettazione e copia Inviati, ma l'APPEND avviene prima di restituire l'esito. Nessun blocco o duplicato reale riprodotto.
+- **Perimetro:** prima misurare DNS/TCP/TLS e letture lente su ambienti controllati. Solo se necessario studiare scadenze reali e liberazione delle risorse; separatamente rendere esplicita la fase dopo accettazione SMTP. Nessun reinvio automatico, nuovo account, rete in background o caching obbligatorio. Conservare TLS, UIDVALIDITY, portachiavi, backup ed export esistenti.
+- **Anti-doppioni:** TECH-062 riguarda operazioni locali; TECH-056 OAuth; TECH-031 allegati bozze; TECH-039 EML; UX-035 preferenze di contatto. Nessun file UX modificato.
+- **Priorità ipotetica:** P2 solo se blocchi riproducibili, P1–P2 solo per rischio concreto di reinvio; altrimenti P3/guida o nessuna modifica. 71 proposte, tutte **«Proposta — da valutare»**. PR #16 in bozza, senza merge; solo Markdown.
 
 ## Sessantasettesima ricognizione — 23 novembre 2026 — REPS-TECH-070
 
