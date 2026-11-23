@@ -171,6 +171,25 @@ fn validate_sale_dates(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+// Expense dates determine which month owns a studio cost. SQLite validates
+// the table structure but not the YYYY-MM-DD content of its TEXT dates.
+fn validate_expense_dates(conn: &Connection) -> Result<(), String> {
+    let mut statement = conn.prepare("SELECT id, expense_date FROM expenses").map_err(error)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(error)?;
+    for row in rows {
+        let (id, date) = row.map_err(error)?;
+        let canonical = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map(|parsed| parsed.format("%Y-%m-%d").to_string() == date)
+            .unwrap_or(false);
+        if !canonical {
+            return Err(format!("Il backup contiene una data di spesa non valida: {id}"));
+        }
+    }
+    Ok(())
+}
+
 // SQLite page integrity and foreign keys alone cannot detect an imported sale
 // without its financial row, or taxes/shipping exceeding the agreed price.
 // All schema versions >= 2 populate sale_finances for every historical sale.
@@ -263,7 +282,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     // Sale dates are present even in the original v1 schema.
     validate_sale_dates(&conn)?;
     // v1 predates finance rows; migration v2 created them for all existing sales.
-    if schema >= 2 { validate_sale_finances(&conn)?; }
+    if schema >= 2 { validate_sale_finances(&conn)?; validate_expense_dates(&conn)?; }
     // Legacy schemas 1-3 have no sale_receipts table: never infer payments.
     if schema >= 4 { validate_receipt_balances(&conn)?; validate_receipt_dates(&conn)?; }
     let mut counts = [0_i64; 4];
@@ -928,6 +947,70 @@ mod tests {
             "SELECT received_at FROM sale_receipts WHERE id='receipt'", [], |row| row.get(0)
         ).unwrap();
         assert_eq!(date, "2026-11-21", "the live archive must remain intact");
+    }
+
+    #[test]
+    fn invalid_expense_dates_cannot_be_backed_up_or_restored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
+                 VALUES('expense','2026-11-21','materials','Paint',250,'now','now')",
+                [],
+            ).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // A rehashed import with invalid TEXT dates passes SQLite page and
+        // foreign-key checks, but would shift or hide costs in monthly reports.
+        for invalid in ["2026-02-30", "2026-2-3", "not-a-date"] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute(
+                    "UPDATE expenses SET expense_date=?1 WHERE id='expense'",
+                    params![invalid],
+                ).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok");
+                let foreign_keys: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check",
+                    [], |row| row.get(0),
+                ).unwrap();
+                assert_eq!(foreign_keys, 0);
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("data di spesa non valida"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+        }
+        let date: String = db.conn.lock().unwrap().query_row(
+            "SELECT expense_date FROM expenses WHERE id='expense'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(date, "2026-11-21", "the live archive must not be replaced");
+
+        // Also refuse to publish a new backup if the active archive itself
+        // contains invalid dates from an external SQLite import.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE expenses SET expense_date='2026-02-30' WHERE id='expense'",
+                [],
+            ).unwrap();
+        }
+        let message = create_backup_core(&db, &destination).unwrap_err();
+        assert!(message.contains("data di spesa non valida"), "{message}");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1,
+            "a refused backup must not leave a published or partial folder");
     }
 
     #[test]
