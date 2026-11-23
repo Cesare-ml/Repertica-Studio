@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (quarantottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **51 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (quarantanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **52 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -57,6 +57,14 @@ Data ricognizione: **2026-11-23** (quarantottesima ricognizione). Stato uniforme
 | [REPS-TECH-049](REPS-TECH-049-confine-istruzioni-dati-mcp-prompt-injection.md) | Testi delle schede come dati non attendibili negli output MCP: rischio di prompt injection indiretta, confini di responsabilità degli host e test sintetici senza censurare le opere | P2–P3 condizionata | Proposta — da valutare |
 | [REPS-TECH-050](REPS-TECH-050-confronto-backup-senza-ripristino.md) | Confronto descrittivo e read-only di due backup completi verificati: differenze per record e hash media senza ripristino, fusione o deduzioni sulla provenienza | P2–P3 condizionata; nessuno sviluppo se bastano CSV/Calc | Proposta — da valutare |
 | [REPS-TECH-051](REPS-TECH-051-manifest-iiif-presentazione-opere.md) | Manifest IIIF Presentation 3 per opere e immagini selezionate: pacchetto di **prepubblicazione offline**, URL HTTP(S) dichiarati dal destinatario, senza hosting né diritti presunti | P3, P2 solo con domanda istituzionale verificata | Proposta — da valutare |
+| [REPS-TECH-052](REPS-TECH-052-verifica-indipendente-backup-formato-v1.md) | Specifica pubblica del backup v1 e verifica tecnica indipendente in sola lettura anche senza Repertica avviato; nessun restore né nuova forma di backup | P2 documentazione/prove; P3 verificatore solo se richiesto | Proposta — da valutare |
+
+## Quarantanovesima ricognizione — 23 novembre 2026 — REPS-TECH-052
+
+- **[REPS-TECH-052 — Specifica pubblica e verifica indipendente dei backup v1](REPS-TECH-052-verifica-indipendente-backup-formato-v1.md):** riesaminati sul branch `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `docs/MCP.md`, `src-tauri/src/backup.rs` e `db.rs`; confrontate le **51 schede tecniche precedenti** e le **56 proposte UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il motore attuale controlla già backup completi v1 (SQLite, media, manifest SHA-256) e ne verifica vincoli importanti; qui si studia solo come **documentare un contratto verificabile fuori dall'app** e, se necessario, un lettore autonomo offline in sola lettura. Non emerge una perdita di dati o una richiesta utente verificata: l'opportunità riguarda indipendenza e conservazione nel lungo periodo.
+- **Anti-doppioni:** TECH-001 = futuro pacchetto semantico e reimportazione, TECH-009 = catalogo e verifiche di backup dall'app, TECH-006 = cifratura eventuale, TECH-012/037/042 = migrazioni/ripristino/compatibilità, TECH-050 = confronto di due copie. REPS-TECH-052 **non** cambia il formato, non esegue restore, non crea nuovi processi gestionali e non tocca il filone UX.
+- **Verifica prima di approvare:** testare anzitutto una **guida pubblica al v1** e fixture sintetiche con SQLite/SHA-256 standard, con distinzione esplicita fra controllo degli hash, controlli semantici completi e prova reale di ripristino. Il digest non è firma o autenticazione; gli schemi futuri non vanno dichiarati corrotti quando sono solo sconosciuti. **P2 ipotetica** per documentazione/conformità, **P3** per un eventuale CLI autonomo; se basta una guida, **nessun nuovo software**.
+- **Esito:** **52 schede tecniche**, tutte **«Proposta — da valutare»**. Soltanto Markdown in `docs/idee/strumenti-e-architettura/`; nessun codice, test, workflow, dipendenza, impostazione, documentazione UX, approvazione, issue di implementazione o merge. [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) da lasciare in bozza.
 
 ## Quarantottesima ricognizione — 23 novembre 2026 — REPS-TECH-051
 
