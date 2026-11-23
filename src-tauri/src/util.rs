@@ -56,6 +56,17 @@ pub fn fold(text: &str) -> String {
             continue;
         }
         match c {
+            // Imported artwork/media metadata may be typed on fullwidth keyboards.
+            // U+FF01..U+FF5E maps one-to-one to ASCII U+0021..U+007E.
+            '\u{ff01}'..='\u{ff5e}' => folded.push(
+                char::from_u32((c as u32) - 0xfee0).expect("fullwidth ASCII mapping")
+            ),
+            // Normalize common no-break/ideographic spaces and smart punctuation
+            // just as the desktop archive search does.
+            '\u{3000}' | '\u{00a0}' | '\u{202f}' => folded.push(' '),
+            '\u{2018}' | '\u{2019}' | '\u{02bc}' => folded.push('\u{0027}'),
+            '\u{201c}' | '\u{201d}' => folded.push('"'),
+            '\u{2010}'..='\u{2015}' | '\u{2212}' => folded.push('-'),
             // Multi-letter equivalents must be expanded, not dropped.
             'æ' => folded.push_str("ae"),
             'œ' => folded.push_str("oe"),
@@ -172,6 +183,24 @@ mod tests {
             assert_eq!(fold(stored), fold(typed), "{stored} versus {typed}");
         }
         // Non-Latin text and emoji must not be transliterated or stripped.
+        assert_eq!(fold("日本語 · 📷"), "日本語 · 📷");
+    }
+
+    #[test]
+    fn local_media_search_matches_fullwidth_codes_and_smart_punctuation() {
+        // These are real forms of pasted archive codes, artwork titles and
+        // photograph credits. Both stored fields and queries use this fold.
+        for (stored, query) in [
+            ("ＡＲＴ－００４２", "art-0042"),
+            ("Ｓｔｕｄｉｏ　４２", "studio 42"),
+            ("Ｌ’Ａｍｉｃｏ — Œuvre", "l'amico - oeuvre"),
+            ("“Carta”　Ａ４", "\"carta\" a4"),
+            ("olio\u{00a0}su\u{202f}tela", "olio su tela"),
+            ("Collezione − privata", "collezione - privata"),
+        ] {
+            assert_eq!(fold(stored), fold(query), "{stored} vs {query}");
+        }
+        // Never drop unrelated scripts, punctuation or emoji from metadata.
         assert_eq!(fold("日本語 · 📷"), "日本語 · 📷");
     }
 
