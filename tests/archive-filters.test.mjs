@@ -319,3 +319,33 @@ test('collector search folds European names and only the artworks they purchased
   assert.deepEqual(found('unsold-0003'), [], 'unrelated artwork codes stay private to their own records');
   assert.deepEqual(found('lodz thor'), [], 'terms cannot cross two collectors');
 });
+
+test('collector lookup uses current metadata only from genuinely purchased works', () => {
+  const works = [
+    artwork('owned', { code: 'ART-101', title: 'Fiume blu', technique: 'Acquerello',
+      support: 'Carta Fabriano', year: '2023', location: 'Atelier Venezia',
+      width_cm: 30, height_cm: 40 }),
+    artwork('unowned', { code: 'ART-999', title: 'Ritratto segreto',
+      technique: 'Tempera', location: 'Napoli' }),
+    artwork('other-owned', { code: 'ART-102', title: 'Mare verde',
+      technique: 'Olio', location: 'Firenze' })
+  ];
+  const people = [collector('a', { name: 'Anna' }), collector('b', { name: 'Bruno' })];
+  const indexes = buildSaleIndexes([
+    sale('owned', 'a', 'Vecchio titolo', 'Anna'),
+    sale('other-owned', 'b', 'Mare verde', 'Bruno')
+  ]);
+  const found = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+
+  assert.deepEqual(found('fiume blu'), ['a']); // Current artwork title, not just sale text.
+  assert.deepEqual(found('acquerello fabriano'), ['a']);
+  assert.deepEqual(found('"atelier venezia" 2023'), ['a']);
+  assert.deepEqual(found('30 x 40 cm'), ['a']);
+  assert.deepEqual(found('art-101 anna'), ['a']);
+  assert.deepEqual(found('firenze olio'), ['b']);
+  assert.deepEqual(found('tempera'), []); // Unsold artwork cannot create a match.
+  assert.deepEqual(found('napoli'), []);
+  assert.deepEqual(found('acquerello bruno'), []); // No cross-buyer metadata.
+  assert.deepEqual(found('vecchio titolo'), ['a']); // Historical sale name still works.
+  assert.deepEqual(filterCollectors(people, 'vecchio titolo', indexes).map(c => c.id), ['a']);
+});
