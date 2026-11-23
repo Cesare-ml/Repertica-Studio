@@ -84,3 +84,7 @@ Il workflow esegue anche compilazioni sul branch `main` quando il codice dell'ap
 - La tesoreria è un riepilogo gestionale, non sostituisce la contabilità fiscale né determina automaticamente somme incassate.
 
 Per formule, convenzioni e limitazioni: [Economia e localizzazione](docs/ECONOMY-I18N.md).
+
+## Integrazione futura Repertica Auctions
+
+Specifiche MVP e contratto di coordinamento: [Auctions agent brief](https://github.com/Cesare-ml/Repertica-auctions/blob/main/docs/AGENT_MVP_BRIEF.md). Desktop rimane completamente offline e senza account per uso locale; OAuth e connessione sono opzionali. Per Auctions deve consentire di selezionare e inviare **solo una singola opera** senza sincronizzare tutto l'archivio, creare/gestire aste con le API server condivise, leggere offerte e risultati e preparare bozze offline (mai offerte reali offline). Parità funzionale con gestione web e risultati idempotenti; nessuna funzione è da considerare già implementata per il solo fatto che è documentata.
