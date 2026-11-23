@@ -50,6 +50,30 @@ fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String
             ));
         }
     }
+    // Imported SQLite data may satisfy foreign keys but contain deductions
+    // larger than the price, or CHECK constraints bypassed by external tools.
+    // Never export an apparently authoritative negative net sale. Compute in
+    // i64 with checked arithmetic so even corrupt extreme values cannot wrap.
+    if matches!(kind, "sales" | "allocations") {
+        let mut stmt = conn.prepare(
+            "SELECT s.id,s.amount_cents,f.tax_cents,f.shipping_cents
+             FROM sales s JOIN sale_finances f ON f.sale_id=s.id
+             ORDER BY s.id"
+        ).map_err(error)?;
+        let entries = stmt.query_map([], |row| Ok((
+            row.get::<_, String>(0)?, row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?, row.get::<_, i64>(3)?,
+        ))).map_err(error)?;
+        for entry in entries {
+            let (sale_id, gross, taxes, shipping) = entry.map_err(error)?;
+            let net = gross.checked_sub(taxes).and_then(|v| v.checked_sub(shipping));
+            if gross <= 0 || taxes < 0 || shipping < 0 || net.is_none_or(|v| v < 0) {
+                return Err(format!(
+                    "Esportazione annullata: imposte, spedizione o importo incoerenti per la vendita {sale_id}. Verifica l'archivio prima di esportare."
+                ));
+            }
+        }
+    }
     // An external SQLite import can bypass the receipt limit triggers. A CSV
     // reporting negative outstanding money would be misleading even though all
     // foreign keys still resolve and the underlying database is readable.
@@ -305,6 +329,73 @@ mod tests {
         conn.execute("INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
             VALUES('s',3334,3333,3333)", []).unwrap();
         assert!(render_csv(&conn, "sales").unwrap().contains(";4200;0;0;4200;"));
+        assert!(render_csv(&conn, "allocations").is_ok());
+    }
+
+    #[test]
+    fn financial_csv_rejects_deductions_above_sale_amount_before_creating_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(r#"
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','ART-1','Opera','t','t');
+                INSERT INTO collectors(id,name,created_at,updated_at)
+                    VALUES('c','Cliente','t','t');
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','c',4200,'2026-11-01','t');
+                INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                    VALUES('s',0,0,3334,3333,3333);
+            "#).unwrap();
+            for (taxes, shipping) in [(4201, 0), (2000, 2201)] {
+                conn.execute(
+                    "UPDATE sale_finances SET tax_cents=?1,shipping_cents=?2 WHERE sale_id='s'",
+                    rusqlite::params![taxes, shipping],
+                ).unwrap();
+                for kind in ["sales", "allocations"] {
+                    let failure = render_csv(&conn, kind).unwrap_err();
+                    assert!(failure.contains("vendita s"), "{kind}: {failure}");
+                    assert!(failure.contains("incoerenti"), "{kind}: {failure}");
+                }
+            }
+        }
+        let destination = dir.path().join("sales.csv");
+        assert!(export_file(&db, "sales", &destination).is_err());
+        assert!(!destination.exists(), "invalid money must never reach a CSV");
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE sale_finances SET tax_cents=1200,shipping_cents=300 WHERE sale_id='s'",
+            [],
+        ).unwrap();
+        assert!(render_csv(&conn, "sales").unwrap().contains(";4200;1200;300;2700;"));
+        assert!(render_csv(&conn, "allocations").is_ok());
+    }
+
+    #[test]
+    fn financial_csv_rejects_negative_imported_deductions_and_recovers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','ART-1','Opera','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Cliente','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',4200,'2026-11-01','t');
+            INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+                VALUES('s',3334,3333,3333);
+            PRAGMA ignore_check_constraints=ON;
+            UPDATE sale_finances SET tax_cents=-1 WHERE sale_id='s';
+            PRAGMA ignore_check_constraints=OFF;
+        "#).unwrap();
+        for kind in ["sales", "allocations"] {
+            let failure = render_csv(&conn, kind).unwrap_err();
+            assert!(failure.contains("vendita s"), "{kind}: {failure}");
+        }
+        conn.execute("UPDATE sale_finances SET tax_cents=0 WHERE sale_id='s'", []).unwrap();
+        assert!(render_csv(&conn, "sales").is_ok());
         assert!(render_csv(&conn, "allocations").is_ok());
     }
 
