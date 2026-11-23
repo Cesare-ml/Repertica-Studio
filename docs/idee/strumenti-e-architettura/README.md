@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **60 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantottesima ricognizione). Stato uniforme: **Proposta — da valutare**. **61 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -69,6 +69,15 @@ Data ricognizione: **2026-11-23** (cinquantasettesima ricognizione). Stato unifo
 | [REPS-TECH-058](REPS-TECH-058-ricognizione-post-ripristino-nuovo-computer.md) | Ricognizione dopo ripristino su un altro computer: destinazione backup assoluta, credenziali posta nel keyring OS, collegamenti MCP esterni e preferenze WebView, senza cambiare archivio né configurazioni automaticamente | P2 solo se bisogno ricorrente; altrimenti P3 o sola guida | Proposta — da valutare |
 | [REPS-TECH-059](REPS-TECH-059-acquisizione-fotografie-smartphone-rete-locale.md) | Acquisizione temporanea e consapevole di fotografie da smartphone al Media Center via LAN, **solo se un pairing cifrato e sicuro è fattibile**; prima sperimentare USB/AirDrop/Quick Share + import multiplo già esistente | P3 iniziale, P2 solo con bisogno verificato e revisione sicurezza; altrimenti nessuna funzione | Proposta — da valutare |
 | [REPS-TECH-060](REPS-TECH-060-identita-destinazione-backup-programmati.md) | Backup automatici su USB/NAS: controllo facoltativo della destinazione effettiva quando il percorso resta uguale ma cambia supporto, senza confondere verifica del disco e integrità delle copie | P2 solo con scenario riproducibile e bisogno reale; P3 o guida altrimenti | Proposta — da valutare |
+| [REPS-TECH-061](REPS-TECH-061-esportazione-metadati-museali-lido-11.md) | Consegna selettiva di metadati delle opere in LIDO 1.1 XML per musei, con mapping dichiarato e validazione offline; non backup, non IIIF, non pubblicazione o import | P3; P2 solo con partner e profilo museale verificati | Proposta — da valutare |
+
+## Cinquantottesima ricognizione — 23 novembre 2026 — REPS-TECH-061
+
+- **[REPS-TECH-061 — Esportazione selettiva dei metadati delle opere in LIDO 1.1](REPS-TECH-061-esportazione-metadati-museali-lido-11.md).** Esaminati `main`, `README.md`, `docs/DATA-PORTABILITY.md`, `docs/MVP.md`, `src-tauri/src/models.rs`, `db.rs` e `export.rs`, più la documentazione ufficiale del formato [LIDO 1.1](https://www.lido-schema.org/schema/v1.1/lido-v1.1.html). Le schede Repertica dispongono già di alcuni metadati utili, ma i dodici registri CSV e il backup SQLite/media **non equivalgono** a un tracciato XML richiesto da un catalogo museale. È una **possibile** esigenza professionale, **non una domanda utente verificata**.
+- **Proposta circoscritta:** solo dopo richiesta di un museo, studiare una **proiezione selettiva e manualmente revisionata**, con identificatore e mapping espliciti, validazione XSD locale, rapporto dei campi mancanti, nessun dato finanziario o contatto privato, nessun URI inventato, nessuna pubblicazione, importazione, modifica dell'archivio o cloud necessario. Titolo/anno/tecnica non autorizzano a inferire attribuzione, provenienza, tipologia o diritti. Lo schema LIDO genericamente valido **non garantisce** compatibilità col profilo del destinatario.
+- **Confronto anti-doppioni:** TECH-001 esporta il pacchetto aperto completo, TECH-051 prepara Manifest IIIF per la presentazione di immagini, TECH-057 documenta le colonne CSV e TECH-041 una checklist Object ID; qui si studia il **contratto XML di metadati museali in sola uscita**, senza duplicare quelle funzioni. Confrontate tutte le **60** schede tecniche precedenti e le **65 Gestione/UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), non modificate.
+- **Alternativa preferita:** testare un **mapping esterno dei CSV** con 3–5 opere fittizie e una specifica reale fornita da un partner; se basta un foglio e il museo accetta, **non** creare una funzione. **Priorità P3**, solo **P2 dopo partner/profilo e necessità documentati**; complessità alta. Tutte le **61 schede** rimangono «Proposta — da valutare», senza approvazione o incarico.
+- **Perimetro modifiche:** nuova scheda e presente indice, esclusivamente Markdown in `docs/idee/strumenti-e-architettura/`; PR #16 in bozza verso `main`, nessun merge, codice, test, workflow, configurazione, dipendenza, issue operativa o file Gestione/UX modificati.
 
 ## Cinquantasettesima ricognizione — 23 novembre 2026 — REPS-TECH-060
 
