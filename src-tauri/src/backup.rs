@@ -200,6 +200,24 @@ fn validate_expense_dates(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+// A third-party SQLite importer can remove CHECK constraints, store invalid
+// expense amounts, and then rehash the backup. Page and FK checks may still
+// pass, but a zero, negative, oversized or non-integer expense would corrupt
+// studio totals. Keep the same 1..=100 billion cents limit as expense CRUD.
+fn validate_expense_amounts(conn: &Connection) -> Result<(), String> {
+    let invalid: Option<String> = conn.query_row(
+        "SELECT id FROM expenses
+         WHERE typeof(amount_cents) != 'integer'
+            OR amount_cents NOT BETWEEN 1 AND 100000000000
+         ORDER BY id LIMIT 1",
+        [], |row| row.get(0)
+    ).optional().map_err(error)?;
+    if let Some(id) = invalid {
+        return Err(format!("Il backup contiene un importo di spesa non valido: {id}"));
+    }
+    Ok(())
+}
+
 // SQLite page integrity and foreign keys alone cannot detect an imported sale
 // without its financial row, or taxes/shipping exceeding the agreed price.
 // All schema versions >= 2 populate sale_finances for every historical sale.
@@ -292,7 +310,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     // Sale dates are present even in the original v1 schema.
     validate_sale_dates(&conn)?;
     // v1 predates finance rows; migration v2 created them for all existing sales.
-    if schema >= 2 { validate_sale_finances(&conn)?; validate_expense_dates(&conn)?; }
+    if schema >= 2 { validate_sale_finances(&conn)?; validate_expense_dates(&conn)?; validate_expense_amounts(&conn)?; }
     // Legacy schemas 1-3 have no sale_receipts table: never infer payments.
     if schema >= 4 { validate_receipt_balances(&conn)?; validate_receipt_dates(&conn)?; }
     let mut counts = [0_i64; 4];
@@ -1028,6 +1046,92 @@ mod tests {
             "SELECT received_at FROM sale_receipts WHERE id='receipt'", [], |row| row.get(0)
         ).unwrap();
         assert_eq!(date, "2026-11-21", "the live archive must remain intact");
+    }
+
+    #[test]
+    fn invalid_expense_amounts_cannot_be_published_or_restored_from_rehashed_backups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
+                 VALUES('expense','2026-11-21','materials','Paint',250,'now','now')",
+                [],
+            ).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // Simulate an imported SQLite schema rebuilt without its CHECK.
+        // PRAGMA integrity_check can otherwise reject an invalid expense
+        // before the application's semantic validator gets to inspect it.
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute_batch(
+                "PRAGMA writable_schema=ON;
+                 UPDATE sqlite_schema SET sql=REPLACE(sql,
+                     ' CHECK(amount_cents > 0)', '')
+                   WHERE type='table' AND name='expenses';
+                 PRAGMA writable_schema=OFF;"
+            ).unwrap();
+            let definition: String = snapshot.query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='expenses'", [], |row| row.get(0)
+            ).unwrap();
+            assert!(!definition.contains("CHECK(amount_cents > 0)"));
+        }
+        // An altered manifest is not enough to authorize a restore when
+        // individual expenses violate the original business constraints.
+        for value in [0_i64, -1, 100_000_000_001] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute(
+                    "UPDATE expenses SET amount_cents=?1 WHERE id='expense'",
+                    params![value],
+                ).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok", "amount={value}");
+                let foreign_keys: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(foreign_keys, 0);
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("importo di spesa non valido"), "{value}: {message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+            let live: i64 = db.conn.lock().unwrap().query_row(
+                "SELECT amount_cents FROM expenses WHERE id='expense'", [],
+                |row| row.get(0)
+            ).unwrap();
+            assert_eq!(live, 250, "failed restore must preserve the live expense");
+        }
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute(
+                "UPDATE expenses SET amount_cents=250 WHERE id='expense'", []
+            ).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        assert!(inspect_backup_core(folder).unwrap().verified, "repaired snapshot should recover");
+
+        // Reject publishing an inconsistent live archive, without leaving a
+        // partly created backup beside the existing verified snapshot.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE expenses SET amount_cents=100000000001 WHERE id='expense'", []
+            ).unwrap();
+        }
+        let message = create_backup_core(&db, &destination).unwrap_err();
+        assert!(message.contains("importo di spesa non valido"), "{message}");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 1);
     }
 
     #[test]
