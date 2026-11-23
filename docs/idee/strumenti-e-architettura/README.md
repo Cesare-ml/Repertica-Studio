@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (quarantanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **52 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **53 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -58,6 +58,16 @@ Data ricognizione: **2026-11-23** (quarantanovesima ricognizione). Stato uniform
 | [REPS-TECH-050](REPS-TECH-050-confronto-backup-senza-ripristino.md) | Confronto descrittivo e read-only di due backup completi verificati: differenze per record e hash media senza ripristino, fusione o deduzioni sulla provenienza | P2–P3 condizionata; nessuno sviluppo se bastano CSV/Calc | Proposta — da valutare |
 | [REPS-TECH-051](REPS-TECH-051-manifest-iiif-presentazione-opere.md) | Manifest IIIF Presentation 3 per opere e immagini selezionate: pacchetto di **prepubblicazione offline**, URL HTTP(S) dichiarati dal destinatario, senza hosting né diritti presunti | P3, P2 solo con domanda istituzionale verificata | Proposta — da valutare |
 | [REPS-TECH-052](REPS-TECH-052-verifica-indipendente-backup-formato-v1.md) | Specifica pubblica del backup v1 e verifica tecnica indipendente in sola lettura anche senza Repertica avviato; nessun restore né nuova forma di backup | P2 documentazione/prove; P3 verificatore solo se richiesto | Proposta — da valutare |
+
+| [REPS-TECH-053](REPS-TECH-053-manifest-aperto-storia-revisioni-media.md) | Esportazione selettiva della storia delle revisioni Media Center con originali, derivati e manifest JSON/hash aperto: nessun reimport, nessuna pretesa di riprodurre gli edit | P2 se domanda reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+
+## Cinquantesima ricognizione — 23 novembre 2026 — REPS-TECH-053
+
+- **[REPS-TECH-053 — Manifest aperto della storia delle revisioni fotografiche del Media Center](REPS-TECH-053-manifest-aperto-storia-revisioni-media.md):** riletti su `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/media.rs`, `imaging.rs`, `db.rs` e `docs/MCP.md`; confrontate **52 schede TECH** precedenti e **57 schede Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il Media Center ha già file originali, revisioni non distruttive e hash; il comando export consegna una foto alla volta (originale/corrente/custom), mentre i registri CSV non rappresentano la **storia delle revisioni insieme ai loro byte**. Il backup completo conserva i dati ma non è una consegna selettiva a un fotografo o archivista. Nessuna perdita di dati né domanda utente dimostrata.
+- **Idea strettamente tecnica:** solo se utile, pacchetto locale di una fotografia scelta con revisioni deliberate, file binari invariati, `manifest.json` versionato, percorsi relativi e SHA-256 verificati; indicazione della revisione corrente, **senza dedurre automaticamente relazioni di derivazione fra versioni** dopo un ripristino. Il JSON delle operazioni è descrittivo, **non una ricetta riproducibile** in programmi terzi. Nessuna scrittura sull'archivio, upload, reimport o nuova storia gestionale.
+- **Anti-doppioni:** TECH-001 = pacchetto generale e reimport; TECH-024 = IPTC/XMP e diritti; TECH-021 = profili colore; TECH-003 = controllo integrità; TECH-013 = copie fotografiche condivisibili; UX-026 = diario produzione **dell'opera**, UX-057 = master costitutivi di **opere digitali**. Non modificato alcun file UX.
+- **Alternativa prima dello sviluppo:** esportare manualmente originale e corrente con le funzioni esistenti, produrre una nota Markdown e controllare gli hash con strumenti locali; validare con 4–6 casi di consegna. **P2 solo se ricorrente**, altrimenti **P3 o nessuno sviluppo**.
+- **Esito:** **53 proposte tecniche**, tutte «Proposta — da valutare». Solo scheda e indice Markdown nella cartella autorizzata; [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) in bozza, senza merge, implementazioni, approvazioni o incarichi operativi.
 
 ## Quarantanovesima ricognizione — 23 novembre 2026 — REPS-TECH-052
 
