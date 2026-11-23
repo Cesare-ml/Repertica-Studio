@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **75 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **76 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -89,6 +89,14 @@ Aggiornato: **2026-11-23** (sessantottesima ricognizione). Stato delle proposte:
 
 | [REPS-UX-074](REPS-UX-074-ricognizione-copertine-fotografiche-mancanti.md) | Ricognizione discreta di opere **senza copertina collegata**: filtro leggibile combinabile con ricerca/stato, senza confondere immagini assenti per scelta con file danneggiati o imporre una «qualità fotografica» | P2 solo se bisogno verificato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-UX-075](REPS-UX-075-caratteristiche-opera-non-verificate.md) | Distinguere caratteristiche dell'opera non verificate da assenze dichiarate (firma, vernice finale, cornice): prima chiarimento dei booleani legacy, eventuali tre stati solo se necessario | P2 se ambiguità dimostrata; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
+| [REPS-UX-076](REPS-UX-076-consultazione-certificati-dati-storici.md) | Ritrovare certificati già emessi per seriale e titolo/codice storico, distinguendo i valori correnti; sola consultazione senza nuovi documenti | P2 solo se bisogno dimostrato; altrimenti P3/CSV/nessuna funzione | Proposta — da valutare |
+
+## Sessantanovesima ricognizione — 23 novembre 2026 — REPS-UX-076
+
+- **[REPS-UX-076 — Ritrovare un certificato emesso tramite seriale e dati storici](REPS-UX-076-consultazione-certificati-dati-storici.md).** Riletti README, MVP, portabilità, modelli, template e comandi Rust. Il registro certificati mostra l'elenco completo e il titolo corrente dell'opera; il titolo/codice storico, se presente, è nello snapshot immutabile. Non emerge una ricerca dedicata al registro. Nessuna perdita di documenti accertata, nessun test desktop svolto.
+- **Prima alternativa:** registro e CSV già disponibili, oppure sola ricerca seriale se basta. Proposta minima in sola lettura, senza migrazioni, con distinzione tra dati all'emissione e correnti, gestione di snapshot illeggibili e nessuna ristampa automatica.
+- **Anti-doppioni:** confrontati 75 UX e 71 TECH; UX-045/059 riguardano rettifiche e controllo preemissione, UX-060 parte dall'opera già individuata, TECH-008 ha scope opere. La [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) resta intatta.
+- **Priorità P2 ipotetica** solo se il bisogno è confermato; altrimenti P3/nessuno sviluppo. Tutte le 76 schede restano «Proposta — da valutare». [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza, solo Markdown, senza merge.
 
 ## Sessantottesima ricognizione — 23 novembre 2026 — REPS-UX-075
 
