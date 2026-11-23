@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **54 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **55 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -61,6 +61,15 @@ Data ricognizione: **2026-11-23** (cinquantunesima ricognizione). Stato uniforme
 
 | [REPS-TECH-053](REPS-TECH-053-manifest-aperto-storia-revisioni-media.md) | Esportazione selettiva della storia delle revisioni Media Center con originali, derivati e manifest JSON/hash aperto: nessun reimport, nessuna pretesa di riprodurre gli edit | P2 se domanda reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-054](REPS-TECH-054-pacchetto-catalogo-web-statico-offline.md) | Pacchetto locale per cataloghi web statici: selezione consapevole di sole opere e immagini pubblicabili, JSON aperto, hash e zero pubblicazione automatica | P2 solo se richiesto; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+| [REPS-TECH-055](REPS-TECH-055-esportazione-coerente-registri-csv.md) | Insieme di registri CSV prodotti da una sola snapshot SQLite con manifest di copertura e hash: per analisi incrociate, non backup o reimport | P2 solo se uso frequente confermato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+## Cinquantaduesima ricognizione — 23 novembre 2026 — REPS-TECH-055
+
+- **[REPS-TECH-055 — Esportazione coerente di più registri CSV con manifest locale](REPS-TECH-055-esportazione-coerente-registri-csv.md):** riletti su **main** README, MVP, portabilità e **src-tauri/src/export.rs**; confrontate le **54 schede tecniche precedenti** e le **59 Gestione e UX** nella [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Esistono già **12 registri CSV** integrali, ciascuno consistente al momento della propria chiamata, con gestione sicura di formule, centesimi, UTF-8 e controllo di riferimenti. **Non** esiste un comando documentato per estrarli insieme dalla **stessa** snapshot.
+- **Opportunità circoscritta:** per professionisti che incrociano vendite, quote, incassi, saldi e spese, si valuta **solo** un'operazione volontaria che generi più CSV correnti da un unico stato del database, più un manifest locale con registri inclusi, conteggi e SHA-256; nessuna fotografia, reimport, ripristino, cloud, pubblicazione o automatismo. I CSV contengono anche dati personali e il manifest **non** equivale a prova di autenticità o correttezza fiscale.
+- **No duplicazioni:** TECH-018 tutela prestazioni e atomicità del singolo CSV, TECH-001 progetta interscambio semantico completo con reimport, TECH-025 esportazione minimizzata verso terzi, TECH-052 verifica backup, TECH-054 dati per siti statici; qui conta **solo la coerenza temporale dei registri tabellari esistenti**. Nessun file di Gestione e UX modificato.
+- **Scelta da validare:** chiedere se davvero vengono usati più registri insieme; prima alternativa **senza sviluppo**: esportarli individualmente in una sessione senza altre modifiche. Priorità **P2 condizionata**, altrimenti P3 o **nessuna nuova funzione**. Nessun test o sviluppo avviato.
+- **Esito:** **55 schede**, tutte **«Proposta — da valutare»**, nessuna approvata o assegnata; solo Markdown nella cartella autorizzata. [PR documentale #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) da lasciare aperta, in bozza e senza merge.
 
 ## Cinquantunesima ricognizione — 23 novembre 2026 — REPS-TECH-054
 
