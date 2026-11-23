@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **65 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **66 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -74,6 +74,13 @@ Data ricognizione: **2026-11-23** (sessantaduesima ricognizione). Stato uniforme
 | [REPS-TECH-063](REPS-TECH-063-brochure-pdf-accessibili-lettura-assistita.md) | Brochure PDF per lettori assistivi: studio di tag semantici, ordine di lettura e alternative umane delle immagini; non equivale a Unicode, PDF/A o conformità PDF/UA dichiarata | P3; P2 solo dopo requisiti di destinatari reali e fattibilità dimostrata | Proposta — da valutare |
 | [REPS-TECH-064](REPS-TECH-064-coordinamento-processi-archivio-attivo.md) | Accesso concorrente di più processi allo stesso archivio: seconda GUI, lettori MCP, migrazione e ripristino con esclusività prudente; nessun server né collaborazione in rete | P1–P2 solo con rischio riproducibile; altrimenti P2–P3 o sola documentazione | Proposta — da valutare |
 | [REPS-TECH-065](REPS-TECH-065-round-trip-revisioni-fotografiche-editor-esterni.md) | Rientro manuale controllato nel Media Center di una fotografia elaborata con editor esterno, come nuova revisione non attiva; niente watchers, editor obbligatori o cambi automatici dei riferimenti | P3; P2 solo dopo validazione professionale | Proposta — da valutare |
+| [REPS-TECH-066](REPS-TECH-066-compatibilita-filesystem-destinazioni-backup.md) | Compatibilità della destinazione USB/NAS: limiti del singolo file, verifica prudente delle capacità e diagnosi della pubblicazione senza false promesse di durabilità | P2 solo se limiti reali misurati; altrimenti P3 o sola guida/test | Proposta — da valutare |
+
+## Sessantatreesima ricognizione — 23 novembre 2026 — REPS-TECH-066
+
+- **[REPS-TECH-066 — Compatibilità e affidabilità delle destinazioni di backup su USB/NAS](REPS-TECH-066-compatibilita-filesystem-destinazioni-backup.md).** Riesaminati `main` (`README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/backup.rs`, schema SQLite), l'indice tecnico preesistente e l'indice Gestione e UX della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). Il backup già crea una cartella temporanea nella destinazione, acquisisce lo snapshot SQLite, copia i media, verifica SHA-256 e pubblica con rinomina. Non emerge un preflight **specifico** dei limiti per singolo file del filesystem o una valutazione della semantica di pubblicazione su USB/NAS. **Nessun incidente è stato dimostrato**: la documentazione MVP richiede ancora prove native reali su dispositivi esterni.
+- **Ipotesi circoscritta:** distinguere spazio totale e limite per file (es. FAT32), segnalare capacità sconosciute e fasi di fallimento su NAS senza dichiarare `successo garantito`; possibile test locale di scrittura/rinomina solo dopo consenso esplicito. Il manifest, gli hash, i backup esistenti e la libertà di scegliere la cartella restano invariati.
+- **Anti-doppioni:** TECH-022 riguarda capienza, TECH-060 identità del supporto, TECH-009/050/052 conservazione/analisi di copie già realizzate, TECH-062 avanzamento, TECH-064 accesso interprocesso all'archivio attivo. Questo studio tratta solo *capacità del filesystem e affidabilità della pubblicazione*; nessun file UX modificato. **P2 soltanto con problemi riproducibili**, altrimenti P3 o semplici prove/guida; prima test su supporti reali, senza sviluppare. **66 schede**, tutte «Proposta — da valutare», nessuna approvata o assegnata.
 
 ## Sessantaduesima ricognizione — 23 novembre 2026 — REPS-TECH-065
 
