@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **63 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantunesima ricognizione). Stato uniforme: **Proposta — da valutare**. **64 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -72,6 +72,13 @@ Data ricognizione: **2026-11-23** (sessantesima ricognizione). Stato uniforme: *
 | [REPS-TECH-061](REPS-TECH-061-esportazione-metadati-museali-lido-11.md) | Consegna selettiva di metadati delle opere in LIDO 1.1 XML per musei, con mapping dichiarato e validazione offline; non backup, non IIIF, non pubblicazione o import | P3; P2 solo con partner e profilo museale verificati | Proposta — da valutare |
 | [REPS-TECH-062](REPS-TECH-062-progresso-annullamento-sicuro-operazioni-locali.md) | Contratto comune per progresso reale e richiesta di annullamento nei punti sicuri di backup/ripristino/esportazioni, senza riscrivere pipeline o promettere recuperi automatici | P2 solo con attese problematiche confermate; altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-TECH-063](REPS-TECH-063-brochure-pdf-accessibili-lettura-assistita.md) | Brochure PDF per lettori assistivi: studio di tag semantici, ordine di lettura e alternative umane delle immagini; non equivale a Unicode, PDF/A o conformità PDF/UA dichiarata | P3; P2 solo dopo requisiti di destinatari reali e fattibilità dimostrata | Proposta — da valutare |
+| [REPS-TECH-064](REPS-TECH-064-coordinamento-processi-archivio-attivo.md) | Accesso concorrente di più processi allo stesso archivio: seconda GUI, lettori MCP, migrazione e ripristino con esclusività prudente; nessun server né collaborazione in rete | P1–P2 solo con rischio riproducibile; altrimenti P2–P3 o sola documentazione | Proposta — da valutare |
+
+## Sessantunesima ricognizione — 23 novembre 2026 — REPS-TECH-064
+
+- **[REPS-TECH-064 — Coordinamento tra processi per proteggere l'archivio attivo](REPS-TECH-064-coordinamento-processi-archivio-attivo.md).** Riletti su `main` `README.md`, `docs/MVP.md`, `src-tauri/Cargo.toml`, `src-tauri/src/lib.rs`, `main.rs`, `db.rs`, `backup.rs` e `mcp.rs`. La GUI usa un mutex sulla connessione **del proprio processo**; il ripristino rinomina la directory dell'archivio dopo avere chiuso **quella** connessione, mentre `Repertica Studio --mcp` può avviare un lettore SQLite separato. Nessuna guardia interprocesso è emersa dai percorsi verificati; ricerca `single_instance` senza risultati. **Questo non dimostra un incidente né corruzione:** sono indispensabili prove native con più processi e restore/migrazioni su filesystem differenti.
+- **Perimetro e priorità:** difesa minima della seconda istanza e valutazione di un contratto interprocesso condiviso/esclusivo per fasi critiche, senza forzare chiusure MCP, senza bloccare più archivi indipendenti né installare un servizio. **P1–P2 soltanto se riprodotto un rischio serio**; altrimenti P2–P3 o guida d'uso. Prima alternativa: test end-to-end e documentazione dell'utilizzo in singola istanza.
+- **Anti-doppioni:** TECH-011 tratta scelta di più archivi, TECH-033 revisioni obsolete dei record, TECH-038 staging media e backup *intra-processo*, TECH-012/037 migrazione e recupero; TECH-014/036 specifiche MCP. Confrontato anche l'indice **68 schede Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), senza modificarle. **64 proposte**, tutte «Proposta — da valutare». Esclusivamente questa nuova scheda e l'indice della cartella; nessun codice, test, workflow, configurazione, dipendenza, issue o merge.
 
 ## Sessantesima ricognizione — 23 novembre 2026 — REPS-TECH-063
 
