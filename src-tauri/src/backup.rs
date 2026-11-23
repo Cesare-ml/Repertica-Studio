@@ -110,20 +110,30 @@ fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
     std::io::copy(&mut input, &mut output).map_err(error)?;
     output.sync_all().map_err(error)
 }
-// Verify a cross-row financial invariant independently of the SQLite write triggers.
-// An exported database can have valid pages, hashes and foreign keys even if someone
-// disabled its triggers before adding excessive payment records. Never restore such
-// an archive into the live collection.
+// Validate each amount as well as the overall sale balance: a corrupt receipt
+// with a negative value can be hidden by other positive payments. Imported SQLite
+// databases can bypass CHECK constraints and triggers without breaking their pages.
 fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
-    let invalid: Option<(String, i64, i64)> = conn.query_row(
-        "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0)
+    let invalid: Option<(String, i64, i64, Option<i64>, Option<i64>)> = conn.query_row(
+        "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0),
+                MIN(r.amount_cents), MAX(r.amount_cents)
          FROM sales s LEFT JOIN sale_receipts r ON r.sale_id = s.id
          GROUP BY s.id
-         HAVING COALESCE(SUM(r.amount_cents), 0) > s.amount_cents
+         HAVING s.amount_cents <= 0
+            OR COALESCE(SUM(r.amount_cents), 0) NOT BETWEEN 0 AND s.amount_cents
+            OR MIN(r.amount_cents) <= 0
+            OR MAX(r.amount_cents) > 100000000000
          LIMIT 1",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?,
+                       row.get(3)?, row.get(4)?))
     ).optional().map_err(error)?;
-    if let Some((id, sale, received)) = invalid {
+    if let Some((id, sale, received, minimum, maximum)) = invalid {
+        if minimum.is_some_and(|v| v <= 0) || maximum.is_some_and(|v| v > 100_000_000_000) {
+            return Err(format!("Il backup contiene incassi con importi non validi per la vendita {id}"));
+        }
+        if sale <= 0 || received < 0 {
+            return Err(format!("Il backup contiene importi incoerenti per la vendita {id}"));
+        }
         return Err(format!(
             "Il backup contiene incassi superiori al valore della vendita {id} ({received} > {sale} centesimi)"
         ));
@@ -911,6 +921,77 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1);
         assert!(db.directory.join(DB_FILE).exists());
+    }
+
+    #[test]
+    fn rehashed_backup_rejects_invalid_receipt_amounts_without_touching_live_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        seed_receipt_evidence(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('second','sale','2026-11-22',400,'cash','now')", []).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // Model a third-party importer that rebuilt the table without its
+        // amount CHECK constraint. A simple PRAGMA ignore_check_constraints
+        // would not work for this regression: integrity_check itself detects
+        // rows violating an existing CHECK constraint.
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute_batch(
+                "DROP TRIGGER IF EXISTS sale_receipts_limit_update;
+                 PRAGMA writable_schema=ON;
+                 UPDATE sqlite_schema SET sql=REPLACE(sql,
+                   ' CHECK(amount_cents BETWEEN 1 AND 100000000000)', '')
+                   WHERE type='table' AND name='sale_receipts';
+                 PRAGMA writable_schema=OFF;"
+            ).unwrap();
+            let definition: String = snapshot.query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='sale_receipts'", [], |r| r.get(0)
+            ).unwrap();
+            assert!(!definition.contains("CHECK(amount_cents BETWEEN"),
+                "the imported schema must have its receipt limit removed");
+        }
+        // Now invalid payments leave page integrity and foreign keys intact.
+        // The -50 amount is masked by another valid +400 receipt.
+        for amount in [0_i64, -50, 100_000_000_001] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute("UPDATE sale_receipts SET amount_cents=?1 WHERE id='receipt'",
+                    params![amount]).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok");
+                let fk_issues: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(fk_issues, 0);
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let error = inspect_backup_core(folder).unwrap_err();
+            assert!(error.contains("incassi con importi non validi"), "{amount}: {error}");
+            assert!(restore_backup_core(&db, folder).is_err());
+        }
+        {
+            let conn = db.conn.lock().unwrap();
+            let live_amount: i64 = conn.query_row(
+                "SELECT amount_cents FROM sale_receipts WHERE id='receipt'", [], |r| r.get(0)
+            ).unwrap();
+            let count: i64 = conn.query_row(
+                "SELECT count(*) FROM sale_receipts", [], |r| r.get(0)
+            ).unwrap();
+            assert_eq!(live_amount, 500, "failed restores must not alter live receipts");
+            assert_eq!(count, 2);
+        }
     }
 
     #[test]
