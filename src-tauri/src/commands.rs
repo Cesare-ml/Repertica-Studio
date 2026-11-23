@@ -360,7 +360,16 @@ fn record_sale_core(db: &Database, input: SaleInput) -> Result<(), String> {
         .map_err(|_|"Vendita non registrata: verifica cliente, opera e vendite esistenti".to_string())?;
     crate::finance::attach_sale_finances(&tx,&sale_id,input.amount_cents,input.tax_cents,input.shipping_cents)?;
     if let Some(payment)=&input.payment { crate::installments::apply_payment(&tx,&sale_id,input.amount_cents,payment)?; }
-    tx.execute("UPDATE artworks SET status='sold',updated_at=?2 WHERE id=?1",params![input.artwork_id,now()]).map_err(err)?;
+    let updated = tx.execute("UPDATE artworks SET status='sold',updated_at=?2 WHERE id=?1",
+        params![input.artwork_id,now()]).map_err(err)?;
+    // Imported archives can contain triggers that silently ignore or undo this
+    // UPDATE. Do not commit the sale, allocations or receipts unless the artwork
+    // is actually marked sold in the same transaction.
+    let final_status: String = tx.query_row("SELECT status FROM artworks WHERE id=?1",
+        params![input.artwork_id], |row| row.get(0)).map_err(err)?;
+    if updated != 1 || final_status != "sold" {
+        return Err("Vendita non registrata: stato dell'opera non aggiornato; verifica l'archivio SQLite".into());
+    }
     tx.commit().map_err(err)
 }
 #[tauri::command]
@@ -377,8 +386,19 @@ fn delete_sale_core(db: &Database, id: &str) -> Result<(), String> {
     if receipts>0 {
         return Err("La vendita ha incassi registrati: elimina prima gli incassi (e i relativi allegati)".into());
     }
-    tx.execute("DELETE FROM sales WHERE id=?1",params![id]).map_err(err)?;
-    tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1",params![artwork,now()]).map_err(err)?;
+    let removed = tx.execute("DELETE FROM sales WHERE id=?1",params![id]).map_err(err)?;
+    let still_exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE id=?1)",
+        params![id], |row| row.get(0)).map_err(err)?;
+    if removed != 1 || still_exists {
+        return Err("Vendita non eliminata completamente: verifica l'archivio SQLite".into());
+    }
+    let updated = tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1",
+        params![artwork,now()]).map_err(err)?;
+    let final_status: String = tx.query_row("SELECT status FROM artworks WHERE id=?1",
+        params![artwork], |row| row.get(0)).map_err(err)?;
+    if updated != 1 || final_status != "available" {
+        return Err("Vendita non annullata: stato dell'opera non ripristinato; verifica l'archivio SQLite".into());
+    }
     tx.commit().map_err(err)
 }
 fn certificate_row(row: &Row<'_>) -> rusqlite::Result<Certificate> {
@@ -894,6 +914,83 @@ mod tests {
         let conn = db.conn.lock().unwrap();
         let status: String = conn.query_row("SELECT status FROM artworks WHERE id=?1",
             params![artwork], |r| r.get(0)).unwrap();
+        assert_eq!(status, "available");
+    }
+
+    #[test]
+    fn registering_a_sale_rolls_back_if_an_imported_trigger_ignores_or_undoes_artwork_status() {
+        let (_dir, db, artwork, collector) = sale_fixture();
+        let sale = || sale_input(&artwork, &collector, "2026-11-21");
+        for trigger in [
+            "CREATE TRIGGER ignore_mark_sold BEFORE UPDATE OF status ON artworks
+             WHEN NEW.status='sold' BEGIN SELECT RAISE(IGNORE); END;",
+            "CREATE TRIGGER undo_mark_sold AFTER UPDATE OF status ON artworks
+             WHEN NEW.status='sold' BEGIN
+                UPDATE artworks SET status='available' WHERE id=NEW.id;
+             END;",
+        ] {
+            {
+                let conn = db.conn.lock().unwrap();
+                conn.execute_batch(trigger).unwrap();
+            }
+            let error = record_sale_core(&db, sale()).unwrap_err();
+            assert!(error.contains("stato"), "{error}");
+            {
+                let conn = db.conn.lock().unwrap();
+                let status: String = conn.query_row("SELECT status FROM artworks WHERE id=?1",
+                    params![artwork], |r| r.get(0)).unwrap();
+                assert_eq!(status, "available");
+                for table in ["sales", "sale_finances", "sale_receipts"] {
+                    let count: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [],
+                        |r| r.get(0)).unwrap();
+                    assert_eq!(count, 0, "{table} must roll back with the rejected sale");
+                }
+                conn.execute_batch("DROP TRIGGER IF EXISTS ignore_mark_sold;
+                                    DROP TRIGGER IF EXISTS undo_mark_sold;").unwrap();
+            }
+        }
+        record_sale_core(&db, sale()).unwrap();
+        assert_eq!(count(&db, "sales"), 1, "the archive remains usable after rollback");
+    }
+
+    #[test]
+    fn cancelling_a_sale_rolls_back_if_an_imported_trigger_preserves_sale_or_sold_status() {
+        let (_dir, db, artwork, collector) = sale_fixture();
+        record_sale_core(&db, sale_input(&artwork, &collector, "2026-11-21")).unwrap();
+        let sale_id: String = db.conn.lock().unwrap()
+            .query_row("SELECT id FROM sales", [], |r| r.get(0)).unwrap();
+        for trigger in [
+            "CREATE TRIGGER ignore_sale_delete BEFORE DELETE ON sales
+             BEGIN SELECT RAISE(IGNORE); END;",
+            "CREATE TRIGGER undo_available_status AFTER UPDATE OF status ON artworks
+             WHEN NEW.status='available' BEGIN
+                UPDATE artworks SET status='sold' WHERE id=NEW.id;
+             END;",
+        ] {
+            {
+                let conn = db.conn.lock().unwrap();
+                conn.execute_batch(trigger).unwrap();
+            }
+            let error = delete_sale_core(&db, &sale_id).unwrap_err();
+            assert!(error.contains("non eliminata") || error.contains("non annullata"), "{error}");
+            {
+                let conn = db.conn.lock().unwrap();
+                let status: String = conn.query_row("SELECT status FROM artworks WHERE id=?1",
+                    params![artwork], |r| r.get(0)).unwrap();
+                assert_eq!(status, "sold", "a failed cancellation must keep the work sold");
+                for table in ["sales", "sale_finances"] {
+                    let count: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [],
+                        |r| r.get(0)).unwrap();
+                    assert_eq!(count, 1, "{table} must survive rollback");
+                }
+                conn.execute_batch("DROP TRIGGER IF EXISTS ignore_sale_delete;
+                                    DROP TRIGGER IF EXISTS undo_available_status;").unwrap();
+            }
+        }
+        delete_sale_core(&db, &sale_id).unwrap();
+        assert_eq!(count(&db, "sales"), 0);
+        let status: String = db.conn.lock().unwrap().query_row(
+            "SELECT status FROM artworks WHERE id=?1", params![artwork], |r| r.get(0)).unwrap();
         assert_eq!(status, "available");
     }
 
