@@ -346,7 +346,11 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
     for (date,amount,fund) in rows {
         if settings.treasury_start_date.as_ref().is_some_and(|start|date.as_str()<start.as_str()){continue;}
         if !date_ok(&date) {return Err(format!("Invalid expense date in archive: {date}"));}
-        if amount<=0 {return Err(format!("Invalid expense amount in archive: {date}"));}
+        // A restored/imported DB can bypass the same monetary ceiling as save_expense_core.
+        // Do not let corrupted external expense values inflate the studio's reports.
+        if !(1..=100_000_000_000).contains(&amount) {
+            return Err(format!("Invalid expense amount in archive: {date}"));
+        }
         let index=date[5..7].parse::<usize>().map_err(error)?-1;
         let month=&mut months[index];
         add_cents(&mut month.expense_cents,amount,"monthly expenses")?;
@@ -815,6 +819,11 @@ mod tests{
         c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
             VALUES('e','2026-02-31','materials','Paint',500,'t','t')",[]).unwrap();
         assert!(finance_overview_core(&c,2026).err().unwrap().contains("Invalid expense date"));
+        // SQLite may accept this value when a third-party importer bypasses app validation.
+        c.execute("UPDATE expenses SET expense_date='2026-02-28', amount_cents=100000000001 WHERE id='e'",[]).unwrap();
+        assert!(finance_overview_core(&c,2026).err().unwrap().contains("Invalid expense amount"));
+        c.execute("UPDATE expenses SET amount_cents=100000000000 WHERE id='e'",[]).unwrap();
+        assert_eq!(finance_overview_core(&c,2026).unwrap().expense_cents, 100_000_000_000);
     }
     #[test]
     fn imported_orphaned_allocation_and_expense_funds_are_not_silently_ignored(){
