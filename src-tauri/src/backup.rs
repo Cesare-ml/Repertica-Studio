@@ -114,23 +114,29 @@ fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
 // with a negative value can be hidden by other positive payments. Imported SQLite
 // databases can bypass CHECK constraints and triggers without breaking their pages.
 fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
-    let invalid: Option<(String, i64, i64, Option<i64>, Option<i64>)> = conn.query_row(
-        "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0),
-                MIN(r.amount_cents), MAX(r.amount_cents)
+    // INTEGER affinity permits fractional REAL values despite the range CHECK.
+    // Reject each malformed amount before SUM: two fractions can even add up
+    // to a whole number while individual receipt reads still fail in Rust.
+    let malformed: Option<(String, String)> = conn.query_row(
+        "SELECT sale_id,id FROM sale_receipts
+         WHERE typeof(amount_cents) != 'integer'
+            OR amount_cents NOT BETWEEN 1 AND 100000000000
+         ORDER BY sale_id,id LIMIT 1",
+        [], |row| Ok((row.get(0)?, row.get(1)?))
+    ).optional().map_err(error)?;
+    if let Some((sale_id, receipt_id)) = malformed {
+        return Err(format!("Il backup contiene incassi con importi non validi per la vendita {sale_id} (incasso {receipt_id})"));
+    }
+    let invalid: Option<(String, i64, i64)> = conn.query_row(
+        "SELECT s.id, s.amount_cents, COALESCE(SUM(r.amount_cents), 0)
          FROM sales s LEFT JOIN sale_receipts r ON r.sale_id = s.id
          GROUP BY s.id
          HAVING s.amount_cents <= 0
             OR COALESCE(SUM(r.amount_cents), 0) NOT BETWEEN 0 AND s.amount_cents
-            OR MIN(r.amount_cents) <= 0
-            OR MAX(r.amount_cents) > 100000000000
          LIMIT 1",
-        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?,
-                       row.get(3)?, row.get(4)?))
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     ).optional().map_err(error)?;
-    if let Some((id, sale, received, minimum, maximum)) = invalid {
-        if minimum.is_some_and(|v| v <= 0) || maximum.is_some_and(|v| v > 100_000_000_000) {
-            return Err(format!("Il backup contiene incassi con importi non validi per la vendita {id}"));
-        }
+    if let Some((id, sale, received)) = invalid {
         if sale <= 0 || received < 0 {
             return Err(format!("Il backup contiene importi incoerenti per la vendita {id}"));
         }
@@ -1043,6 +1049,59 @@ mod tests {
             assert_eq!(live_amount, 500, "failed restores must not alter live receipts");
             assert_eq!(count, 2);
         }
+    }
+
+    #[test]
+    fn fractional_receipts_are_rejected_even_when_the_total_is_a_whole_number() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let relative = seed_receipt_evidence(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('second','sale','2026-11-22',400,'cash','now')", []).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+
+        // These values satisfy the original range CHECK and receipt triggers.
+        // No schema tampering is necessary: SQLite stores both as REAL.
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute("UPDATE sale_receipts SET amount_cents=399.5 WHERE id='second'", []).unwrap();
+            snapshot.execute("UPDATE sale_receipts SET amount_cents=500.5 WHERE id='receipt'", []).unwrap();
+            let total: f64 = snapshot.query_row("SELECT SUM(amount_cents) FROM sale_receipts", [], |r| r.get(0)).unwrap();
+            assert_eq!(total, 900.0);
+            let integrity: String = snapshot.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+            assert_eq!(integrity, "ok");
+            let fk_issues: i64 = snapshot.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+            assert_eq!(fk_issues, 0);
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        let message = inspect_backup_core(folder).unwrap_err();
+        assert!(message.contains("incassi con importi non validi"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        {
+            let conn = db.conn.lock().unwrap();
+            let total: i64 = conn.query_row("SELECT SUM(amount_cents) FROM sale_receipts", [], |r| r.get(0)).unwrap();
+            assert_eq!(total, 900);
+            let amount: i64 = conn.query_row("SELECT amount_cents FROM sale_receipts WHERE id='receipt'", [], |r| r.get(0)).unwrap();
+            assert_eq!(amount, 500);
+        }
+        assert_eq!(fs::read(db.directory.join(&relative)).unwrap(), b"%PDF-1.7\nCollection proof");
+
+        // Correct the imported snapshot and confirm it becomes restorable.
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute("UPDATE sale_receipts SET amount_cents=500 WHERE id='receipt'", []).unwrap();
+            snapshot.execute("UPDATE sale_receipts SET amount_cents=400 WHERE id='second'", []).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+        assert!(restore_backup_core(&db, folder).is_ok());
     }
 
     #[test]
