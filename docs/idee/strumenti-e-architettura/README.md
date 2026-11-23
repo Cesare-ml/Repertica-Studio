@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantaduesima ricognizione). Stato uniforme: **Proposta — da valutare**. **55 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **56 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -62,6 +62,15 @@ Data ricognizione: **2026-11-23** (cinquantaduesima ricognizione). Stato uniform
 | [REPS-TECH-053](REPS-TECH-053-manifest-aperto-storia-revisioni-media.md) | Esportazione selettiva della storia delle revisioni Media Center con originali, derivati e manifest JSON/hash aperto: nessun reimport, nessuna pretesa di riprodurre gli edit | P2 se domanda reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-054](REPS-TECH-054-pacchetto-catalogo-web-statico-offline.md) | Pacchetto locale per cataloghi web statici: selezione consapevole di sole opere e immagini pubblicabili, JSON aperto, hash e zero pubblicazione automatica | P2 solo se richiesto; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-055](REPS-TECH-055-esportazione-coerente-registri-csv.md) | Insieme di registri CSV prodotti da una sola snapshot SQLite con manifest di copertura e hash: per analisi incrociate, non backup o reimport | P2 solo se uso frequente confermato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+| [REPS-TECH-056](REPS-TECH-056-autenticazione-oauth2-posta-facoltativa.md) | OAuth 2.0 **facoltativo** per autenticarsi alle caselle IMAP/SMTP esistenti, senza account Repertica: browser OS/PKCE, token solo in portachiavi e valutazione preventiva di scope e costi di verifica dei provider | P2 condizionata; P1–P2 solo se blocchi utenti verificati; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+## Cinquantatreesima ricognizione — 23 novembre 2026 — REPS-TECH-056
+
+- **[REPS-TECH-056 — OAuth 2.0 facoltativo per la posta IMAP/SMTP, senza login Repertica](REPS-TECH-056-autenticazione-oauth2-posta-facoltativa.md).** Riletti su `main` `README.md`, `docs/BUSINESS-MAIL-DESKTOP.md`, `docs/MCP.md` e `src-tauri/src/business_mail.rs`. Il client di posta già esiste e usa IMAP/SMTP con password nel portachiavi OS; OAuth2/XOAUTH2 è un **limite riconosciuto nella documentazione** e non risulta implementato nel modulo esaminato. Nessun incidente o richiesta utente è stato verificato.
+- **Bisogno tecnico circoscritto:** utenti che hanno una casella professionale con autenticazione password non consentita potrebbero voler usare la posta integrata, **senza login all'app**. Possibile autorizzazione manuale del provider tramite browser/PKCE, credenziali temporanee nel keyring, login IMAP e invio SMTP con capacità separate. La posta richiede rete ma l'archivio locale continua a funzionare offline. Nessun invio, refresh globale o cloud Repertica automatico.
+- **Rischio decisivo, da studiare prima del codice:** i provider possono richiedere registrazione, consenso tenant, scope ampi, verifica pubblica e oneri di manutenzione. Confrontate le fonti ufficiali di [Google XOAUTH2](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol), [Microsoft OAuth IMAP/SMTP](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth) e [Google restricted scopes](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification) (consultate il 23/11/2026). **Non** è garantita compatibilità con tutte le caselle.
+- **No doppioni:** TECH-031 allegati bozze, TECH-039 EML, TECH-017 cifratura archivio, TECH-014/049 MCP; nel filone [Gestione e UX — PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) UX-035 riguarda preferenze di contatto, non autorizzazioni IMAP. Confrontate **55 proposte tecniche precedenti e 60 Gestione e UX**. Nessun loro file modificato.
+- **Alternativa senza sviluppo:** mantenere password per app dove consentite e aprire il client di posta OS. **P2 solo se gli utenti confermano il bisogno e la sostenibilità del provider**; se non emerge, P3 o nessuna nuova funzione. Stato **«Proposta — da valutare»**; nessuna approvazione, incarico o sviluppo.
 
 ## Cinquantaduesima ricognizione — 23 novembre 2026 — REPS-TECH-055
 
