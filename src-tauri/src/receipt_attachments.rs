@@ -298,8 +298,14 @@ fn detach_core(db: &Database, receipt_id: &str) -> Result<(), String> {
     if still_linked {
         return Err("SQLite ha ricreato il collegamento all'allegato: rimozione annullata".into());
     }
+    // DELETE triggers in an imported database may create a *different* link
+    // after the preflight check (e.g. move the same document to another receipt).
+    // Recheck all owners inside the same transaction before deleting the bytes.
+    // On query failure, dropping the transaction restores the original link.
+    let preserve_file = still_used ||
+        referenced_elsewhere(&tx, &attachment.media_path, receipt_id)?;
     tx.commit().map_err(err)?;
-    if still_used { return Ok(()); }
+    if preserve_file { return Ok(()); }
     cleanup_unlinked(db, &attachment.media_path)
 }
 #[tauri::command]
@@ -684,6 +690,48 @@ mod tests {
         detach_core(&db, "r").unwrap();
         assert!(get_core(&db, "r").unwrap().is_none());
         assert!(!stored.exists());
+    }
+
+    #[test]
+    fn delete_trigger_moving_evidence_to_another_receipt_preserves_the_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("receipt.pdf");
+        let evidence = b"%PDF-1.7\ntransfer-proof";
+        fs::write(&source, evidence).unwrap();
+        let original = attach_core(&db, "r", &source).unwrap();
+        let stored = db.directory.join(&original.media_path);
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                 VALUES('r2','s','2026-11-21',200,'cash','t')", []
+            ).unwrap();
+            // A previously imported database can modify other media references
+            // in an AFTER DELETE trigger without recreating the deleted row.
+            conn.execute_batch(
+                "CREATE TRIGGER move_evidence AFTER DELETE ON sale_receipt_attachments
+                 BEGIN
+                   INSERT INTO sale_receipt_attachments
+                     (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
+                   VALUES('r2',OLD.media_path,OLD.original_name,OLD.mime_type,
+                     OLD.size_bytes,OLD.sha256,OLD.created_at);
+                 END;"
+            ).unwrap();
+        }
+        detach_core(&db, "r").unwrap();
+        assert!(get_core(&db, "r").unwrap().is_none());
+        let moved = get_core(&db, "r2").unwrap().expect("trigger moved the attachment");
+        assert_eq!(moved.media_path, original.media_path);
+        assert_eq!(fs::read(&stored).unwrap(), evidence,
+            "a new owner created by a DELETE trigger must retain the bytes");
+        assert!(data_core(&db, "r2").unwrap().starts_with("data:application/pdf;base64,"));
+
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER move_evidence;").unwrap();
+        detach_core(&db, "r2").unwrap();
+        assert!(!stored.exists(), "the final unlink can now remove the file");
     }
 
     #[test]
