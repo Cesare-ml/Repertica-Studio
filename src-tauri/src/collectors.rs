@@ -358,8 +358,9 @@ fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
     }
     let paths: Vec<String> = {
         let mut statement = tx.prepare("SELECT image_path FROM collector_images WHERE collector_id=?1").map_err(err)?;
-        statement.query_map(params![id], |r| r.get(0))
-            .map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?
+        let paths = statement.query_map(params![id], |r| r.get(0))
+            .map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
+        paths
     };
     let affected = tx.execute("DELETE FROM collectors WHERE id=?1", params![id]).map_err(err)?;
     if affected != 1 {
