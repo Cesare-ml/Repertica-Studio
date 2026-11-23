@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (sessantaseiesima ricognizione). Stato uniforme: **Proposta — da valutare**. **69 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantasettesima ricognizione). Stato uniforme: **Proposta — da valutare**. **70 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -78,6 +78,14 @@ Data ricognizione: **2026-11-23** (sessantaseiesima ricognizione). Stato uniform
 | [REPS-TECH-067](REPS-TECH-067-robustezza-pianificazione-backup-cambi-ora.md) | Backup programmati e ora locale: indagine su DST, cambio fuso, correzione dell'orologio, recuperi e retry senza duplicazioni o omissioni silenziose | P2 solo se rischi reali riproducibili; altrimenti P3/sola guida e QA | Proposta — da valutare |
 | [REPS-TECH-068](REPS-TECH-068-brochure-pdf-esportazione-memoria-limitata.md) | Brochure PDF fino a 100 opere: studio del picco RAM dell'attuale renderer che accumula pagine, oggetti e PDF prima della scrittura; possibili soluzioni progressive, solo dopo benchmark | P2 solo con limiti misurati; altrimenti P3 o nessuna modifica | Proposta — da valutare |
 | [REPS-TECH-069](REPS-TECH-069-protezione-originali-raw-sostituzione.md) | Salvaguardia dei RAW originari alla sostituzione: verifica della rimozione attuale, conferma/export preventivi e soltanto eventualmente cronologia locale recuperabile opt-in | P1–P2 per prevenzione solo se danno confermato; P2–P3 per versioni; altrimenti nessuno sviluppo | Proposta — da valutare |
+| [REPS-TECH-070](REPS-TECH-070-prestazioni-consultazione-archivio-liste-grandi.md) | Consultazione fluida degli archivi grandi: misurazione del costo dei getter di ricerca e del rendering della tabella opere, prima di valutare derivazioni stabili, paginazione accessibile o eventuali query Rust | P2 solo dopo misure e bisogno reale; altrimenti P3/QA o nessuno sviluppo | Proposta — da valutare |
+
+## Sessantasettesima ricognizione — 23 novembre 2026 — REPS-TECH-070
+
+- **[REPS-TECH-070 — Consultazione fluida degli archivi grandi](REPS-TECH-070-prestazioni-consultazione-archivio-liste-grandi.md).** Riesaminati su `main` `README.md`, `docs/MVP.md`, `src-tauri/src/commands.rs`, `src/app/app.component.ts/html`, `src/app/archive-filters.ts` e `tests/archive-filters.test.mjs`; confrontate le **69 proposte tecniche** precedenti e le **74 Gestione e UX** dell'altra [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14). `list_artworks` carica tutte le opere; `visibleArtworks` richiama `filterArtworks` e produce un nuovo array a ogni accesso, mentre la tabella usa `*ngFor` per tutte le opere visibili. Conteggio, elenco e stato vuoto consultano più volte il getter. **Questo è un potenziale costo architetturale, non un rallentamento misurato**: nessun benchmark o guasto riprodotto.
+- **Perimetro prudente:** fase 0 di misurazione locale su 100/1.000/10.000/30.000 schede sintetiche, senza usare dati privati; soltanto dopo considerare riduzione dei ricalcoli, rendering progressivo accessibile e, come ultima possibilità, query Rust/SQLite. Non introdurre nuovi filtri, viste, cloud o cursor MCP; conservare semantica Unicode della ricerca, conteggio globale, navigazione del viewer, privacy e CSV/backup integrali.
+- **Anti-doppioni:** TECH-008 definisce nuovi filtri e viste salvate, TECH-036 limita elenchi **MCP**, TECH-005 tratta anteprime media e TECH-048 parità Unicode UI/MCP; UX-071 conserva il contesto di navigazione e UX-074 ipotizza un filtro copertina. La scheda studia **solo il costo e la scalabilità dell'UI esistente**, senza modificare alcun file dell'altro filone.
+- **Priorità ipotetica:** P2 solo in presenza di misure riproducibili e bisogno professionale dimostrato; P3/semplice QA o nessuno sviluppo se le prestazioni sono accettabili. **70 proposte**, tutte **«Proposta — da valutare»**, non approvate né assegnate allo sviluppo. Solo Markdown in questa cartella, PR [#16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) in bozza, senza merge.
 
 ## Sessantaseiesima ricognizione — 23 novembre 2026 — REPS-TECH-069
 
