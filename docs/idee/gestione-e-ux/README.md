@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **61 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantacinquesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **62 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -70,6 +70,14 @@ Aggiornato: **2026-11-23** (cinquantaquattresima ricognizione). Stato delle prop
 | [REPS-UX-059](REPS-UX-059-controllo-preemissione-certificati.md) | Controllo finale **prima** dell'emissione irreversibile del certificato: riepilogo di dati/foto/intestatario, senza consumare seriale né confondere la successiva anteprima con una verifica preventiva | P1–P2 solo con errori reali confermati; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-UX-060](REPS-UX-060-attivita-registrate-opera-vista-unificata.md) | Vista prudente delle attività **già registrate** per una singola opera (vendite, incassi, certificati, galleria): sola lettura, collegamenti ai registri autorevoli, nessuna storia o consegna inventata | P2 solo se la navigazione fra registri è un problema confermato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-UX-061](REPS-UX-061-revisione-dati-personali-collezionisti.md) | Revisione prudente dei dati personali dei collezionisti: campi attuali, riferimenti storici, copie ed eventuali richieste di rettifica, senza cancellazioni automatiche | P2 se validata; P3 o nessuno sviluppo se basta una guida | Proposta — da valutare |
+| [REPS-UX-062](REPS-UX-062-verifica-coerenza-brochure-rispetto-archivio.md) | Verifica prima di ristampare una brochure già salvata: confronto dei campi effettivamente pubblicati con l'archivio corrente e, solo eventualmente, con una baseline confermata; nessuna riscrittura silenziosa del PDF storico | P2 se ristampe con errori ricorrenti; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+## Cinquantacinquesima ricognizione — 23 novembre 2026 — REPS-UX-062
+
+- **[REPS-UX-062 — Verifica delle modifiche prima di ristampare una brochure](REPS-UX-062-verifica-coerenza-brochure-rispetto-archivio.md).** Consultati `main`, `docs/BROCHURES-OFFLINE.md`, `src/app/brochures.component.ts`, `src/app/models.ts`, `src-tauri/src/brochures.rs`: una bozza locale conserva override editoriali opzionali, ma il renderer usa **dati tecnici e foto correnti**. Una successiva esportazione dello stesso documento può quindi riflettere modifiche dell'archivio; il PDF precedente è esterno e non viene conservato come snapshot dall'app. Studio di confronto **dei valori realmente stampati**, da non confondere con confronto byte-per-byte dei PDF. Non è stato osservato un reclamo o errore reale.
+- **Confini anti-doppioni:** UX-007 crea dossier, UX-041 tratta contenuti multilingua, UX-059 controlla certificati irreversibili; TECH-032/034 si occupano di PDF/renderer e TECH-010 della cronologia generale. Nessuna di queste schede propone il controllo di una **bozza di brochure già salvata rispetto a una successiva ristampa**; i file tecnici della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) non sono stati modificati.
+- **Prova prima dello sviluppo:** 4–6 professionisti, due PDF di una stessa brochure con modifiche a titolo/tecnica/foto, confrontati con una checklist; verificare se la funzione fa risparmiare errori e tempo. **P2 solo con bisogno ricorrente**, altrimenti P3/nessuna implementazione.
+- **Perimetro:** solo scheda e indice in questa cartella, nessun codice/test/build/configurazione/dipendenza/issue/merge/approvazione.
 
 ## Cinquantaquattresima ricognizione — 23 novembre 2026 — REPS-UX-061
 
