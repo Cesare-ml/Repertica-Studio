@@ -329,15 +329,29 @@ where
 
 fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let path: String = conn.query_row("SELECT image_path FROM collector_images WHERE id=?1", params![image_id], |r| r.get(0))
+    let mut conn = db.conn.lock().map_err(err)?;
+    // Keep the path lookup, DELETE and final-state check in one transaction.
+    // An imported archive can silently ignore DELETE or recreate the row in
+    // an AFTER DELETE trigger. Neither case may be reported as success.
+    let tx = conn.transaction().map_err(err)?;
+    let path: String = tx.query_row("SELECT image_path FROM collector_images WHERE id=?1", params![image_id], |r| r.get(0))
         .optional().map_err(err)?.ok_or("Fotografia non trovata")?;
     if !valid_media_file(&path) { return Err("Percorso media non valido".into()); }
-    // An imported archive may contain a BEFORE DELETE trigger that suppresses
-    // the operation with RAISE(IGNORE). Do not tell the artist that a photograph
-    // was deleted when its database row (and therefore its media) still exists.
-    let removed = conn.execute("DELETE FROM collector_images WHERE id=?1", params![image_id]).map_err(err)?;
-    if removed != 1 { return Err("Fotografia non eliminata: verifica l'archivio SQLite".into()); }
+    let removed = tx.execute("DELETE FROM collector_images WHERE id=?1", params![image_id]).map_err(err)?;
+    if removed != 1 {
+        return Err("Fotografia non eliminata: verifica l'archivio SQLite".into());
+    }
+    let still_exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collector_images WHERE id=?1)",
+        params![image_id], |row| row.get(0),
+    ).map_err(err)?;
+    if still_exists {
+        // Dropping the transaction rolls back the trigger's changes too.
+        return Err("Fotografia non eliminata completamente: verifica l'archivio SQLite".into());
+    }
+    tx.commit().map_err(err)?;
+    // Physical files are removed only after a committed deletion and only if
+    // no other local record or historical document still references them.
     remove_media_file(&conn, db, &path);
     Ok(())
 }
@@ -692,6 +706,34 @@ mod tests {
         delete_image_core(&db, &photo.id).unwrap();
         assert!(!db.directory.join(&photo.image_path).exists());
         assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, 0);
+    }
+
+    #[test]
+    fn recreated_photo_row_rolls_back_delete_and_preserves_the_original_file() {
+        let (dir, db) = setup();
+        let person = save_collector_core(&db, input("Anna")).unwrap();
+        let photo = add_image_core(
+            &db, &person.id, &picture(dir.path(), "photo.jpg", 1), "PHOTO",
+        ).unwrap();
+        let stored = db.directory.join(&photo.image_path);
+
+        // SQLite reports one affected row, but a legacy trigger recreates it.
+        // Without a final check the user sees success although the row survives.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER restore_collector_photo AFTER DELETE ON collector_images
+             BEGIN INSERT INTO collector_images(id,collector_id,kind,image_path,created_at)
+               VALUES(OLD.id,OLD.collector_id,OLD.kind,OLD.image_path,OLD.created_at); END;",
+        ).unwrap();
+        let failure = delete_image_core(&db, &photo.id).unwrap_err();
+        assert!(failure.contains("non eliminata completamente"), "{failure}");
+        assert!(stored.is_file(), "a failed delete cannot remove the media file");
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &person.id).unwrap().photo_count, 1);
+        assert_eq!(list_collector_images_core(&db, &person.id).unwrap()[0].id, photo.id);
+
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER restore_collector_photo").unwrap();
+        delete_image_core(&db, &photo.id).unwrap();
+        assert!(!stored.exists());
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &person.id).unwrap().photo_count, 0);
     }
 
     #[test]
