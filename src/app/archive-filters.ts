@@ -28,6 +28,12 @@ export function buildSaleIndexes(sales: Sale[]): SaleIndexes {
 /** Normalize Latin diacritics, case and whitespace for local search. */
 function foldSearch(value: string): string {
   return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    // Ligatures and Latin letters without a base+accent decomposition need
+    // explicit equivalents. Apply identically to saved fields and search terms.
+    .replace(/[æœßþðđłøıħ]/gu, letter => ({
+      'æ': 'ae', 'œ': 'oe', 'ß': 'ss', 'þ': 'th', 'ð': 'd',
+      'đ': 'd', 'ł': 'l', 'ø': 'o', 'ı': 'i', 'ħ': 'h'
+    }[letter] ?? letter))
     // Names and artwork titles often arrive from phones with typographic quotes/dashes.
     // Normalize their punctuation consistently in queries and stored fields.
     .replace(/[\u2018\u2019\u02bc]/gu, "'")
