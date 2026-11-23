@@ -345,6 +345,17 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     }
     // A sale carries either no frozen shares (split switched off) or shares totalling exactly 100%.
     if schema >= 9 {
+        // A correct sum can conceal negative, oversized or fractional shares
+        // when a third-party importer has removed the original CHECK constraint.
+        let invalid: Option<String> = conn.query_row(
+            "SELECT sale_id FROM sale_allocations
+             WHERE typeof(share_bp) != 'integer' OR share_bp NOT BETWEEN 0 AND 10000
+             ORDER BY sale_id LIMIT 1",
+            [], |r| r.get(0)
+        ).optional().map_err(error)?;
+        if let Some(id) = invalid {
+            return Err(format!("Il backup contiene una quota di ripartizione non valida per la vendita {id}"));
+        }
         let inconsistent: i64 = conn.query_row(
             "SELECT count(*) FROM (SELECT sale_id FROM sale_allocations GROUP BY sale_id HAVING SUM(share_bp)<>10000)",
             [], |r| r.get(0)).map_err(error)?;
@@ -1303,6 +1314,73 @@ mod tests {
         ).unwrap();
         assert_eq!(rows, 2, "the live installment plan must remain unchanged");
         assert!(db.directory.join(DB_FILE).is_file());
+    }
+
+    #[test]
+    fn invalid_frozen_shares_cannot_be_hidden_by_a_correct_total() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('sale','a','c',1000,'2026-11-21','now');
+                 INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                    VALUES('sale',0,0,3334,3333,3333);
+                 INSERT INTO sale_allocations(sale_id,part_id,share_bp)
+                    VALUES('sale','personal',10000),('sale','activity',0);"
+            ).unwrap();
+        }
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified, "zero shares are valid");
+
+        // Simulate a third-party importer removing the original CHECK.
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute_batch(
+                "PRAGMA writable_schema=ON;
+                 UPDATE sqlite_schema SET sql=REPLACE(sql,' CHECK(share_bp BETWEEN 0 AND 10000)','')
+                   WHERE type='table' AND name='sale_allocations';
+                 PRAGMA writable_schema=OFF;"
+            ).unwrap();
+        }
+        // Every pair still totals exactly 100%, but individual values are invalid.
+        for (personal, activity) in [(-1.0_f64, 10001.0_f64), (10001.0, -1.0), (4999.5, 5000.5)] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute(
+                    "UPDATE sale_allocations SET share_bp=CASE part_id WHEN 'personal' THEN ?1 ELSE ?2 END
+                     WHERE sale_id='sale'",
+                    params![personal, activity],
+                ).unwrap();
+                let total: f64 = snapshot.query_row(
+                    "SELECT CAST(SUM(share_bp) AS REAL) FROM sale_allocations WHERE sale_id='sale'",
+                    [], |r| r.get(0)
+                ).unwrap();
+                assert_eq!(total, 10000.0);
+                let integrity: String = snapshot.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+                assert_eq!(integrity, "ok");
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("quota di ripartizione non valida"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+            let live: i64 = db.conn.lock().unwrap().query_row(
+                "SELECT share_bp FROM sale_allocations WHERE sale_id='sale' AND part_id='personal'",
+                [], |r| r.get(0)
+            ).unwrap();
+            assert_eq!(live, 10000);
+        }
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute("DELETE FROM sale_allocations WHERE sale_id='sale'", []).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        assert!(inspect_backup_core(folder).unwrap().verified, "sales without a split remain valid");
     }
 
     #[test]
