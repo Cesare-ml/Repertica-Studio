@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **64 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **65 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -74,6 +74,14 @@ Aggiornato: **2026-11-23** (cinquantasettesima ricognizione). Stato delle propos
 | [REPS-UX-063](REPS-UX-063-riepilogo-economico-prima-registrazione-vendita.md) | Riepilogo **prima** di registrare una vendita singola: lordo, tasse, spedizione, netto gestionale e quote congelabili, distinti da incassi e utile fiscale | P2 se utile nei test; altrimenti P3/nessuna funzione | Proposta — da valutare |
 
 | [REPS-UX-064](REPS-UX-064-revisione-guidata-metadati-opere-esistenti.md) | Revisione manuale di tecnica/supporto per una selezione esplicita di **opere già catalogate**: confronto prima/dopo per ogni record, conferma transazionale e protezione contro schede obsolete, senza alterare vendita, certificati, prezzi o file | P2 solo se bisogno ripetitivo dimostrato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+| [REPS-UX-065](REPS-UX-065-anteprima-impatto-tariffa-coefficiente-catalogo.md) | Anteprima **non distruttiva** dell'effetto di tariffa/cm² e coefficiente artista sui prezzi suggeriti delle opere reali: prima/dopo e cause delle esclusioni, senza nuovi listini, vendite o modifiche massive | P2 se utilità osservata; P3/nessuna funzione se bastano esempi | Proposta — da valutare |
+
+## Cinquantottesima ricognizione — 23 novembre 2026 — REPS-UX-065
+
+- **[REPS-UX-065 — Anteprima dell'impatto di tariffa e coefficiente sui prezzi suggeriti](REPS-UX-065-anteprima-impatto-tariffa-coefficiente-catalogo.md).** Esaminati `README.md`, `docs/MVP.md`, `docs/ECONOMY-I18N.md`, `src/app/pricing.ts`, `src/app/app.component.ts/html`, `src/app/models.ts` e `src-tauri/src/finance.rs` su `main`. Oggi le Impostazioni mostrano due formati standard, non le conseguenze *prima/dopo* per le singole opere già presenti. Una variazione della **tariffa** tocca le opere calcolate anche con coefficiente individuale; una variazione del **coefficiente artista** non tocca quelle con override, né i prezzi fissi. Il bisogno non è dimostrato da utenti reali.
+- **Studio prudente:** eventuale anteprima locale read-only su opere disponibili, conteggi di casi invariati/non calcolabili ed esempi per riga, senza sommare presunti valori d'inventario, creare listini o modificare opere/vendite/certificati. La preview non sostituisce la validazione del salvataggio delle Impostazioni; se dati e bozza cambiano deve essere invalidata. **Provare prima** spiegazione migliorata o campione di 3–5 opere, senza tabella completa.
+- **Anti-doppioni:** UX-023 riguarda prezzi richiesti con storico, UX-003 margini di produzione, UX-063 quote prima della vendita, UX-064 la revisione di metadati, TECH-008 filtri e TECH-033 salvataggi condizionali. Confrontate **64 schede UX** e **60 tecniche** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), i cui file rimangono invariati.
+- **Decisioni e priorità:** test con 4–6 artisti/gallerie e dati sintetici, per verificare frequenza del problema, comprensione ed efficacia del confronto. **P2 condizionata**, altrimenti P3 o nessuno sviluppo. Tutte le **65 proposte** restano **«Proposta — da valutare»**, senza approvazioni, incarichi, issue, codice o merge. Modificati soltanto Markdown del presente filone.
 
 ## Cinquantasettesima ricognizione — 23 novembre 2026 — REPS-UX-064
 
