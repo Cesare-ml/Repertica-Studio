@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantaduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **59 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **60 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -68,6 +68,15 @@ Aggiornato: **2026-11-23** (cinquantaduesima ricognizione). Stato delle proposte
 | [REPS-UX-057](REPS-UX-057-opere-digitali-file-master-istruzioni-presentazione.md) | Opere digitali: distinzione fra master costitutivi, versioni espositive e fotografie documentali; requisiti di presentazione dichiarati e portabilità senza promesse di riproducibilità | P3 generale; P2 solo con domanda specialistica verificata | Proposta — da valutare |
 | [REPS-UX-058](REPS-UX-058-distinta-imballaggio-trasferimenti-multiopera.md) | Distinta di imballaggio locale per gruppi di opere e colli in trasferimenti temporanei, con assegnazioni dichiarate, revisione e stampa prudente senza generare movimentazioni o consegne | P2 se bisogno reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-UX-059](REPS-UX-059-controllo-preemissione-certificati.md) | Controllo finale **prima** dell'emissione irreversibile del certificato: riepilogo di dati/foto/intestatario, senza consumare seriale né confondere la successiva anteprima con una verifica preventiva | P1–P2 solo con errori reali confermati; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
+| [REPS-UX-060](REPS-UX-060-attivita-registrate-opera-vista-unificata.md) | Vista prudente delle attività **già registrate** per una singola opera (vendite, incassi, certificati, galleria): sola lettura, collegamenti ai registri autorevoli, nessuna storia o consegna inventata | P2 solo se la navigazione fra registri è un problema confermato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+## Cinquantatreesima ricognizione — 23 novembre 2026 — REPS-UX-060
+
+- **[REPS-UX-060 — Attività già registrate per opera: vista unificata senza storia presunta](REPS-UX-060-attivita-registrate-opera-vista-unificata.md).** Riletti su `main` `README.md`, `docs/MVP.md`, `docs/SALE-RECEIPTS.md`, `src/app/models.ts`, `src/app/app.component.ts`, `src/app/app.component.html`, `src-tauri/src/db.rs`. Confermati registri e dati temporalmente diversi per scheda, vendita, incasso, certificato e foto: oggi la navigazione avviene da sezioni distinte. **Nessuna prova di bisogno reale o test runtime**.
+- **Confine anti-doppioni:** non crea *movimentazioni o provenienza* (UX-001), *diario di lavorazione* (UX-026), *storico mostre* (UX-019), *rettifiche certificati* (UX-045), *rendiconto mensile* (UX-050) o *revisioni dei metadati* (TECH-010). L'altra automazione si occupa delle revisioni dei media esportabili (TECH-053). Confrontate le **59** schede UX precedenti e **55** proposte del [filone tecnico — PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16); nessun file tecnico modificato.
+- **Soluzione soltanto ipotetica:** pannello read-only `Attività registrate` dentro l'opera, con etichette non ambigue e salti ai record sorgente. `sold_at` è vendita dichiarata, `received_at` è incasso inserito manualmente, `issued_at` appartiene a certificato immutabile; `created_at` di scheda/foto non dimostra produzione o scatto. Nessun evento dedotto da `status` o `updated_at`, nessun audit log o esportazione predefinita di clienti/importi.
+- **Alternativa senza sviluppo:** provare collegamenti contestuali o un semplice riepilogo con link su 4–6 professionisti e scenari fittizi; se bastano, nessuna funzione. **Priorità ipotetica P2** solo se la necessità ricorre, altrimenti P3/nessun sviluppo.
+- **Esito:** **60 proposte Gestione e UX**, tutte «Proposta — da valutare». Solo nuova scheda e indice Markdown in `docs/idee/gestione-e-ux/`; [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta in bozza, senza merge, approvazioni, issue o sviluppo.
 
 ## Cinquantaduesima ricognizione — 23 novembre 2026 — REPS-UX-059
 
