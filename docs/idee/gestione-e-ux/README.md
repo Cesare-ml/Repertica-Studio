@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantunesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **58 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantaduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **59 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -67,6 +67,14 @@ Aggiornato: **2026-11-23** (cinquantunesima ricognizione). Stato delle proposte:
 | [REPS-UX-056](REPS-UX-056-indirizzi-multipli-contatti-destinazioni.md) | Indirizzi plurimi di contatti già noti, usi e destinazioni **dichiarati**, conferma prima di un eventuale impiego e compatibilità con indirizzo legacy | P2 se validata; P3 o nessuno sviluppo se bastano note/due campi | Proposta — da valutare |
 | [REPS-UX-057](REPS-UX-057-opere-digitali-file-master-istruzioni-presentazione.md) | Opere digitali: distinzione fra master costitutivi, versioni espositive e fotografie documentali; requisiti di presentazione dichiarati e portabilità senza promesse di riproducibilità | P3 generale; P2 solo con domanda specialistica verificata | Proposta — da valutare |
 | [REPS-UX-058](REPS-UX-058-distinta-imballaggio-trasferimenti-multiopera.md) | Distinta di imballaggio locale per gruppi di opere e colli in trasferimenti temporanei, con assegnazioni dichiarate, revisione e stampa prudente senza generare movimentazioni o consegne | P2 se bisogno reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
+| [REPS-UX-059](REPS-UX-059-controllo-preemissione-certificati.md) | Controllo finale **prima** dell'emissione irreversibile del certificato: riepilogo di dati/foto/intestatario, senza consumare seriale né confondere la successiva anteprima con una verifica preventiva | P1–P2 solo con errori reali confermati; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
+
+## Cinquantaduesima ricognizione — 23 novembre 2026 — REPS-UX-059
+
+- **[REPS-UX-059 — Controllo finale prima dell'emissione irreversibile dei certificati](REPS-UX-059-controllo-preemissione-certificati.md).** Sul branch `main` sono stati riletti `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src/app/models.ts`, `src/app/app.component.html`, `src/app/app.component.ts`, `src-tauri/src/commands.rs` e `src/app/certificate-sheet.component.ts`. Il pulsante attuale chiama l'emissione **prima** di mostrare l'anteprima; lo snapshot e il seriale sono creati in transazione. L'anteprima **post** emissione esiste già e non viene duplicata.
+- **Confine anti-doppioni:** UX-045 tratta **rettifiche dopo** l'emissione; UX-018 bozze della **scheda opera**; TECH-041 la checklist generale Object ID e TECH-023 PDF/A, non la decisione di emissione. Confrontate le **58** schede UX precedenti e le **54** del [filone tecnico — PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16); nessun suo file è stato toccato.
+- **Primo esperimento senza sviluppo:** provare l'emissione esistente con 4–6 professionisti su dati fittizi, raccogliere errori e valutare se basti un riepilogo minimo. L'eventuale revisione pre-emissione non deve assegnare seriali, dedurre intestatari o promettere autenticità; l'eventuale controllo contro modifiche concorrenti deve avvenire nell'emissione transazionale. **Priorità soltanto ipotetica P1–P2** se il rischio è reale, altrimenti P3/nessuno sviluppo.
+- **Esito:** **59 schede Gestione e UX**, tutte «Proposta — da valutare». Solo nuova scheda e indice Markdown sotto `docs/idee/gestione-e-ux/`; [PR documentale #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza, senza merge, approvazioni, issue operative o sviluppo.
 
 ## Cinquantunesima ricognizione — 23 novembre 2026 — REPS-UX-058
 
