@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantaseiesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **73 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **74 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -85,6 +85,16 @@ Aggiornato: **2026-11-23** (sessantaseiesima ricognizione). Stato delle proposte
 | [REPS-UX-072](REPS-UX-072-categorie-spesa-personalizzabili-storico.md) | Categorie delle spese personalizzabili, con etichette stabili, archiviazione senza perdere lo storico e compatibilità dei codici CSV; nessun budget né riclassificazione automatica | P2 se validata; altrimenti P3/nessuna funzione | Proposta — da valutare |
 
 | [REPS-UX-073](REPS-UX-073-confronto-anni-periodi-economici-omogenei.md) | Confronto economico **anno su anno su mesi omogenei**: vendite, spese e incassi dichiarati distinti, senza percentuali ingannevoli su basi zero o periodi incompleti e senza nuove registrazioni | P2 solo dopo verifica del bisogno; altrimenti P3/Calc/nessuna funzione | Proposta — da valutare |
+
+
+| [REPS-UX-074](REPS-UX-074-ricognizione-copertine-fotografiche-mancanti.md) | Ricognizione discreta di opere **senza copertina collegata**: filtro leggibile combinabile con ricerca/stato, senza confondere immagini assenti per scelta con file danneggiati o imporre una «qualità fotografica» | P2 solo se bisogno verificato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+## Sessantasettesima ricognizione — 23 novembre 2026 — REPS-UX-074
+
+- **[REPS-UX-074 — Ricognizione delle opere prive di fotografia di copertina](REPS-UX-074-ricognizione-copertine-fotografiche-mancanti.md).** Riesaminati sul branch `main` README, `docs/MVP.md`, `src/app/models.ts`, `src/app/archive-filters.ts`, `src/app/app.component.html/ts`, documentazione su portabilità e fotografie. `Artwork.image_path` è facoltativo; la lista permette ricerca, stato, collezionista e ordinamento, ma non mostra nel flusso consultato un filtro specifico per copertina assente. Il controllo d'integrità dei media già presente identifica **file problematici**, non l'assenza intenzionale di un collegamento. **Nessun bug o bisogno ricorrente dimostrato**, soltanto un'opportunità UX per archivi fotografici ampi.
+- **Perimetro minimo:** eventuale filtro `copertina: tutte / presente / assente` nell'Archivio, senza tabella nuova, schema, workflow, badge obbligatorio, selezioni automatiche di foto o cambiamenti a vendite/certificati; i collegamenti alla galleria restano distinti dalla copertina. La fase facoltativa potrebbe aggiungere una **lista CSV selettiva e privata** per pianificare una sessione con un fotografo, mai un nuovo backup.
+- **Anti-duplicazioni:** UX-018 crea nuove schede, UX-064 corregge metadati già registrati, UX-007/062 trattano dossier e brochure. TECH-003 diagnostica l'integrità dei file; TECH-045 studia associazioni guidate delle immagini già importate; TECH-008 studia filtri salvati. Nessuno di questi file è modificato. [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) conservata invariata.
+- **Priorità:** P2 **solo se** osservazioni con professionisti dimostrano un beneficio concreto, altrimenti P3 o nessuno sviluppo; preferire l'attuale elenco di opere nei piccoli archivi. Con questa scheda, **74 proposte Gestione e UX** rimangono tutte **«Proposta — da valutare»**, senza approvazione o assegnazione. Solo Markdown nella cartella autorizzata, [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza e senza merge.
 
 ## Sessantaseiesima ricognizione — 23 novembre 2026 — REPS-UX-073
 
