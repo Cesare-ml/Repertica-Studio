@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (quarantottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **55 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (quarantanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **56 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -64,6 +64,13 @@ Aggiornato: **2026-11-23** (quarantottesima ricognizione). Stato delle proposte:
 | [REPS-UX-054](REPS-UX-054-vista-presentazione-riservata-in-studio.md) | Vista temporanea per presentare opere a schermo con soli campi deliberatamente visibili, senza fingere protezione dell'archivio | P2 se validata; P3 o nessuno sviluppo se bastano viewer e PDF | Proposta — da valutare |
 
 | [REPS-UX-055](REPS-UX-055-revisione-possibili-doppioni-schede-opera.md) | Revisione volontaria di possibili schede-opera duplicate con indizi spiegabili e confronto, senza fusione né modifiche ai record | P2 se validata; P3 o nessuno sviluppo se bastano ricerca e CSV | Proposta — da valutare |
+| [REPS-UX-056](REPS-UX-056-indirizzi-multipli-contatti-destinazioni.md) | Indirizzi plurimi di contatti già noti, usi e destinazioni **dichiarati**, conferma prima di un eventuale impiego e compatibilità con indirizzo legacy | P2 se validata; P3 o nessuno sviluppo se bastano note/due campi | Proposta — da valutare |
+
+## Quarantanovesima ricognizione — 23 novembre 2026 — REPS-UX-056
+
+- **[REPS-UX-056 — Indirizzi multipli dei contatti e destinazioni dichiarate](REPS-UX-056-indirizzi-multipli-contatti-destinazioni.md):** consultati su `main` `README.md`, `src-tauri/src/collectors.rs`, `src/app/models.ts`, `src-tauri/src/export.rs`, `docs/DATA-PORTABILITY.md`; confrontate le **55 schede UX** precedenti e le **51 TECH** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). L'anagrafica collezionisti espone un solo `address` testuale. Possibile esigenza: distinguere recapiti per corrispondenza e destinazioni **potenziali** senza presumere indirizzi aggiornati o consegne avvenute. Nessuna richiesta utente o perdita di dati reale verificata.
+- **Confini:** UX-014 è la rubrica trasversale; UX-046 è la gestione delle singole consegne; UX-035 riguarda le preferenze di comunicazione; TECH-040 è vCard e TECH-001 la portabilità. La presente idea non modifica questi documenti né crea un modulo logistico, un CRM o invii automatici.
+- **Decisione rimessa al proprietario:** prima raccogliere casi reali e verificare se siano sufficienti il campo attuale, le note o due campi semplici; solo eventualmente struttura multi-indirizzo con scelta confermata e CSV separato. **P2 condizionata**, altrimenti **P3 o nessuno sviluppo**. Offline-first, privacy dei domicili, backup integrali e lingua del sistema/fallback inglese; nessuna approvazione, assegnazione o merge.
 
 ## Quarantottesima ricognizione — 23 novembre 2026 — REPS-UX-055
 
