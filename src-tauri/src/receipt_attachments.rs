@@ -18,7 +18,7 @@ const MAX_BYTES: usize = 12 * 1024 * 1024;
 const FIELDS: &str = "receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at";
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ReceiptAttachment {
     pub receipt_id: String,
     pub media_path: String,
@@ -122,30 +122,47 @@ fn attach_core(db: &Database, receipt_id: &str, source: &Path) -> Result<Receipt
     // discard the staged file on every rejected link or SQLite error.
     let relative = stage_receipt_file(db, &bytes, ext)?;
     let linked = (|| -> Result<ReceiptAttachment, String> {
-        let conn = db.conn.lock().map_err(err)?;
+        let mut conn = db.conn.lock().map_err(err)?;
+        // An imported archive may contain triggers that silently ignore an
+        // INSERT or alter its metadata. Verify the persisted link inside the
+        // transaction before publishing an attachment or keeping staged bytes.
+        let tx = conn.transaction().map_err(err)?;
         media_directory(db)?;
-        let exists: bool = conn.query_row(
+        let exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM sale_receipts WHERE id=?1)",
             params![receipt_id], |r| r.get(0),
         ).map_err(err)?;
         if !exists { return Err("Incasso non trovato".into()); }
-        let already: bool = conn.query_row(
+        let already: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM sale_receipt_attachments WHERE receipt_id=?1)",
             params![receipt_id], |r| r.get(0),
         ).map_err(err)?;
         if already { return Err("Questo incasso ha già un allegato".into()); }
         let stamp = Utc::now().to_rfc3339();
-        conn.execute(
-            "INSERT INTO sale_receipt_attachments
-            (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
-            VALUES(?1,?2,?3,?4,?5,?6,?7)",
-            params![receipt_id, &relative, name, mime_type, bytes.len() as i64, &digest, &stamp],
-        ).map_err(err)?;
-        Ok(ReceiptAttachment {
+        let expected = ReceiptAttachment {
             receipt_id: receipt_id.into(), media_path: relative.clone(),
             original_name: name.into(), mime_type: mime_type.into(),
             size_bytes: bytes.len() as i64, sha256: digest, created_at: stamp,
-        })
+        };
+        let written = tx.execute(
+            "INSERT INTO sale_receipt_attachments
+            (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
+            VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![&expected.receipt_id, &expected.media_path, &expected.original_name,
+                &expected.mime_type, expected.size_bytes, &expected.sha256, &expected.created_at],
+        ).map_err(err)?;
+        if written != 1 {
+            return Err("SQLite non ha salvato l'allegato dell'incasso".into());
+        }
+        let saved: ReceiptAttachment = tx.query_row(
+            &format!("SELECT {FIELDS} FROM sale_receipt_attachments WHERE receipt_id=?1"),
+            params![receipt_id], row,
+        ).optional().map_err(err)?.ok_or("SQLite non ha conservato l'allegato dell'incasso")?;
+        if saved != expected {
+            return Err("SQLite ha modificato i metadati dell'allegato: salvataggio annullato".into());
+        }
+        tx.commit().map_err(err)?;
+        Ok(saved)
     })();
     if linked.is_err() { let _ = fs::remove_file(db.directory.join(&relative)); }
     linked
@@ -240,8 +257,9 @@ fn cleanup_unlinked(db: &Database, relative: &str) -> Result<(), String> {
     }
 }
 fn detach_core(db: &Database, receipt_id: &str) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(err)?;
-    let attachment: ReceiptAttachment = conn.query_row(
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let attachment: ReceiptAttachment = tx.query_row(
         &format!("SELECT {FIELDS} FROM sale_receipt_attachments WHERE receipt_id=?1"),
         params![receipt_id], row,
     ).optional().map_err(err)?.ok_or("Allegato non trovato")?;
@@ -251,7 +269,7 @@ fn detach_core(db: &Database, receipt_id: &str) -> Result<(), String> {
     // Check the directory and all other references BEFORE modifying SQLite.
     // If the media directory was replaced or a query fails, retain the link.
     media_directory(db)?;
-    let still_used = referenced_elsewhere(&conn, &attachment.media_path, receipt_id)?;
+    let still_used = referenced_elsewhere(&tx, &attachment.media_path, receipt_id)?;
     if !still_used {
         // Imported archives and external edits may contain a replaced file,
         // including a dangling symlink. Never silently delete unverified bytes.
@@ -264,8 +282,23 @@ fn detach_core(db: &Database, receipt_id: &str) -> Result<(), String> {
             Err(e) => return Err(err(e)),
         }
     }
-    conn.execute("DELETE FROM sale_receipt_attachments WHERE receipt_id=?1", params![receipt_id])
-        .map_err(err)?;
+    // A BEFORE DELETE trigger can use RAISE(IGNORE), while an AFTER DELETE
+    // trigger can recreate the row. Never delete the evidence file unless the
+    // expected SQLite link is genuinely absent at commit time.
+    let deleted = tx.execute(
+        "DELETE FROM sale_receipt_attachments WHERE receipt_id=?1", params![receipt_id],
+    ).map_err(err)?;
+    if deleted != 1 {
+        return Err("SQLite non ha rimosso il collegamento all'allegato".into());
+    }
+    let still_linked: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sale_receipt_attachments WHERE receipt_id=?1)",
+        params![receipt_id], |r| r.get(0),
+    ).map_err(err)?;
+    if still_linked {
+        return Err("SQLite ha ricreato il collegamento all'allegato: rimozione annullata".into());
+    }
+    tx.commit().map_err(err)?;
     if still_used { return Ok(()); }
     cleanup_unlinked(db, &attachment.media_path)
 }
@@ -572,6 +605,82 @@ mod tests {
         let attachment = attach_core(&db, "r", &source).unwrap();
         let stored = db.directory.join(&attachment.media_path);
         fs::remove_file(&stored).unwrap();
+        detach_core(&db, "r").unwrap();
+        assert!(get_core(&db, "r").unwrap().is_none());
+        assert!(!stored.exists());
+    }
+
+    #[test]
+    fn ignored_or_tampered_sqlite_inserts_never_leave_unlinked_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("receipt.pdf");
+        fs::write(&source, b"%PDF-1.7\nreceipt-evidence").unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER ignore_evidence BEFORE INSERT ON sale_receipt_attachments
+                 BEGIN SELECT RAISE(IGNORE); END;"
+            ).unwrap();
+        }
+        assert!(attach_core(&db, "r", &source).unwrap_err().contains("SQLite"));
+        assert!(get_core(&db, "r").unwrap().is_none());
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 0);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER ignore_evidence;
+                 CREATE TRIGGER tamper_evidence AFTER INSERT ON sale_receipt_attachments
+                 BEGIN UPDATE sale_receipt_attachments SET original_name='changed.pdf'
+                   WHERE receipt_id=NEW.receipt_id; END;"
+            ).unwrap();
+        }
+        assert!(attach_core(&db, "r", &source).unwrap_err().contains("SQLite"));
+        assert!(get_core(&db, "r").unwrap().is_none());
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 0);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER tamper_evidence;").unwrap();
+        let saved = attach_core(&db, "r", &source).unwrap();
+        assert_eq!(saved.original_name, "receipt.pdf");
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn ignored_or_recreated_sqlite_deletes_never_destroy_receipt_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("active")).unwrap();
+        setup(&db);
+        let source = tmp.path().join("receipt.pdf");
+        fs::write(&source, b"%PDF-1.7\nreceipt-evidence").unwrap();
+        let saved = attach_core(&db, "r", &source).unwrap();
+        let stored = db.directory.join(&saved.media_path);
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER ignore_detach BEFORE DELETE ON sale_receipt_attachments
+                 BEGIN SELECT RAISE(IGNORE); END;"
+            ).unwrap();
+        }
+        assert!(detach_core(&db, "r").unwrap_err().contains("SQLite"));
+        assert!(get_core(&db, "r").unwrap().is_some());
+        assert!(stored.exists());
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER ignore_detach;
+                 CREATE TRIGGER recreate_evidence AFTER DELETE ON sale_receipt_attachments
+                 BEGIN
+                   INSERT INTO sale_receipt_attachments
+                     (receipt_id,media_path,original_name,mime_type,size_bytes,sha256,created_at)
+                   VALUES(OLD.receipt_id,OLD.media_path,OLD.original_name,OLD.mime_type,
+                     OLD.size_bytes,OLD.sha256,OLD.created_at);
+                 END;"
+            ).unwrap();
+        }
+        assert!(detach_core(&db, "r").unwrap_err().contains("SQLite"));
+        assert!(get_core(&db, "r").unwrap().is_some(), "SQL deletion must roll back");
+        assert_eq!(fs::read(&stored).unwrap(), b"%PDF-1.7\nreceipt-evidence");
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER recreate_evidence;").unwrap();
         detach_core(&db, "r").unwrap();
         assert!(get_core(&db, "r").unwrap().is_none());
         assert!(!stored.exists());
