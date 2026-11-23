@@ -307,11 +307,12 @@ where
             params![collector_id], |r| r.get(0),
         ).map_err(err)?;
         if !exists { return Err("Collezionista non trovato".into()); }
-        let mut replaced: Option<String> = None;
+        let mut replaced: Option<(String, String)> = None;
+        let mut previous_photo_count: Option<i64> = None;
         if kind == "PROFILE" {
             replaced = tx.query_row(
-                "SELECT image_path FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
-                params![collector_id], |r| r.get(0),
+                "SELECT id,image_path FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
+                params![collector_id], |r| Ok((r.get(0)?, r.get(1)?)),
             ).optional().map_err(err)?;
             tx.execute(
                 "DELETE FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
@@ -323,18 +324,54 @@ where
                 params![collector_id], |r| r.get(0),
             ).map_err(err)?;
             if count >= MAX_PHOTOS { return Err(format!("Massimo {MAX_PHOTOS} fotografie per collezionista")); }
+            previous_photo_count = Some(count);
         }
         let id = Uuid::new_v4().to_string();
-        tx.execute(
+        let created_at = now();
+        let inserted = tx.execute(
             "INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
-            params![id, collector_id, kind, relative, now()],
+            params![&id, collector_id, kind, &relative, &created_at],
         ).map_err(err)?;
+        if inserted != 1 {
+            return Err("Fotografia non salvata: verifica l'archivio SQLite".into());
+        }
         let image = tx.query_row(
             &format!("SELECT {IMAGE_FIELDS} FROM collector_images WHERE id=?1"),
-            params![id], image_row,
-        ).map_err(err)?;
+            params![&id], image_row,
+        ).optional().map_err(err)?
+            .ok_or("Fotografia non salvata: il collegamento è scomparso")?;
+        // External SQLite imports may carry AFTER INSERT triggers that divert a
+        // photo to another collector, replace its path or silently remove a
+        // different picture. A successful INSERT alone is not proof of success.
+        if image.collector_id != collector_id || image.kind != kind
+            || image.image_path != relative || image.created_at != created_at {
+            return Err("Fotografia non salvata correttamente: verifica i collegamenti dell'archivio SQLite".into());
+        }
+        if kind == "PROFILE" {
+            let remaining: i64 = tx.query_row(
+                "SELECT count(*) FROM collector_images WHERE collector_id=?1 AND kind='PROFILE'",
+                params![collector_id], |r| r.get(0),
+            ).map_err(err)?;
+            let old_survived = if let Some((old_id, _)) = &replaced {
+                tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM collector_images WHERE id=?1)",
+                    params![old_id], |r| r.get::<_, bool>(0),
+                ).map_err(err)?
+            } else { false };
+            if remaining != 1 || old_survived {
+                return Err("Fotografia profilo non sostituita completamente: verifica l'archivio SQLite".into());
+            }
+        } else {
+            let remaining: i64 = tx.query_row(
+                "SELECT count(*) FROM collector_images WHERE collector_id=?1 AND kind='PHOTO'",
+                params![collector_id], |r| r.get(0),
+            ).map_err(err)?;
+            if Some(remaining - 1) != previous_photo_count {
+                return Err("La galleria del collezionista è cambiata durante il salvataggio: operazione annullata".into());
+            }
+        }
         tx.commit().map_err(err)?;
-        if let Some(old) = replaced { remove_media_file(&conn, db, &old); }
+        if let Some((_, old_path)) = replaced { remove_media_file(&conn, db, &old_path); }
         Ok(image)
     })();
     if outcome.is_err() {
@@ -695,6 +732,74 @@ mod tests {
             by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().profile_image_id.as_deref(),
             Some(next.id.as_str()),
         );
+    }
+
+    #[test]
+    fn imported_triggers_cannot_divert_or_replace_collector_photo_links() {
+        let (dir, db) = setup();
+        let anna = save_collector_core(&db, input("Anna")).unwrap();
+        let bruno = save_collector_core(&db, input("Bruno")).unwrap();
+        let original = add_image_core(&db, &anna.id, &picture(dir.path(), "profile.jpg", 1), "PROFILE").unwrap();
+        let photo = add_image_core(&db, &anna.id, &picture(dir.path(), "gallery.jpg", 2), "PHOTO").unwrap();
+        let original_path = db.directory.join(&original.image_path);
+        let photo_path = db.directory.join(&photo.image_path);
+
+        // An AFTER INSERT trigger can rewrite a committed file link while
+        // retaining the same generated ID. Roll back the replacement, including
+        // the deleted old profile, and clean the newly staged media file.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER change_collector_photo_path AFTER INSERT ON collector_images
+             BEGIN UPDATE collector_images SET image_path='media/forged.jpg' WHERE id=NEW.id; END;",
+        ).unwrap();
+        let failure = add_image_core(
+            &db, &anna.id, &picture(dir.path(), "replacement.jpg", 3), "PROFILE",
+        ).unwrap_err();
+        assert!(failure.contains("non salvata correttamente"), "{failure}");
+        assert_eq!(media_count(&db), 2);
+        assert!(original_path.is_file());
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &anna.id).unwrap().profile_image_id.as_deref(), Some(original.id.as_str()));
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER change_collector_photo_path").unwrap();
+
+        // A different trigger could redirect a new picture to another owner,
+        // leaving the requested collector's gallery unchanged.
+        db.conn.lock().unwrap().execute_batch(&format!(
+            "CREATE TRIGGER divert_collector_photo AFTER INSERT ON collector_images
+             BEGIN UPDATE collector_images SET collector_id='{}' WHERE id=NEW.id; END;",
+            bruno.id,
+        )).unwrap();
+        let failure = add_image_core(
+            &db, &anna.id, &picture(dir.path(), "diverted.jpg", 4), "PHOTO",
+        ).unwrap_err();
+        assert!(failure.contains("non salvata correttamente"), "{failure}");
+        assert_eq!(media_count(&db), 2);
+        assert!(list_collector_images_core(&db, &bruno.id).unwrap().is_empty());
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER divert_collector_photo").unwrap();
+
+        // Even if the inserted row looks correct, another existing gallery
+        // photo must not silently disappear as a trigger side effect.
+        db.conn.lock().unwrap().execute_batch(&format!(
+            "CREATE TRIGGER drop_previous_collector_photo AFTER INSERT ON collector_images
+             WHEN NEW.kind='PHOTO'
+             BEGIN DELETE FROM collector_images WHERE id='{}'; END;",
+            photo.id,
+        )).unwrap();
+        let failure = add_image_core(
+            &db, &anna.id, &picture(dir.path(), "replacement-gallery.jpg", 5), "PHOTO",
+        ).unwrap_err();
+        assert!(failure.contains("galleria"), "{failure}");
+        assert!(photo_path.is_file());
+        assert_eq!(media_count(&db), 2);
+        assert_eq!(list_collector_images_core(&db, &anna.id).unwrap().len(), 2);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER drop_previous_collector_photo").unwrap();
+
+        let replacement = add_image_core(
+            &db, &anna.id, &picture(dir.path(), "valid-profile.jpg", 6), "PROFILE",
+        ).unwrap();
+        assert!(!original_path.exists());
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &anna.id).unwrap().profile_image_id.as_deref(), Some(replacement.id.as_str()));
+        add_image_core(&db, &anna.id, &picture(dir.path(), "valid-gallery.jpg", 7), "PHOTO").unwrap();
+        assert_eq!(by_id(&db.conn.lock().unwrap(), &anna.id).unwrap().photo_count, 3);
+        assert_eq!(media_count(&db), 3);
     }
 
     #[test]
