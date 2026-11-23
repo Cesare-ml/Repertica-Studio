@@ -280,3 +280,42 @@ test('artwork location search combines phrases with status, collector and metada
   assert.deepEqual(found('deposito marea'), ['b']);
   assert.deepEqual(found('padova'), []);
 });
+
+
+test('artwork search matches European ligatures in titles, locations and buyer names', () => {
+  const works = [
+    artwork('a', { title: 'Œuvre de Dvořák', location: 'Łódź', status: 'sold' }),
+    artwork('b', { title: 'Straße di Sølv', description: 'Æther' }),
+    artwork('c', { title: '日本語 · 光' })
+  ];
+  const indexes = buildSaleIndexes([sale('a', 'buyer', 'Œuvre de Dvořák', 'Þór Ægir')]);
+  const found = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+
+  assert.deepEqual(found('oeuvre dvorak'), ['a']);
+  assert.deepEqual(found('"oeuvre de dvorak" lodz'), ['a']);
+  assert.deepEqual(found('thor aegir'), ['a']);
+  assert.deepEqual(found('STRASSE SOLV'), ['b']);
+  assert.deepEqual(found('aether'), ['b']);
+  assert.deepEqual(found('日本語'), ['c'], 'unrelated scripts are left intact');
+  assert.deepEqual(found('strasse dvorak'), [], 'AND terms cannot combine unrelated works');
+});
+
+test('collector search folds European names and only the artworks they purchased', () => {
+  const people = [
+    collector('buyer', { name: 'Søren Straße', address: 'Łódź', notes: 'Æther' }),
+    collector('other', { name: 'Þór Ægir', notes: '日本語' })
+  ];
+  const works = [
+    artwork('w1', { code: 'ART-0042', title: 'Œuvre de Dvořák' }),
+    artwork('w2', { code: 'UNSOLD-0003', title: 'Straße' })
+  ];
+  const indexes = buildSaleIndexes([sale('w1', 'buyer', 'Œuvre de Dvořák', 'Søren Straße')]);
+  const found = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+
+  assert.deepEqual(found('soren strasse lodz'), ['buyer']);
+  assert.deepEqual(found('"oeuvre de dvorak" aether'), ['buyer']);
+  assert.deepEqual(found('thor aegir'), ['other']);
+  assert.deepEqual(found('日本語'), ['other']);
+  assert.deepEqual(found('unsold-0003'), [], 'unrelated artwork codes stay private to their own records');
+  assert.deepEqual(found('lodz thor'), [], 'terms cannot cross two collectors');
+});
