@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantaduesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **69 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **70 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -80,6 +80,17 @@ Aggiornato: **2026-11-23** (sessantaduesima ricognizione). Stato delle proposte:
 | [REPS-UX-067](REPS-UX-067-protezione-modifiche-non-salvate-moduli.md) | Protezione non invasiva dei campi modificati e non ancora salvati nei moduli opera, collezionista e spesa, con uscita consapevole; nessuna bozza persistente o autosave | P2 se rischio verificato; P3/nessuna funzione altrimenti | Proposta — da valutare |
 | [REPS-UX-068](REPS-UX-068-verifica-collezionista-esistente-prima-inserimento.md) | Verifica di un contatto già presente **prima di creare un nuovo collezionista** nel flusso opera+vendita, confronto prudente, selezione UUID solo esplicita; nessuna fusione o collegamento automatico | P2 soltanto se duplicati reali verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
 | [REPS-UX-069](REPS-UX-069-ripetizione-manuale-spesa-precedente.md) | Nuova spesa manuale da una registrazione precedente: riuso prudente dei campi, nuova data e importo da verificare, nessuna ricorrenza né pagamento presunto | P2 solo con casi frequenti verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
+| [REPS-UX-070](REPS-UX-070-avviso-possibili-incassi-duplicati.md) | Avviso **non bloccante** prima di registrare un possibile incasso già dichiarato della stessa vendita; indizi spiegabili senza confondere coincidenze con pagamenti verificati | P2 se errori ricorrenti osservati, altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Sessantatreesima ricognizione — 23 novembre 2026 — REPS-UX-070
+
+- **[REPS-UX-070 — Avviso prudente prima di un possibile incasso duplicato](REPS-UX-070-avviso-possibili-incassi-duplicati.md).** Riletti su `main` README, MVP, SALE-RECEIPTS, RECEIPT-ATTACHMENTS, DATA-PORTABILITY, `src-tauri/src/receipts.rs`, `src/app/app.component.ts/html`: registrare un incasso è manuale, il limite impedisce il superamento del lordo ma **non distingue due inserimenti identici quando il residuo li consente**. È un rischio UX plausibile, **non** un bug o un errore reale documentato.
+- **Proposta circoscritta:** confronto solo degli incassi già dichiarati per **la medesima vendita**, con indizi data/importo/metodo e riferimento non vuoto, avviso prima della scrittura e possibilità di registrare comunque due versamenti legittimamente uguali. Nessuna riconciliazione bancaria, deduplicazione, cancellazione, nuova tabella o automatismo.
+- **Validazione preliminare:** prova con 4–6 professionisti su rate, contanti e riferimenti riutilizzati; misurare falsi positivi e attrito. Prima alternativa: migliorare visibilità della tabella e richiamo statico alla verifica. **P2 solo con errori ricorrenti osservati**, altrimenti P3 o nessuna funzione.
+- **Anti-doppioni:** UX-024 scadenze, UX-030 confronto CSV di estratti conto, UX-039 ripartizione informativa, UX-063 riepilogo pre-vendita, UX-068 contatti omonimi; TECH-033 salvataggi obsoleti e TECH-055 export coerenti. [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) letta ma **nessun suo file modificato**. **70 schede**, tutte «Proposta — da valutare», senza approvazioni/assegnazioni.
+- **Perimetro:** soltanto scheda e indice Markdown sotto `docs/idee/gestione-e-ux/`, su PR documentale in bozza. Nessun codice, test, build, workflow, configurazione, dipendenza, issue di implementazione o merge.
+
+---
 
 ## Sessantaduesima ricognizione — 23 novembre 2026 — REPS-UX-069
 
