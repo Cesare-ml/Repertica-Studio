@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (cinquantatreesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **60 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantaquattresima ricognizione). Stato delle proposte: **Proposta — da valutare**. **61 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -69,6 +69,15 @@ Aggiornato: **2026-11-23** (cinquantatreesima ricognizione). Stato delle propost
 | [REPS-UX-058](REPS-UX-058-distinta-imballaggio-trasferimenti-multiopera.md) | Distinta di imballaggio locale per gruppi di opere e colli in trasferimenti temporanei, con assegnazioni dichiarate, revisione e stampa prudente senza generare movimentazioni o consegne | P2 se bisogno reale; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-UX-059](REPS-UX-059-controllo-preemissione-certificati.md) | Controllo finale **prima** dell'emissione irreversibile del certificato: riepilogo di dati/foto/intestatario, senza consumare seriale né confondere la successiva anteprima con una verifica preventiva | P1–P2 solo con errori reali confermati; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-UX-060](REPS-UX-060-attivita-registrate-opera-vista-unificata.md) | Vista prudente delle attività **già registrate** per una singola opera (vendite, incassi, certificati, galleria): sola lettura, collegamenti ai registri autorevoli, nessuna storia o consegna inventata | P2 solo se la navigazione fra registri è un problema confermato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+| [REPS-UX-061](REPS-UX-061-revisione-dati-personali-collezionisti.md) | Revisione prudente dei dati personali dei collezionisti: campi attuali, riferimenti storici, copie ed eventuali richieste di rettifica, senza cancellazioni automatiche | P2 se validata; P3 o nessuno sviluppo se basta una guida | Proposta — da valutare |
+
+## Cinquantaquattresima ricognizione — 23 novembre 2026 — REPS-UX-061
+
+- **[REPS-UX-061 — Revisione prudente dei dati personali dei collezionisti](REPS-UX-061-revisione-dati-personali-collezionisti.md).** Analizzati su `main` la scheda contatto (inclusi campi facoltativi di nascita, note e fotografie), `collectors.rs`, `commands.rs`, `models.ts`, i CSV integrali e le copie di backup. Oggi il contatto è modificabile e si può eliminare **solo se non è collegato a vendite**; i certificati conservano istantanee storiche e le copie precedenti non vengono modificate dalla correzione del database corrente. Nessuna richiesta reale o violazione è stata riscontrata: è un problema da validare con professionisti.
+- **Ambito UX, non compliance automatica:** eventuale vista di riepilogo delle posizioni dei dati e delle relazioni, con accesso ai comandi esistenti, effetti dichiarati e avvisi su backup, CSV/PDF e documenti distribuiti. Nessuna anonimizzazione o eliminazione di certificati, vendite o backup esterni, nessuna promessa di conformità normativa.
+- **Anti-doppioni:** UX-014 struttura la rubrica; UX-035 preferenze comunicazioni; UX-056 indirizzi multipli. TECH-025 studia export selettivi, TECH-040 vCard, TECH-006/009/017/052 sicurezza e conservazione backup. Confrontate le **60 schede UX** precedenti e le **56 proposte tecniche** nella [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16), senza modificare file tecnici.
+- **Prima alternativa senza sviluppo:** prova con 4–6 artisti/galleristi su modifica della scheda esistente + checklist ODT e casi sintetici. **P2 soltanto se emerge un'esigenza ricorrente; altrimenti P3 o nessun sviluppo.**
+- **Esito:** 61 schede Gestione e UX, tutte «Proposta — da valutare». Solo una nuova scheda e questo indice Markdown sotto `docs/idee/gestione-e-ux/`; PR #14 in bozza, nessun merge, codice, test, workflow, dipendenza, configurazione, approvazione o assegnazione.
 
 ## Cinquantatreesima ricognizione — 23 novembre 2026 — REPS-UX-060
 
