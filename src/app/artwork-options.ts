@@ -17,11 +17,19 @@ export interface MenuState {
   other: string;
 }
 
+/** Compare imported menu values without losing the original free-text entry.
+ * Historical archives can use non-breaking spaces, compatibility-width Latin letters
+ * or repeated whitespace, while the dropdown uses canonical option labels.
+ */
+function optionKey(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
+}
+
 /** Work out what the menu should show for a stored value; values that are not in the list become "Altro". */
 export function menuStateFor(options: readonly string[], value: string | null | undefined): MenuState {
   const text = (value ?? '').trim();
   if (!text) return { choice: '', other: '' };
-  const known = options.find(option => option.toLowerCase() === text.toLowerCase());
+  const known = options.find(option => optionKey(option) === optionKey(text));
   return known ? { choice: known, other: '' } : { choice: OTHER_CHOICE, other: text };
 }
 

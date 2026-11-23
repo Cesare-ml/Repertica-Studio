@@ -38,3 +38,26 @@ test('the new artwork form shows the price by itself and offers menus instead of
   assert.match(dialog, /class="price-modes"/);
   assert.doesNotMatch(get('src/app/app.component.ts'), /scheduleEstimate|previewPrice/, 'the price is computed in the interface, instantly');
 });
+
+test('imported technique and support values normalize compatibility spaces without changing custom text', () => {
+  assert.deepEqual(
+    menuStateFor(TECHNIQUES, '\u00a0TECNICA\u202F  MISTA\t'),
+    { choice: 'Tecnica mista', other: '' },
+    'non-breaking spaces and repeated whitespace still select the known technique'
+  );
+  assert.deepEqual(
+    menuStateFor(SUPPORTS, 'Ｃａｒｔａ　Ｆａｂｒｉａｎｏ'),
+    { choice: 'Carta Fabriano', other: '' },
+    'compatibility-width characters from copied catalogues map to the known support'
+  );
+  assert.deepEqual(
+    menuStateFor(SUPPORTS, ' Carta\u00a0\t da  acquerello '),
+    { choice: 'Carta da acquerello', other: '' }
+  );
+  assert.deepEqual(
+    menuStateFor(TECHNIQUES, '  TECNICA\u00a0  SPECIALE  '),
+    { choice: OTHER_CHOICE, other: 'TECNICA\u00a0  SPECIALE' },
+    'unknown historic techniques are preserved as custom values, not discarded'
+  );
+  assert.equal(valueFor(OTHER_CHOICE, ' TECNICA\u00a0  SPECIALE '), 'TECNICA\u00a0  SPECIALE');
+});

@@ -320,6 +320,32 @@ test('collector search folds European names and only the artworks they purchased
   assert.deepEqual(found('lodz thor'), [], 'terms cannot cross two collectors');
 });
 
+test('fullwidth imported codes and metadata remain searchable in artworks and buyers', () => {
+  const works = [
+    artwork('stored', { code: 'ＡＲＴ－００４２', title: 'Ｌ’Ａｍｉｃｏ — Œuvre',
+      technique: 'Olio　su tela', status: 'sold' }),
+    artwork('plain', { code: 'ART-0043', title: 'Studio 43' }),
+    artwork('unrelated', { code: 'ART-0999', title: '日本語 · 📷' })
+  ];
+  const indexes = buildSaleIndexes([sale('stored', 'buyer', 'L’Amico — Œuvre', 'Ｅｌｅｎａ')]);
+  const found = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+
+  assert.deepEqual(found('art-0042'), ['stored']);
+  assert.deepEqual(found('ＡＲＴ－００４３'), ['plain']);
+  assert.deepEqual(found('"l\'amico - oeuvre" elena'), ['stored']);
+  assert.deepEqual(found('"olio su tela"'), ['stored']);
+  assert.deepEqual(found('日本語'), ['unrelated'], 'other writing systems and emoji remain searchable');
+
+  const people = [
+    collector('buyer', { name: 'Ｅｌｅｎａ', address: 'Ｖｅｎｅｚｉａ' }),
+    collector('elsewhere', { name: 'Mario' })
+  ];
+  const findBuyers = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+  assert.deepEqual(findBuyers('elena venezia'), ['buyer']);
+  assert.deepEqual(findBuyers('art-0042'), ['buyer']);
+  assert.deepEqual(findBuyers('art-0043'), [], 'an unpurchased artwork must not match a buyer');
+});
+
 test('collector lookup uses current metadata only from genuinely purchased works', () => {
   const works = [
     artwork('owned', { code: 'ART-101', title: 'Fiume blu', technique: 'Acquerello',

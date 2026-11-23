@@ -346,7 +346,11 @@ fn finance_overview_core(c:&rusqlite::Connection,year:i32)->Result<FinanceOvervi
     for (date,amount,fund) in rows {
         if settings.treasury_start_date.as_ref().is_some_and(|start|date.as_str()<start.as_str()){continue;}
         if !date_ok(&date) {return Err(format!("Invalid expense date in archive: {date}"));}
-        if amount<=0 {return Err(format!("Invalid expense amount in archive: {date}"));}
+        // A restored/imported DB can bypass the same monetary ceiling as save_expense_core.
+        // Do not let corrupted external expense values inflate the studio's reports.
+        if !(1..=100_000_000_000).contains(&amount) {
+            return Err(format!("Invalid expense amount in archive: {date}"));
+        }
         let index=date[5..7].parse::<usize>().map_err(error)?-1;
         let month=&mut months[index];
         add_cents(&mut month.expense_cents,amount,"monthly expenses")?;
@@ -386,12 +390,23 @@ pub fn finance_overview(db:State<'_,Database>,year:i32)->Result<FinanceOverview,
 }
 /// Price of an artwork in cents. A fixed price always wins; otherwise width × height × rate per cm²
 /// × coefficient, where the coefficient is the artwork's own or, when it has none, the artist's.
-/// `None` when the size is missing or the result is not a sensible amount.
+/// `None` when the size or an imported price parameter is invalid.
+/// Never replace a corrupted fixed price with a plausible computed estimate.
 pub fn price_cents(width_cm:Option<f64>,height_cm:Option<f64>,rate_cm2_cents:i64,artist_coefficient:f64,own_coefficient:Option<f64>,fixed_price_cents:Option<i64>)->Option<i64>{
-    if let Some(fixed)=fixed_price_cents {return Some(fixed)}
+    // Match save_artwork's fixed-price limits, including the valid zero price.
+    // A fixed price takes precedence even if the other inputs are invalid.
+    if let Some(fixed)=fixed_price_cents {
+        return (0..=100_000_000_000).contains(&fixed).then_some(fixed);
+    }
     let (width,height)=(width_cm?,height_cm?);
-    if !width.is_finite() || !height.is_finite() || width<=0.0 || height<=0.0 || width>100000.0 || height>100000.0 {return None}
-    let cents=width*height*rate_cm2_cents as f64*own_coefficient.unwrap_or(artist_coefficient);
+    let coefficient=own_coefficient.unwrap_or(artist_coefficient);
+    // Legacy/imported SQLite data can bypass the settings/form validators.
+    // In that case show no price rather than a negative or misleading estimate.
+    if !(0..=100_000).contains(&rate_cm2_cents)
+        || !coefficient.is_finite() || coefficient<=0.0 || coefficient>100_000.0
+        || !width.is_finite() || !height.is_finite()
+        || width<=0.0 || height<=0.0 || width>100000.0 || height>100000.0 {return None}
+    let cents=width*height*rate_cm2_cents as f64*coefficient;
     if !cents.is_finite() || cents<0.0 || cents>100_000_000_000.0 {return None}
     Some(cents.round() as i64)
 }
@@ -411,6 +426,28 @@ mod tests{
             assert_eq!(price_cents(w,h,16,1.0,None,None),None,"{w:?} {h:?}");
         }
         assert_eq!(price_cents(Some(1e5),Some(1e5),100000,1.0,None,None),None,"absurd totals are refused");
+    }
+    #[test]
+    fn imported_invalid_prices_never_create_misleading_estimates() {
+        let normal = || price_cents(Some(30.0), Some(40.0), 16, 2.0, None, None);
+        assert_eq!(normal(), Some(38_400));
+        // Invalid stored fixed cents must not fall back to the calculated price.
+        for fixed in [-1, i64::MIN, 100_000_000_001, i64::MAX] {
+            assert_eq!(price_cents(Some(30.0), Some(40.0), 16, 2.0, None, Some(fixed)), None, "{fixed}");
+        }
+        assert_eq!(price_cents(None, None, -1, f64::NAN, None, Some(0)), Some(0));
+        assert_eq!(price_cents(None, None, -1, f64::NAN, None, Some(100_000_000_000)), Some(100_000_000_000));
+        // Invalid rate/coefficient from an imported archive must not appear as a real quote.
+        for rate in [-1, 100_001, i64::MAX] {
+            assert_eq!(price_cents(Some(30.0), Some(40.0), rate, 2.0, None, None), None, "{rate}");
+        }
+        for coefficient in [0.0, -1.0, 100_000.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(price_cents(Some(30.0), Some(40.0), 16, coefficient, None, None), None, "{coefficient}");
+            assert_eq!(price_cents(Some(30.0), Some(40.0), 16, 2.0, Some(coefficient), None), None, "{coefficient}");
+        }
+        // An explicit valid artwork override takes precedence over a damaged studio default.
+        assert_eq!(price_cents(Some(30.0), Some(40.0), 16, f64::NAN, Some(1.5), None), Some(28_800));
+        assert_eq!(price_cents(Some(30.0), Some(40.0), 0, 1.0, None, None), Some(0));
     }
     #[test]
     fn ignored_studio_settings_write_is_reported_and_does_not_claim_success() {
@@ -782,6 +819,11 @@ mod tests{
         c.execute("INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
             VALUES('e','2026-02-31','materials','Paint',500,'t','t')",[]).unwrap();
         assert!(finance_overview_core(&c,2026).err().unwrap().contains("Invalid expense date"));
+        // SQLite may accept this value when a third-party importer bypasses app validation.
+        c.execute("UPDATE expenses SET expense_date='2026-02-28', amount_cents=100000000001 WHERE id='e'",[]).unwrap();
+        assert!(finance_overview_core(&c,2026).err().unwrap().contains("Invalid expense amount"));
+        c.execute("UPDATE expenses SET amount_cents=100000000000 WHERE id='e'",[]).unwrap();
+        assert_eq!(finance_overview_core(&c,2026).unwrap().expense_cents, 100_000_000_000);
     }
     #[test]
     fn imported_orphaned_allocation_and_expense_funds_are_not_silently_ignored(){

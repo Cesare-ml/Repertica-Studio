@@ -1,7 +1,7 @@
 //! Portable, local-only backups. A backup is a self-contained directory: snapshot SQLite,
 //! copied media and a SHA-256 manifest. No network or third-party account is involved.
 use crate::db::{self, Database};
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -131,6 +131,46 @@ fn validate_receipt_balances(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+// A restored financial archive must not silently move collections between
+// months because an external importer stored an impossible or non-canonical
+// date. SQLite's integrity_check does not validate date values in TEXT columns.
+fn validate_receipt_dates(conn: &Connection) -> Result<(), String> {
+    let mut statement = conn.prepare("SELECT id, received_at FROM sale_receipts").map_err(error)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(error)?;
+    for row in rows {
+        let (id, date) = row.map_err(error)?;
+        let canonical = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map(|parsed| parsed.format("%Y-%m-%d").to_string() == date)
+            .unwrap_or(false);
+        if !canonical {
+            return Err(format!("Il backup contiene una data di incasso non valida: {id}"));
+        }
+    }
+    Ok(())
+}
+
+// Sale dates determine monthly turnover. A re-hashed SQLite snapshot can pass
+// page and foreign-key checks while placing a sale in an impossible month.
+// Check all schema versions, since the sales table exists since v1.
+fn validate_sale_dates(conn: &Connection) -> Result<(), String> {
+    let mut statement = conn.prepare("SELECT id, sold_at FROM sales").map_err(error)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(error)?;
+    for row in rows {
+        let (id, date) = row.map_err(error)?;
+        let canonical = NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map(|parsed| parsed.format("%Y-%m-%d").to_string() == date)
+            .unwrap_or(false);
+        if !canonical {
+            return Err(format!("Il backup contiene una data di vendita non valida: {id}"));
+        }
+    }
+    Ok(())
+}
+
 // SQLite page integrity and foreign keys alone cannot detect an imported sale
 // without its financial row, or taxes/shipping exceeding the agreed price.
 // All schema versions >= 2 populate sale_finances for every historical sale.
@@ -168,10 +208,12 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
     if !(1..=crate::db::SCHEMA_VERSION).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    // Sale dates are present even in the original v1 schema.
+    validate_sale_dates(&conn)?;
     // v1 predates finance rows; migration v2 created them for all existing sales.
     if schema >= 2 { validate_sale_finances(&conn)?; }
     // Legacy schemas 1-3 have no sale_receipts table: never infer payments.
-    if schema >= 4 { validate_receipt_balances(&conn)?; }
+    if schema >= 4 { validate_receipt_balances(&conn)?; validate_receipt_dates(&conn)?; }
     let mut counts = [0_i64; 4];
     for (i, table) in ["artworks", "collectors", "sales", "certificates"].iter().enumerate() {
         counts[i] = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).map_err(error)?;
@@ -797,6 +839,86 @@ mod tests {
         ).unwrap();
         assert_eq!(count, 1);
         assert!(db.directory.join(DB_FILE).exists());
+    }
+
+    #[test]
+    fn rehashed_backup_with_invalid_receipt_date_is_rejected_before_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        seed_receipt_evidence(&db);
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // SQLite accepts impossible TEXT dates and its integrity/foreign-key
+        // checks still pass; the manifest can also be rehashed by an importer.
+        for invalid in ["2026-02-30", "2026-2-3"] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute("UPDATE sale_receipts SET received_at=?1 WHERE id='receipt'",
+                    params![invalid]).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok");
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("data di incasso non valida"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+        }
+        let conn = db.conn.lock().unwrap();
+        let date: String = conn.query_row(
+            "SELECT received_at FROM sale_receipts WHERE id='receipt'", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(date, "2026-11-21", "the live archive must remain intact");
+    }
+
+    #[test]
+    fn rehashed_backup_with_invalid_sale_date_is_rejected_before_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        seed_receipt_evidence(&db);
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+
+        // Neither PRAGMA integrity_check nor foreign_key_check validates the
+        // contents of a TEXT date. Re-hash the SQLite file to prove the
+        // semantic validation, rather than the manifest, blocks the restore.
+        for invalid in ["2026-02-30", "2026-2-3", "not-a-date"] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute(
+                    "UPDATE sales SET sold_at=?1 WHERE id='sale'",
+                    params![invalid],
+                ).unwrap();
+                let integrity: String = snapshot.query_row(
+                    "PRAGMA integrity_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(integrity, "ok");
+                let foreign_keys: i64 = snapshot.query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0)
+                ).unwrap();
+                assert_eq!(foreign_keys, 0);
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("data di vendita non valida"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+        }
+        let conn = db.conn.lock().unwrap();
+        let date: String = conn.query_row(
+            "SELECT sold_at FROM sales WHERE id='sale'", [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(date, "2026-11-21", "the live archive must stay intact");
+        assert!(db.directory.join(DB_FILE).is_file());
     }
 
     #[test]
