@@ -59,7 +59,7 @@ export function formatIssueDate(value: string | null | undefined, language: stri
   if (!value) return '';
   const original = String(value);
   const raw = original.slice(0, 10);
-  const parts = /^(\\d{4})-(\\d{2})-(\\d{2})(?:$|T)/.exec(original);
+  const parts = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(original);
   if (!parts) return raw;
   const [year, month, day] = parts.slice(1).map(Number);
   if (year === 0) return raw;
