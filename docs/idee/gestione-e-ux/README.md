@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (quarantanovesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **56 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (cinquantesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **57 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -65,6 +65,14 @@ Aggiornato: **2026-11-23** (quarantanovesima ricognizione). Stato delle proposte
 
 | [REPS-UX-055](REPS-UX-055-revisione-possibili-doppioni-schede-opera.md) | Revisione volontaria di possibili schede-opera duplicate con indizi spiegabili e confronto, senza fusione né modifiche ai record | P2 se validata; P3 o nessuno sviluppo se bastano ricerca e CSV | Proposta — da valutare |
 | [REPS-UX-056](REPS-UX-056-indirizzi-multipli-contatti-destinazioni.md) | Indirizzi plurimi di contatti già noti, usi e destinazioni **dichiarati**, conferma prima di un eventuale impiego e compatibilità con indirizzo legacy | P2 se validata; P3 o nessuno sviluppo se bastano note/due campi | Proposta — da valutare |
+| [REPS-UX-057](REPS-UX-057-opere-digitali-file-master-istruzioni-presentazione.md) | Opere digitali: distinzione fra master costitutivi, versioni espositive e fotografie documentali; requisiti di presentazione dichiarati e portabilità senza promesse di riproducibilità | P3 generale; P2 solo con domanda specialistica verificata | Proposta — da valutare |
+
+## Cinquantesima ricognizione — 23 novembre 2026 — REPS-UX-057
+
+- **[REPS-UX-057 — Opere digitali: master e istruzioni di presentazione](REPS-UX-057-opere-digitali-file-master-istruzioni-presentazione.md):** riletti sul branch `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src/app/models.ts`, `src-tauri/src/models.rs` e `src-tauri/src/raw_files.rs`; confrontate le **56 proposte UX precedenti** e le **52 del filone tecnico** della [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16). I file RAW esistenti sono **fotografici** (uno per opera, max 1 GiB, con copia locale e SHA-256), non master di videoarte o software artistico; le immagini di galleria sono documentazione fotografica, non necessariamente l'opera stessa. **Non sono state verificate richieste utente o problemi reali**: è una domanda di prodotto per un possibile sottogruppo professionale.
+- **Confine anti-doppioni:** UX-022 gestisce *componenti fisici*, UX-025 le *istruzioni di cura/installazione generali*, UX-005 gli *esemplari numerati*, UX-010 i *diritti*, mentre TECH-016/007/046/001 studiano *conservazione e interscambio dei file*. La nuova proposta tratta soltanto il **significato gestionale delle versioni digitali e il flusso UX**; nessun codice, formato di storage o documento tecnico è stato modificato.
+- **Prima decisione da validare:** mostrare a 4–6 artisti/archivi di opere digitali una soluzione esterna `cartella + documento Markdown/ODT` e una bozza di scheda Repertica. Se non emerge un reale vantaggio, **nessuno sviluppo**. **P3** per l'insieme degli utenti, **P2** solo se gli archivi specializzati confermano; la fase file gestiti richiederebbe separata analisi tecnica. Una semplice scheda che punta a un master esterno **non equivale a backup completo di quel file**.
+- **Esito:** **57 proposte UX**, tutte nello stato «Proposta — da valutare». Unica nuova scheda Markdown e aggiornamento di questo indice, entrambi in `docs/idee/gestione-e-ux/`; nessuna modifica a `main`, altra cartella, test, workflow, configurazioni, issue o sviluppo. La [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) resta documentale, in bozza, senza merge né approvazione.
 
 ## Quarantanovesima ricognizione — 23 novembre 2026 — REPS-UX-056
 
