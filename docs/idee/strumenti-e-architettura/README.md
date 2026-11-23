@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantatreesima ricognizione). Stato uniforme: **Proposta — da valutare**. **56 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (cinquantaquattresima ricognizione). Stato uniforme: **Proposta — da valutare**. **57 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -63,6 +63,15 @@ Data ricognizione: **2026-11-23** (cinquantatreesima ricognizione). Stato unifor
 | [REPS-TECH-054](REPS-TECH-054-pacchetto-catalogo-web-statico-offline.md) | Pacchetto locale per cataloghi web statici: selezione consapevole di sole opere e immagini pubblicabili, JSON aperto, hash e zero pubblicazione automatica | P2 solo se richiesto; P3 o nessuno sviluppo altrimenti | Proposta — da valutare |
 | [REPS-TECH-055](REPS-TECH-055-esportazione-coerente-registri-csv.md) | Insieme di registri CSV prodotti da una sola snapshot SQLite con manifest di copertura e hash: per analisi incrociate, non backup o reimport | P2 solo se uso frequente confermato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
 | [REPS-TECH-056](REPS-TECH-056-autenticazione-oauth2-posta-facoltativa.md) | OAuth 2.0 **facoltativo** per autenticarsi alle caselle IMAP/SMTP esistenti, senza account Repertica: browser OS/PKCE, token solo in portachiavi e valutazione preventiva di scope e costi di verifica dei provider | P2 condizionata; P1–P2 solo se blocchi utenti verificati; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+
+| [REPS-TECH-057](REPS-TECH-057-contratto-schemi-csv-dizionario-dati.md) | Contratto versionato e dizionario leggibile anche da strumenti esterni per i dodici registri CSV esistenti: tipi, unità, privacy, relazioni, limiti e compatibilità delle colonne, senza cambiare gli export | P2 solo con consumer ricorrenti verificati; altrimenti P3/nessuna funzione | Proposta — da valutare |
+
+## Cinquantaquattresima ricognizione — 23 novembre 2026 — REPS-TECH-057
+
+- **[REPS-TECH-057 — Contratto versionato e dizionario dei dodici registri CSV](REPS-TECH-057-contratto-schemi-csv-dizionario-dati.md).** Verificati sul branch `main` `README.md`, `docs/MVP.md`, `docs/DATA-PORTABILITY.md`, `src-tauri/src/export.rs` e `src/app/csv-registers.ts`. L'esportatore dichiara **dodici registri** con intestazioni proprie ma nessuna versione di contratto leggibile nel file: gli aggiustamenti di colonne (documentati in passato per gli allegati agli incassi) possono alterare gli script esterni; la granularità, le unità (`*_cents`, `*_bp`), i limiti di `NULL` e la protezione da formule meritano una descrizione verificabile. **Nessuna rottura effettiva di integrazioni è stata osservata**.
+- **Non duplica:** TECH-001 studia il futuro pacchetto completo reimportabile, TECH-018 la robustezza di scrittura del singolo CSV, TECH-055 l'esportazione coordinata da una stessa snapshot, TECH-025 la minimizzazione. Qui soltanto **semantica, versioning e compatibilità dei registri individuali già presenti**, con primo passo eventualmente solo Markdown; consultate le **56 proposte tecniche** preesistenti e le **61 del filone Gestione e UX** della [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14), non modificate.
+- **Prima alternativa senza codice:** documentare colonne/limiti e provare con **3–5 professionisti** o script esistenti su dati sintetici. **P2 condizionata** a uso ripetuto verificato; altrimenti **P3 o nessun intervento**. Sidecar JSON macchina soltanto opzionale, in fase futura e previa approvazione. Il CSV rimane integrale, offline, non ripristinabile e non diventa automaticamente sicuro da condividere.
+- **Esito:** **57 schede**, tutte **«Proposta — da valutare»**; solo scheda e indice Markdown nella cartella autorizzata, [PR #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) ancora documentale in bozza, senza merge, codice, test, workflow, impostazioni, dipendenze, issue operative, approvazioni o assegnazioni.
 
 ## Cinquantatreesima ricognizione — 23 novembre 2026 — REPS-TECH-056
 
