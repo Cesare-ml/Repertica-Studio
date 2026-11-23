@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo**, da valutare personalmente. Le schede non autorizzano implementazioni, modifiche al prodotto o assegnazioni agli sviluppatori.
 
-Aggiornato: **2026-11-23** (sessantasettesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **74 schede**; nessuna idea approvata o assegnata.
+Aggiornato: **2026-11-23** (sessantottesima ricognizione). Stato delle proposte: **Proposta — da valutare**. **75 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Idea | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -88,6 +88,14 @@ Aggiornato: **2026-11-23** (sessantasettesima ricognizione). Stato delle propost
 
 
 | [REPS-UX-074](REPS-UX-074-ricognizione-copertine-fotografiche-mancanti.md) | Ricognizione discreta di opere **senza copertina collegata**: filtro leggibile combinabile con ricerca/stato, senza confondere immagini assenti per scelta con file danneggiati o imporre una «qualità fotografica» | P2 solo se bisogno verificato; altrimenti P3/nessuno sviluppo | Proposta — da valutare |
+| [REPS-UX-075](REPS-UX-075-caratteristiche-opera-non-verificate.md) | Distinguere caratteristiche dell'opera non verificate da assenze dichiarate (firma, vernice finale, cornice): prima chiarimento dei booleani legacy, eventuali tre stati solo se necessario | P2 se ambiguità dimostrata; P3/nessuno sviluppo altrimenti | Proposta — da valutare |
+
+## Sessantottesima ricognizione — 23 novembre 2026 — REPS-UX-075
+
+- **[REPS-UX-075 — Caratteristiche dell'opera non verificate](REPS-UX-075-caratteristiche-opera-non-verificate.md).** Riletti README, MVP, modelli UI/Rust, migrazione v14, template, visualizzatore, CSV e contratto MCP. La migrazione assegna false ai tre flag firma/vernice/cornice delle opere precedenti e un test verifica tale comportamento; anche i moduli nuovi partono da false. Una negazione deliberata non è distinguibile da un valore predefinito. Nessun incidente reale dimostrato.
+- **Prima alternativa:** spiegare il significato conservativo di «non marcato»; solo se insufficiente studiare tre stati indipendenti e una compatibilità esplicita con CSV/MCP/backup, senza alterare snapshot storici o dedurre informazioni dalle foto.
+- **Anti-doppioni:** confrontati 74 UX e 70 TECH; TECH-041 tratta la checklist Object ID, UX-004 i rapporti di condizione, UX-026 il diario di lavorazione, UX-064 la revisione dei metadati, TECH-057 il contratto CSV. [PR tecnica #16](https://github.com/Cesare-ml/Repertica-Studio/pull/16) non modificata.
+- **Priorità:** P2 condizionata a bisogno dimostrato, altrimenti P3 o nessuno sviluppo. Tutte le 75 schede restano «Proposta — da valutare»; solo Markdown, [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14) in bozza e senza merge.
 
 ## Sessantasettesima ricognizione — 23 novembre 2026 — REPS-UX-074
 
