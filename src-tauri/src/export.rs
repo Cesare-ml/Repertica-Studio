@@ -23,6 +23,39 @@ fn append_text_cell(output: &mut String, value: &str) {
     output.push('"');
 }
 
+// An external SQLite import can contain impossible/non-canonical dates even
+// when foreign keys and page integrity pass. Reject them before publishing a
+// CSV: spreadsheet sorting and month-based accounting would be misleading.
+// Only check the date actually represented by the requested register.
+fn validate_export_dates(conn: &Connection, kind: &str) -> Result<(), String> {
+    let (table, date_column, label) = match kind {
+        "sales" | "balances" | "allocations" => ("sales", "sold_at", "vendita"),
+        "receipts" => ("sale_receipts", "received_at", "incasso"),
+        "expenses" => ("expenses", "expense_date", "spesa"),
+        "installments" => ("sale_installments", "due_date", "scadenza rata"),
+        "certificates" => ("certificates", "issued_at", "emissione certificato"),
+        _ => return Ok(()),
+    };
+    // All identifiers above are fixed literals, never interpolated user input.
+    let sql = format!("SELECT id,{date_column} FROM {table} ORDER BY id");
+    let mut statement = conn.prepare(&sql).map_err(error)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(error)?;
+    for entry in rows {
+        let (id, date) = entry.map_err(error)?;
+        let canonical = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map(|parsed| parsed.format("%Y-%m-%d").to_string() == date)
+            .unwrap_or(false);
+        if !canonical {
+            return Err(format!(
+                "Esportazione annullata: data di {label} non valida ({id}). Verifica l'archivio."
+            ));
+        }
+    }
+    Ok(())
+}
+
 // CSV must not silently lose records when foreign keys were disabled during
 // an external SQLite import. INNER JOIN would otherwise omit orphaned rows.
 fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String> {
@@ -35,6 +68,7 @@ fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String
             "Esportazione annullata: relazione SQLite non valida nella tabella {table} (riga {rowid:?}, riferimento a {parent}). Verifica o ripristina l'archivio prima di esportare."
         ));
     }
+    validate_export_dates(conn, kind)?;
     // Missing dependent sale_finances rows do not violate foreign keys. Do not
     // use COALESCE to invent taxes and shipping in financial exports.
     if matches!(kind, "sales" | "allocations") {
@@ -279,6 +313,62 @@ mod tests {
     use super::*;
     use crate::db;
 
+
+    #[test]
+    fn corrupted_imported_dates_never_become_authoritative_csv_registers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','ART-1','Opera','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Collezionista','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',5000,'2026-11-01','t');
+            INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+                VALUES('s',3334,3333,3333);
+            INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('r','s','2026-11-02',1000,'cash','t');
+            INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,created_at,updated_at)
+                VALUES('e','2026-11-02','materiali','Cornice',100,'activity','t','t');
+            INSERT INTO sale_installments(id,sale_id,position,due_date,amount_cents)
+                VALUES('i1','s',1,'2026-11-02',2500),
+                      ('i2','s',2,'2026-12-02',2500);
+            INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('cert','a','RS-0001','2026-11-02','Artista','{}','t');
+            -- Simulate an external SQLite edit that disabled historic immutability.
+            DROP TRIGGER certificates_no_update;
+        "#).unwrap();
+        for (table, column, id, kinds) in [
+            ("sales", "sold_at", "s", &["sales", "balances", "allocations"][..]),
+            ("sale_receipts", "received_at", "r", &["receipts"][..]),
+            ("expenses", "expense_date", "e", &["expenses"][..]),
+            ("sale_installments", "due_date", "i1", &["installments"][..]),
+            ("certificates", "issued_at", "cert", &["certificates"][..]),
+        ] {
+            let update = format!("UPDATE {table} SET {column}=?1 WHERE id=?2");
+            for bad_date in ["2026-02-30", "2026-2-3", "invalid"] {
+                conn.execute(&update, rusqlite::params![bad_date, id]).unwrap();
+                for kind in kinds {
+                    let error = render_csv(&conn, kind).unwrap_err();
+                    assert!(error.contains("data di"), "{kind}: {error}");
+                    assert!(error.contains(id), "{kind}: {error}");
+                }
+            }
+            conn.execute(&update, rusqlite::params!["2026-11-02", id]).unwrap();
+            for kind in kinds {
+                assert!(render_csv(&conn, kind).is_ok(), "{kind} should recover");
+            }
+        }
+        // The native export must reject before opening a destination file.
+        conn.execute("UPDATE expenses SET expense_date='2026-02-30' WHERE id='e'", []).unwrap();
+        drop(conn);
+        let destination = dir.path().join("expenses.csv");
+        let failure = export_file(&db, "expenses", &destination).unwrap_err();
+        assert!(failure.contains("data di spesa"), "{failure}");
+        assert!(!destination.exists(), "no partial CSV should be published");
+    }
 
     #[test]
     fn csv_rejects_orphaned_sale_instead_of_omitting_it_from_joined_registers() {
