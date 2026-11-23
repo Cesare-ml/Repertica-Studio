@@ -2,7 +2,7 @@
 
 **Catalogo esclusivamente ideativo — nessuna funzionalità approvata o assegnata allo sviluppo.**
 
-Data ricognizione: **2026-11-23** (cinquantanovesima ricognizione). Stato uniforme: **Proposta — da valutare**. **62 schede**; nessuna idea approvata o assegnata.
+Data ricognizione: **2026-11-23** (sessantesima ricognizione). Stato uniforme: **Proposta — da valutare**. **63 schede**; nessuna idea approvata o assegnata.
 
 | ID stabile | Scheda | Priorità ipotetica | Stato |
 | --- | --- | --- | --- |
@@ -71,6 +71,14 @@ Data ricognizione: **2026-11-23** (cinquantanovesima ricognizione). Stato unifor
 | [REPS-TECH-060](REPS-TECH-060-identita-destinazione-backup-programmati.md) | Backup automatici su USB/NAS: controllo facoltativo della destinazione effettiva quando il percorso resta uguale ma cambia supporto, senza confondere verifica del disco e integrità delle copie | P2 solo con scenario riproducibile e bisogno reale; P3 o guida altrimenti | Proposta — da valutare |
 | [REPS-TECH-061](REPS-TECH-061-esportazione-metadati-museali-lido-11.md) | Consegna selettiva di metadati delle opere in LIDO 1.1 XML per musei, con mapping dichiarato e validazione offline; non backup, non IIIF, non pubblicazione o import | P3; P2 solo con partner e profilo museale verificati | Proposta — da valutare |
 | [REPS-TECH-062](REPS-TECH-062-progresso-annullamento-sicuro-operazioni-locali.md) | Contratto comune per progresso reale e richiesta di annullamento nei punti sicuri di backup/ripristino/esportazioni, senza riscrivere pipeline o promettere recuperi automatici | P2 solo con attese problematiche confermate; altrimenti P3/nessuna funzione | Proposta — da valutare |
+| [REPS-TECH-063](REPS-TECH-063-brochure-pdf-accessibili-lettura-assistita.md) | Brochure PDF per lettori assistivi: studio di tag semantici, ordine di lettura e alternative umane delle immagini; non equivale a Unicode, PDF/A o conformità PDF/UA dichiarata | P3; P2 solo dopo requisiti di destinatari reali e fattibilità dimostrata | Proposta — da valutare |
+
+## Sessantesima ricognizione — 23 novembre 2026 — REPS-TECH-063
+
+- **[REPS-TECH-063 — Brochure PDF accessibili: struttura e lettura assistita](REPS-TECH-063-brochure-pdf-accessibili-lettura-assistita.md).** Riesaminati su `main` `README.md`, `docs/BROCHURES-OFFLINE.md` e il renderer `src-tauri/src/brochures.rs`: l'editor produce già brochure PDF A4 native/offline, ma la funzione `render_pdf` esaminata non genera un albero semantico, un ordine di lettura marcato o alternative `/Alt` per le fotografie. **Non sono state accertate segnalazioni di utenti né esigenze normative specifiche.** Verificate le 62 schede tecniche e le 67 Gestione e UX dell'altra [PR #14](https://github.com/Cesare-ml/Repertica-Studio/pull/14).
+- **Differenza rispetto alle idee esistenti:** TECH-032 riguarda glifi Unicode, metriche/font e layout; questa scheda affronta **titoli riconoscibili, ordine logico, immagini informative vs decorative e lingue** per chi legge il PDF con tecnologie assistive. TECH-020 riguarda accessibilità dell'app; TECH-023 PDF/A dei certificati; TECH-034 scrittura sicura dei PDF. Le schede UX sui contenuti, sui diritti e sulla brochure restano intatte. Font Unicode **non equivalgono** a PDF accessibili e presenza di tag **non dimostra** conformità PDF/UA.
+- **Ricerca preliminare esterna:** guide [W3C WAI PDF3](https://www.w3.org/WAI/WCAG22/Techniques/pdf/PDF3.html), [PDF9](https://www.w3.org/WAI/WCAG21/Techniques/pdf/PDF9.html) e [PDF Association](https://pdfa.org/accessibility) consultate il 23/11/2026. Prima opzione **senza sviluppo**: chiedere requisiti a 3–5 destinatari e provare testo/HTML/ODT accessibili allegati alla brochure visiva; valutare con screen reader un PDF campione. Se il PDF strutturato non serve, non procedere.
+- **Priorità ipotetica P3**; P2 soltanto dopo necessità ripetuta e fattibilità locale dimostrate. Complessità alta per un documento strutturato e validato. **63 schede**, tutte «Proposta — da valutare», nessuna approvata o assegnata. Solo questo indice e la nuova scheda Markdown sotto `docs/idee/strumenti-e-architettura/`; PR #16 in bozza, nessun merge.
 
 ## Cinquantanovesima ricognizione — 23 novembre 2026 — REPS-TECH-062
 
