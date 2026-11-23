@@ -32,7 +32,10 @@ const LATIN_EQUIVALENTS: Readonly<Record<string, string>> = {
 
 /** Normalize Latin diacritics, case and whitespace for local search. */
 function foldSearch(value: string): string {
-  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+  // NFKC maps imported fullwidth archive codes (ＡＲＴ－００４２), digits and
+  // ideographic spaces to their searchable equivalents. The original fields
+  // and codes in SQLite are never rewritten.
+  return value.normalize('NFKC').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
     // Ligatures and Latin letters without a base+accent decomposition need
     // explicit equivalents. Apply identically to saved fields and search terms.
     .replace(/[æœßþðđłøıħ]/gu, letter => LATIN_EQUIVALENTS[letter] ?? letter)
