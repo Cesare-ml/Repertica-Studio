@@ -55,19 +55,42 @@ pub struct PlanInput {
     pub parts: Vec<PartInput>,
 }
 
+// Third-party SQLite importers can bypass CHECK constraints. Values other than
+// 0/1 must never be silently treated as "disabled" or "inactive": that could
+// stop the allocation of new sales or hide historical funds.
+fn persisted_flag(value: i64, field: &str) -> Result<bool, String> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(format!("Invalid {field} flag in imported allocation data; repair the archive before continuing")),
+    }
+}
+
 pub fn enabled(conn: &Connection) -> Result<bool, String> {
-    conn.query_row("SELECT enabled FROM allocation_settings WHERE singleton=1", [], |r| r.get::<_, i64>(0))
-        .map(|v| v == 1).map_err(err)
+    let value = conn.query_row(
+        "SELECT enabled FROM allocation_settings WHERE singleton=1",
+        [], |r| r.get::<_, i64>(0),
+    ).map_err(err)?;
+    persisted_flag(value, "allocation enabled")
 }
 
 /// Every part ever defined, active or not, in display order.
 pub fn all_parts(conn: &Connection) -> Result<Vec<Part>, String> {
     let mut statement = conn.prepare(
         "SELECT id,name,share_bp,pays_expenses,position,active FROM allocation_parts ORDER BY position,id").map_err(err)?;
-    let parts = statement.query_map([], |r| Ok(Part {
-        id: r.get(0)?, name: r.get(1)?, share_bp: r.get(2)?, pays_expenses: r.get::<_, i64>(3)? == 1,
-        position: r.get(4)?, active: r.get::<_, i64>(5)? == 1,
-    })).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
+    let rows = statement.query_map([], |r| Ok((
+        r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?,
+        r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?,
+    ))).map_err(err)?;
+    let mut parts = Vec::new();
+    for row in rows {
+        let (id, name, share_bp, pays_expenses, position, active) = row.map_err(err)?;
+        parts.push(Part {
+            id, name, share_bp,
+            pays_expenses: persisted_flag(pays_expenses, "pays_expenses")?,
+            position, active: persisted_flag(active, "active")?,
+        });
+    }
     Ok(parts)
 }
 
@@ -210,6 +233,36 @@ mod tests {
         (dir, db)
     }
     fn part(name: &str, bp: i64, pays: bool) -> PartInput { PartInput { id: None, name: name.into(), share_bp: bp, pays_expenses: pays } }
+
+    #[test]
+    fn invalid_imported_boolean_flags_do_not_hide_allocations() {
+        let (_dir, db) = setup();
+        let conn = db.conn.lock().unwrap();
+        let before = load_plan(&conn).unwrap();
+        // An external importer can disable CHECK constraints while modifying
+        // a perfectly valid SQLite file; opening the file must not mask this.
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+        conn.execute("UPDATE allocation_settings SET enabled=2 WHERE singleton=1", []).unwrap();
+        assert!(enabled(&conn).unwrap_err().contains("allocation enabled"));
+        assert!(shares_for_new_sale(&conn).is_err(),
+            "corruption cannot silently turn a new sale's allocations off");
+        conn.execute("UPDATE allocation_settings SET enabled=1 WHERE singleton=1", []).unwrap();
+
+        conn.execute("UPDATE allocation_parts SET pays_expenses=2 WHERE id='activity'", []).unwrap();
+        assert!(all_parts(&conn).unwrap_err().contains("pays_expenses"));
+        assert!(load_plan(&conn).is_err());
+        conn.execute("UPDATE allocation_parts SET pays_expenses=1 WHERE id='activity'", []).unwrap();
+
+        conn.execute("UPDATE allocation_parts SET active=-1 WHERE id='savings'", []).unwrap();
+        assert!(all_parts(&conn).unwrap_err().contains("active"));
+        assert!(shares_for_new_sale(&conn).is_err(),
+            "a corrupt active flag must not silently exclude the historic fund");
+        conn.execute("UPDATE allocation_parts SET active=1 WHERE id='savings'", []).unwrap();
+        conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+
+        assert_eq!(load_plan(&conn).unwrap(), before);
+        assert_eq!(shares_for_new_sale(&conn).unwrap().len(), 3);
+    }
 
     #[test]
     fn three_default_parts_are_created_and_enabled() {
