@@ -586,6 +586,32 @@ mod tests {
         use super::resource_http::NativeAuctionsHttp;
         use rusqlite::{Connection,params};
         let (listener,addr)=listen();
+        // Simulate the browser only at the injected opener boundary. The native
+        // callback really binds a fresh loopback port, validates state/Host and
+        // closes its listener before the HTTP exchange. No platform opener.
+        let session = super::super::LoopbackSession::bind(GrantClient::Auctions, Duration::from_secs(5)).unwrap();
+        let callback_addr = session.listener.local_addr().unwrap();
+        let state = session.grant.state.clone();
+        let verifier = session.grant.verifier.as_ref().unwrap().clone();
+        let challenge = super::super::challenge(&verifier);
+        let grant = session.open_and_wait(&std::sync::atomic::AtomicBool::new(false),
+            IdentityProvider::IsolatedHttp(addr), |url| {
+                assert!(url.starts_with(&format!("http://{addr}/login?")));
+                assert!(url.contains("client_id=repertica-desktop-auctions&"));
+                assert!(url.contains(&format!("state={state}&")));
+                assert!(url.contains(&format!("code_challenge={challenge}&code_challenge_method=S256")));
+                let mut stream = TcpStream::connect(callback_addr).unwrap();
+                stream.write_all(format!(
+                    "GET {CALLBACK_PATH}?code={CODE}&state={state} HTTP/1.1\r\nHost: {callback_addr}\r\n\r\n"
+                ).as_bytes()).unwrap();
+                Ok(())
+            }).unwrap();
+        assert_eq!(grant.expected_audience(), "repertica-auctions");
+        assert!(TcpStream::connect(callback_addr).is_err());
+        let expected_grant = json!({"grant_type":"authorization_code",
+            "client_id":"repertica-desktop-auctions",
+            "redirect_uri":format!("http://{callback_addr}{CALLBACK_PATH}"),
+            "code":CODE,"code_verifier":verifier});
         let (key_tx, key_rx) = std::sync::mpsc::channel::<String>();
         let worker=thread::spawn(move || {
             let f=fixture();
@@ -599,7 +625,7 @@ mod tests {
             }
             let mut s = accept(&listener);
             let body: Value = serde_json::from_slice(&read_request(&mut s, &format!("POST {TOKEN} HTTP/1.1"))).unwrap();
-            assert_eq!(body, serde_json::to_value(grant()).unwrap());
+            assert_eq!(body, expected_grant);
             reply(&mut s, "200 OK", &json!({"access_token":bearer,"token_type":"Bearer","expires_in":900,"scope":"profile"}));
             drop(s);
             let mut private = tenants("owner");
@@ -635,7 +661,7 @@ mod tests {
         }
         tauri::async_runtime::block_on(async {
             let token = NativeIdentityHttp::new(IdentityProvider::IsolatedHttp(addr)).unwrap()
-                .exchange_with_clock(grant(), DEADLINE, || Ok(NOW)).await.unwrap();
+                .exchange_with_clock(grant, DEADLINE, || Ok(NOW)).await.unwrap();
             let api=NativeAuctionsHttp::new(addr).unwrap();
             let altered=RESOURCE_BODY.replace(r#""title":"Art""#,r#""title":"Other""#);
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,&altered,||Ok(NOW)).await.unwrap_err(),"preview_draft_changed");
