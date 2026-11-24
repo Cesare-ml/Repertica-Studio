@@ -68,3 +68,21 @@ increment. Existing archive startup stays unchanged.
 Run the new contract tests with
 `cargo test --manifest-path src-tauri/Cargo.toml --test auction_pkce_contract`.
 This is not the provider/browser end-to-end test.
+
+### QA gate: isolated provider only (24 November)
+
+The native browser boundary now takes a closed provider enum. In non-test
+builds the only variant is Disabled; the opener is never invoked. In test
+builds the synthetic fixture uses the exact reserved issuer
+`https://studio.example.test` from Online #5 (no DNS or remote requests).
+There is no renderer, environment or arbitrary URL override. The only network
+I/O in these tests is the existing literal IPv4 loopback callback.
+
+The test-only redemption harness models a one-time grant, fixed destination,
+no redirect following, exact audience/scope, access purpose, positive
+security_version (Online #5 f7d9f77), bounded lifetime and deadline rejection.
+It uses synthetic claim structures and a fake provider, not signed JWTs or
+an HTTP client. No real token, key or account is used. A separate isolated
+provider HTTP/RS256/JWKS test with synthetic keys/accounts, hard I/O timeout,
+revocation and PG integration remains required. No browser opener or native
+HTTP adapter is active; production stays disabled pending explicit QA approval.
