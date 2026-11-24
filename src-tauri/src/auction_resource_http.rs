@@ -31,6 +31,9 @@ pub(super) struct Tenant {
     artist_slug: Option<String>,
     artist_name: Option<String>,
     approved: Option<u8>,
+    // Required JSON boolean from the server's publication predicate. An old
+    // or malformed response is not an authorization to prepare a request.
+    publication_eligible: bool,
     published_this_month: u32,
 }
 
@@ -126,7 +129,7 @@ fn check_new_schedule(body: &str, now: u64) -> Result<(), String> {
 }
 
 fn eligible_tenant(t: &Tenant) -> bool {
-    t.status == "active" && matches!(t.role.as_str(), "owner" | "editor") &&
+    t.publication_eligible && t.status == "active" && matches!(t.role.as_str(), "owner" | "editor") &&
         t.approved == Some(1) && t.artist_slug.is_some()
 }
 

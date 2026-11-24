@@ -430,7 +430,7 @@ mod tests {
     fn tenants(role: &str) -> Value {
         json!({"month":"2027-01","monthlyPerArtistLimit":3,"globalMonthlyLimit":12,"tenants":[
             {"tenantId":"tenant-test","status":"active","role":role,"artistSlug":"artist",
-             "artistName":"Synthetic artist","approved":1,"publishedThisMonth":1}]})
+             "artistName":"Synthetic artist","approved":1,"publishedThisMonth":1,"publicationEligible":role != "viewer"}]})
     }
     fn receipt(replayed: bool, bidding: bool) -> Value {
         json!({"auctionId":RESOURCE_ID,"slug":"artist--art","status":"preview",
@@ -582,14 +582,40 @@ mod tests {
     }
 
     #[test]
-    fn native_reviewed_preparation_only_gets_membership_and_persists_exact_bytes() {
+    fn native_pkce_preparation_and_explicit_reconciliation_preserve_exact_bytes() {
         use super::resource_http::NativeAuctionsHttp;
         use rusqlite::{Connection,params};
         let (listener,addr)=listen();
+        let (key_tx, key_rx) = std::sync::mpsc::channel::<String>();
         let worker=thread::spawn(move || {
             let f=fixture();
             let bearer=f["valid"].as_str().unwrap();
+            // Use the actual native exchange, discovery and signed JWKS before
+            // the resource calls, rather than injecting a pre-verified token.
+            for (path, body) in [(DISCOVERY, discovery()), (JWKS, f["jwks"].clone())] {
+                let mut s = accept(&listener);
+                assert!(read_request(&mut s, &format!("GET {path} HTTP/1.1")).is_empty());
+                reply(&mut s, "200 OK", &body);
+            }
+            let mut s = accept(&listener);
+            let body: Value = serde_json::from_slice(&read_request(&mut s, &format!("POST {TOKEN} HTTP/1.1"))).unwrap();
+            assert_eq!(body, serde_json::to_value(grant()).unwrap());
+            reply(&mut s, "200 OK", &json!({"access_token":bearer,"token_type":"Bearer","expires_in":900,"scope":"profile"}));
+            drop(s);
+            let mut private = tenants("owner");
+            private["tenants"][0]["publicationEligible"] = json!(false);
+            let mut s = accept(&listener);
+            assert!(read_resource_request(&mut s,"GET /api/studio/tenants HTTP/1.1",Some(bearer),None).is_empty());
+            reply(&mut s,"200 OK",&private);
+            drop(s);
             for role in ["viewer","owner","owner","owner"] { resource_tenants(&listener,bearer,role); }
+            // Only the key generated and persisted by native preparation is
+            // accepted by the fixture; explicit reconciliation follows.
+            let key = key_rx.recv_timeout(Duration::from_secs(15)).unwrap();
+            resource_tenants(&listener,bearer,"owner");
+            let mut s = accept(&listener);
+            assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(&key)).as_slice(),RESOURCE_BODY.as_bytes());
+            reply(&mut s,"201 Created",&receipt(false,false));
             listener
         });
         let mut conn=Connection::open_in_memory().unwrap();
@@ -608,12 +634,15 @@ mod tests {
             c.query_row("SELECT revision,record_json FROM auction_drafts",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap()
         }
         tauri::async_runtime::block_on(async {
-            let token=verified_resource_token();
+            let token = NativeIdentityHttp::new(IdentityProvider::IsolatedHttp(addr)).unwrap()
+                .exchange_with_clock(grant(), DEADLINE, || Ok(NOW)).await.unwrap();
             let api=NativeAuctionsHttp::new(addr).unwrap();
             let altered=RESOURCE_BODY.replace(r#""title":"Art""#,r#""title":"Other""#);
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,&altered,||Ok(NOW)).await.unwrap_err(),"preview_draft_changed");
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW+200)).await.unwrap_err(),"invalid_schedule");
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&uuid::Uuid::new_v4().to_string(),RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_draft_conflict");
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
+            // An approved but private profile must also deny preparation.
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
             let other=RESOURCE_BODY.replace("tenant-test","tenant-other");
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,&other,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
@@ -633,8 +662,65 @@ mod tests {
             assert!(value.get("receipt").is_none());
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&next,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"pending_preview_unresolved");
             assert_eq!(stored(&conn),(actual,record));
+            key_tx.send(value["pending"]["idempotencyKey"].as_str().unwrap().to_owned()).unwrap();
+            let confirmed = api.reconcile_preview(&mut conn,&token,"a",&scope,&next,||Ok(NOW)).await.unwrap();
+            let (confirmed_revision, confirmed_record) = stored(&conn);
+            assert_ne!(confirmed_revision, next);
+            let saved: Value = serde_json::from_str(&confirmed_record).unwrap();
+            assert_eq!(saved["pending"], value["pending"]);
+            assert_eq!(saved["receipt"]["auctionId"], RESOURCE_ID);
+            assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&confirmed_revision,||Ok(NOW)).await.unwrap(),confirmed);
+            assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
         });
         let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn native_resource_requires_server_publication_eligibility() {
+        use super::resource_http::NativeAuctionsHttp;
+        let (listener, addr) = listen();
+        let worker = thread::spawn(move || {
+            let f = fixture();
+            let bearer = f["valid"].as_str().unwrap();
+            let mut private = tenants("owner");
+            private["tenants"][0]["publicationEligible"] = json!(false);
+            let mut suspended = tenants("owner");
+            suspended["tenants"][0]["status"] = json!("suspended");
+            suspended["tenants"][0]["publicationEligible"] = json!(false);
+            let mut absent_profile = tenants("editor");
+            absent_profile["tenants"][0]["artistSlug"] = Value::Null;
+            absent_profile["tenants"][0]["artistName"] = Value::Null;
+            absent_profile["tenants"][0]["approved"] = Value::Null;
+            absent_profile["tenants"][0]["publicationEligible"] = json!(false);
+            let mut missing = tenants("owner");
+            missing["tenants"][0].as_object_mut().unwrap().remove("publicationEligible");
+            let mut numeric = tenants("owner");
+            numeric["tenants"][0]["publicationEligible"] = json!(1);
+            let mut inconsistent = tenants("viewer");
+            inconsistent["tenants"][0]["publicationEligible"] = json!(true);
+            for body in [private.clone(), suspended, absent_profile, tenants("viewer"),
+                inconsistent, missing, numeric, private, tenants("editor")] {
+                let mut s = accept(&listener);
+                assert!(read_resource_request(&mut s,"GET /api/studio/tenants HTTP/1.1",Some(bearer),None).is_empty());
+                reply(&mut s,"200 OK",&body);
+            }
+            listener
+        });
+        tauri::async_runtime::block_on(async {
+            let token = verified_resource_token();
+            let api = NativeAuctionsHttp::new(addr).unwrap();
+            for _ in 0..5 {
+                assert!(api.eligible_tenants(&token, || Ok(NOW)).await.unwrap().is_empty());
+            }
+            for _ in 0..2 {
+                assert_eq!(api.eligible_tenants(&token, || Ok(NOW)).await.err(), Some("oauth_invalid_response"));
+            }
+            assert_eq!(api.create_preview(&token, RESOURCE_KEY, RESOURCE_BODY, || Ok(NOW)).await.err(),
+                Some("auction_access_denied"));
+            assert_eq!(api.eligible_tenants(&token, || Ok(NOW)).await.unwrap(), vec!["tenant-test".to_owned()]);
+        });
+        let listener = worker.join().unwrap();
         assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
     }
 
