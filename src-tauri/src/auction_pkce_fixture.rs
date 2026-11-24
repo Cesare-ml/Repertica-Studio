@@ -135,3 +135,91 @@ fn fixture_redemption_replay_and_expired_request() {
         ENDPOINT, expires, |_, _| { std::thread::sleep(Duration::from_millis(60));
             Ok((200, claims(GrantClient::Auctions))) }), Err("oauth_timeout"));
 }
+
+
+// Test-only model of Identity #5's atomic code-store predicate. Unlike the
+// earlier transport closure, it rejects altered grant fields instead of
+// asserting on them. It is not a database, signature verifier or HTTP server.
+struct BoundCode {
+    code_hash: [u8; 32],
+    client_id: &'static str,
+    redirect_uri: String,
+    challenge: String,
+    security_version: u64,
+    expires_at: u64,
+    used: bool,
+}
+
+impl BoundCode {
+    fn issue(grant: &TokenExchange, now: u64, version: u64) -> Self {
+        Self {
+            code_hash: Sha256::digest(grant.code.as_bytes()).into(),
+            client_id: grant.client_id,
+            redirect_uri: grant.redirect_uri.clone(),
+            challenge: challenge(&grant.code_verifier),
+            security_version: version,
+            expires_at: now + 90,
+            used: false,
+        }
+    }
+
+    fn redeem(&mut self, grant: &TokenExchange, now: u64, current_version: u64,
+              verified: bool) -> Result<(u16, Claims), &'static str> {
+        let code_hash: [u8; 32] = Sha256::digest(grant.code.as_bytes()).into();
+        if self.used || !verified || current_version == 0 ||
+            current_version != self.security_version || now >= self.expires_at ||
+            grant.grant_type != "authorization_code" ||
+            code_hash != self.code_hash || grant.client_id != self.client_id ||
+            grant.redirect_uri != self.redirect_uri ||
+            challenge(&grant.code_verifier) != self.challenge {
+            return Err("oauth_invalid_grant");
+        }
+        self.used = true;
+        let mut c = claims(grant.expected_client);
+        c.security_version = self.security_version;
+        Ok((200, c))
+    }
+}
+
+#[test]
+fn fixture_code_binding_rejects_wrong_port_client_verifier_and_code() {
+    for (client, other) in [(GrantClient::Auctions, GrantClient::StudioApi),
+                           (GrantClient::StudioApi, GrantClient::Auctions)] {
+        let mut store = BoundCode::issue(&exchange(client), NOW, 1);
+        for case in 0..5 {
+            let mut grant = exchange(client);
+            match case {
+                0 => grant.redirect_uri = "http://127.0.0.1:49153/repertica/oauth/callback".into(),
+                1 => grant.client_id = other.id(),
+                2 => grant.code_verifier = "B".repeat(43),
+                3 => grant.code = "different-synthetic-authorization-code".into(),
+                _ => grant.grant_type = "refresh_token",
+            }
+            assert_eq!(redeem(grant, IdentityProvider::IsolatedFixture, ENDPOINT, deadline(),
+                |_, g| store.redeem(g, NOW, 1, true)), Err("oauth_invalid_grant"));
+            assert!(!store.used);
+        }
+        assert_eq!(redeem(exchange(client), IdentityProvider::IsolatedFixture, ENDPOINT, deadline(),
+            |_, g| store.redeem(g, NOW + 89, 1, true)), Ok(()));
+        assert!(store.used);
+        assert_eq!(redeem(exchange(client), IdentityProvider::IsolatedFixture, ENDPOINT, deadline(),
+            |_, g| store.redeem(g, NOW + 89, 1, true)), Err("oauth_invalid_grant"));
+    }
+}
+
+#[test]
+fn fixture_code_binding_denies_expired_or_revoked_grants() {
+    for client in [GrantClient::Auctions, GrantClient::StudioApi] {
+        for (now, current_version, verified) in [
+            (NOW + 90, 1, true),
+            (NOW, 2, true),
+            (NOW, 0, true),
+            (NOW, 1, false),
+        ] {
+            let mut store = BoundCode::issue(&exchange(client), NOW, 1);
+            assert_eq!(redeem(exchange(client), IdentityProvider::IsolatedFixture, ENDPOINT, deadline(),
+                |_, g| store.redeem(g, now, current_version, verified)), Err("oauth_invalid_grant"));
+            assert!(!store.used);
+        }
+    }
+}
