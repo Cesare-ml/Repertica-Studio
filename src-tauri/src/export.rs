@@ -69,6 +69,19 @@ fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String
         ));
     }
     validate_export_dates(conn, kind)?;
+    // current_revision_id is not a foreign key: an external edit can leave
+    // a missing or cross-item current revision even with foreign_key_check OK.
+    if matches!(kind, "media_items" | "media_revisions") {
+        let broken_media: Option<String> = conn.query_row(
+            "SELECT m.id FROM media_items m WHERE NOT EXISTS
+                (SELECT 1 FROM media_revisions r WHERE r.id=m.current_revision_id AND r.media_id=m.id)
+             ORDER BY m.id LIMIT 1",
+            [], |row| row.get(0)
+        ).optional().map_err(error)?;
+        if let Some(id) = broken_media {
+            return Err(format!("Esportazione annullata: versione corrente non valida per il media {id}. Verifica l'archivio."));
+        }
+    }
     // Missing dependent sale_finances rows do not violate foreign keys. Do not
     // use COALESCE to invent taxes and shipping in financial exports.
     if matches!(kind, "sales" | "allocations") {
@@ -240,6 +253,20 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              JOIN sales s ON s.id=al.sale_id JOIN artworks a ON a.id=s.artwork_id
              LEFT JOIN sale_finances f ON f.sale_id=s.id
              ORDER BY s.sold_at,s.id,p.position,p.id"
+        ),
+        // Separate catalog and revision rows keep original UUID relationships,
+        // including trashed media and earlier (non-current) image versions.
+        "media_items" => (
+            "media_id;title;description;alt_text;credits;copyright_status;original_name;state;current_revision_id;dhash;dhash_revision_id;created_at;updated_at",
+            "SELECT id,title,description,alt_text,credits,copyright_status,
+                    original_name,state,current_revision_id,dhash,dhash_revision_id,created_at,updated_at
+             FROM media_items ORDER BY created_at,id"
+        ),
+        "media_revisions" => (
+            "revision_id;media_id;revision_number;kind;image_path;width_px;height_px;size_bytes;sha256;operations_json;created_at",
+            "SELECT id,media_id,number,kind,image_path,width,height,size_bytes,
+                    sha256,operations_json,created_at
+             FROM media_revisions ORDER BY media_id,number,id"
         ),
         _ => return Err("Tipo di registro CSV non riconosciuto".into()),
     };
@@ -806,6 +833,55 @@ seconda riga','t','t')", []).unwrap();
             assert!(export_file(&db, kind, &csv).is_err());
         }
         assert!(export_file(&db, "artworks", &db.directory.join("artworks.csv")).is_err());
+    }
+
+
+    #[test]
+    fn media_registers_include_trashed_assets_and_historical_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO media_items(id,title,original_name,state,current_revision_id,created_at,updated_at)
+                VALUES('m2','=suspicious','second.png','TRASHED','r3','t2','t2'),
+                      ('m1','First','first.jpg','ACTIVE','r2','t1','t1');
+        "#).unwrap();
+        let sha = "b".repeat(64);
+        for (id, media_id, number, kind, path, width, height, size, operations) in [
+            ("r1","m1",1,"ORIGINAL","media/source.jpg",100,200,400,None),
+            ("r2","m1",2,"EDIT","media/edited.png",80,160,300,Some(r#"[{"op":"rotate","value":"=90"}]"#)),
+            ("r3","m2",1,"ORIGINAL","media/second.png",20,20,80,None),
+        ] {
+            conn.execute(
+                "INSERT INTO media_revisions(id,media_id,number,kind,image_path,width,height,size_bytes,sha256,operations_json,created_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'t')",
+                rusqlite::params![id,media_id,number,kind,path,width,height,size,sha,operations],
+            ).unwrap();
+        }
+        let items = render_csv(&conn, "media_items").unwrap();
+        assert!(items.starts_with("\u{feff}media_id;title;description;alt_text;credits;copyright_status;original_name;state;current_revision_id;dhash;dhash_revision_id;created_at;updated_at\r\n"));
+        assert!(items.contains("\"m2\";\"'=suspicious\";"));
+        assert!(items.contains(";\"TRASHED\";\"r3\";"));
+        assert!(items.find("\"m1\"").unwrap() < items.find("\"m2\"").unwrap());
+        assert_eq!(items.matches("\r\n").count(), 3);
+        let revisions = render_csv(&conn, "media_revisions").unwrap();
+        assert!(revisions.starts_with("\u{feff}revision_id;media_id;revision_number;kind;image_path;width_px;height_px;size_bytes;sha256;operations_json;created_at\r\n"));
+        let original = format!("\"r1\";\"m1\";1;\"ORIGINAL\";\"media/source.jpg\";100;200;400;\"{sha}\";");
+        let edit = format!("\"r2\";\"m1\";2;\"EDIT\";\"media/edited.png\";80;160;300;\"{sha}\";");
+        assert!(revisions.find(&original).unwrap() < revisions.find(&edit).unwrap());
+        assert!(revisions.contains("rotate"));
+        assert_eq!(revisions.matches("\r\n").count(), 4);
+
+        // No export may report a dangling/cross-item current revision.
+        for invalid in ["r3", "missing"] {
+            conn.execute("UPDATE media_items SET current_revision_id=?1 WHERE id='m1'", [invalid]).unwrap();
+            for kind in ["media_items", "media_revisions"] {
+                assert!(render_csv(&conn, kind).unwrap_err().contains("versione corrente non valida"));
+            }
+        }
+        conn.execute("UPDATE media_items SET current_revision_id='r2' WHERE id='m1'", []).unwrap();
+        assert_eq!(render_csv(&conn, "media_items").unwrap(), items);
+        assert_eq!(render_csv(&conn, "media_revisions").unwrap(), revisions);
     }
 
     #[test]
