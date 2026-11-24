@@ -13,7 +13,7 @@ export interface CsvRegisterOption {
 
 export const csvRegisterOptions: Record<CsvRegisterKind, CsvRegisterOption> = {
   artworks: {
-    title: 'Esporta opere CSV',
+    title: 'Esporta opere CSV (con acquirenti)',
     filename: 'opere',
     success: 'Registro opere esportato in CSV locale.'
   },

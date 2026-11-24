@@ -29,7 +29,7 @@ fn append_text_cell(output: &mut String, value: &str) {
 // Only check the date actually represented by the requested register.
 fn validate_export_dates(conn: &Connection, kind: &str) -> Result<(), String> {
     let (table, date_column, label) = match kind {
-        "sales" | "balances" | "allocations" => ("sales", "sold_at", "vendita"),
+        "artworks" | "sales" | "balances" | "allocations" => ("sales", "sold_at", "vendita"),
         "receipts" => ("sale_receipts", "received_at", "incasso"),
         "expenses" => ("expenses", "expense_date", "spesa"),
         "installments" => ("sale_installments", "due_date", "scadenza rata"),
@@ -139,10 +139,15 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
     // carries its date; no historic record is silently omitted.
     let (header, query) = match kind {
         "artworks" => (
-            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at;signed;final_varnish;framed;artist_coefficient_override;fixed_price_cents",
-            "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,
-                    description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents
-             FROM artworks ORDER BY code COLLATE NOCASE,id"
+            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at;signed;final_varnish;framed;artist_coefficient_override;fixed_price_cents;sale_id;collector_id;collector_name;sold_at",
+            "SELECT a.id,a.code,a.title,a.year,a.technique,a.support,a.width_cm,a.height_cm,a.depth_cm,
+                    a.description,a.location,a.status,a.image_path,a.created_at,a.updated_at,
+                    a.signed,a.final_varnish,a.framed,a.artist_coefficient_override,a.fixed_price_cents,
+                    s.id,s.collector_id,c.name,s.sold_at
+             FROM artworks a
+             LEFT JOIN sales s ON s.artwork_id=a.id
+             LEFT JOIN collectors c ON c.id=s.collector_id
+             ORDER BY a.code COLLATE NOCASE,a.id"
         ),
         "gallery" => (
             "image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at;kind",
@@ -341,7 +346,7 @@ mod tests {
             DROP TRIGGER certificates_no_update;
         "#).unwrap();
         for (table, column, id, kinds) in [
-            ("sales", "sold_at", "s", &["sales", "balances", "allocations"][..]),
+            ("sales", "sold_at", "s", &["artworks", "sales", "balances", "allocations"][..]),
             ("sale_receipts", "received_at", "r", &["receipts"][..]),
             ("expenses", "expense_date", "e", &["expenses"][..]),
             ("sale_installments", "due_date", "i1", &["installments"][..]),
@@ -368,6 +373,36 @@ mod tests {
         let failure = export_file(&db, "expenses", &destination).unwrap_err();
         assert!(failure.contains("data di spesa"), "{failure}");
         assert!(!destination.exists(), "no partial CSV should be published");
+    }
+
+    #[test]
+    fn artworks_csv_links_sold_works_to_collectors_without_dropping_unsold_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a1','ART-1','Sold','t','t'),
+                      ('a2','ART-2','Available','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('buyer','=Test Buyer','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('sale-1','a1','buyer',15000,'2026-11-21','t');
+        "#).unwrap();
+
+        let csv = render_csv(&conn, "artworks").unwrap();
+        assert!(csv.starts_with("\u{feff}artwork_id;code;title;"));
+        assert!(csv.contains(";fixed_price_cents;sale_id;collector_id;collector_name;sold_at\r\n"));
+        let sold = csv.lines().find(|row| row.starts_with("\"a1\";")).unwrap();
+        assert!(sold.ends_with(";\"sale-1\";\"buyer\";\"'=Test Buyer\";\"2026-11-21\""), "{sold}");
+        let available = csv.lines().find(|row| row.starts_with("\"a2\";")).unwrap();
+        assert!(available.ends_with(";\"\";\"\";\"\";\"\""), "{available}");
+        assert_eq!(csv.matches("\r\n").count(), 3, "header plus one row per artwork");
+
+        // Buyer identity comes from the current collector record, not a sale snapshot.
+        conn.execute("UPDATE collectors SET name='Updated Buyer' WHERE id='buyer'", []).unwrap();
+        let updated = render_csv(&conn, "artworks").unwrap();
+        assert!(updated.contains(";\"sale-1\";\"buyer\";\"Updated Buyer\";\"2026-11-21\"\r\n"));
     }
 
     #[test]
@@ -791,7 +826,7 @@ seconda riga','t','t')", []).unwrap();
         assert!(certificates.contains("\"'+ARTIST\""));
         assert!(certificates.lines().next().unwrap().ends_with(";language;issued_place;declarant_name"));
         let artworks = render_csv(&conn, "artworks").unwrap();
-        assert!(artworks.lines().next().unwrap().ends_with(";artist_coefficient_override;fixed_price_cents"), "{artworks}");
+        assert!(artworks.lines().next().unwrap().ends_with(";artist_coefficient_override;fixed_price_cents;sale_id;collector_id;collector_name;sold_at"), "{artworks}");
         assert!(certificates.contains("\"{\"\"title\"\":\"\"Titolo originario\"\"}\""));
     }
 
