@@ -578,3 +578,7 @@ mod tests {
         assert!(TcpStream::connect(addr).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "auction_pkce_fixture.rs"]
+mod fixture_exchange;
