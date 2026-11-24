@@ -21,8 +21,8 @@ JSON semantics; the native read rejects malformed draft records.
 
 Coordination: reserve schema 19 with core before approval; backup.rs is not
 modified. This branch adds native round-trip/restore regression tests and
-frontend port tests. Native PKCE is blocked on the provider's loopback callback
-and audience agreement. No pilot or production access.
+frontend port tests. Native PKCE now has an agreed provider-side contract in Online #5;
+activation is still blocked pending isolated end-to-end tests. No pilot or production access.
 
 ## Editor session boundary
 
@@ -39,3 +39,26 @@ coordinated with core PRs #30/#35/#109 before editing shared components.
 
 The five controller tests use a mock persistence port; the earlier native
 bridge tests cover record validation and immutable requests separately.
+
+## Native PKCE contract (not enabled)
+
+Identity handoff: [Online #5 contract at ba34bb4](https://github.com/Cesare-ml/Repertica-Studio-Online/blob/ba34bb4a64c235e9fa69e6895340678cbab3a3f7/docs/SSO_CONTRACT.md).
+The isolated Rust module `auction_pkce.rs` binds literal IPv4 loopback on an
+OS-assigned port, generates independent state and verifier, derives S256 and
+accepts only a single valid raw callback target. The grant fixes client ID,
+scope and redirect for redemption, and retains the expected audience locally.
+The Rust integration test includes the synthetic provider fixture and checks
+wrong state/path, duplicate fields, replay and independent bound listeners.
+
+No Tauri command is registered for PKCE. Before wiring the UI, implement
+bounded HTTP request parsing (GET, exact Host including port, request size and
+read timeout), cancellation and listener lifetime, trusted HTTPS issuer and
+system browser launch, and native token exchange without redirects or IPC
+token exposure. Validate token audience and scope against the intended
+operation, with provider signature/expiry checks on the server. No network
+activation, token persistence, upload, or production configuration in this
+increment. Existing archive startup stays unchanged.
+
+Run the new contract tests with
+`cargo test --manifest-path src-tauri/Cargo.toml --test auction_pkce_contract`.
+This is not the provider/browser end-to-end test.
