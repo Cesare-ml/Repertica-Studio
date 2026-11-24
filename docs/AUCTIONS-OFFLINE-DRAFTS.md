@@ -50,11 +50,17 @@ scope and redirect for redemption, and retains the expected audience locally.
 The Rust integration test includes the synthetic provider fixture and checks
 wrong state/path, duplicate fields, replay and independent bound listeners.
 
-No Tauri command is registered for PKCE. Before wiring the UI, implement
-bounded HTTP request parsing (GET, exact Host including port, request size and
-read timeout), cancellation and listener lifetime, trusted HTTPS issuer and
-system browser launch, and native token exchange without redirects or IPC
-token exposure. Validate token audience and scope against the intended
+No Tauri command is registered for PKCE. The isolated native loopback session
+now owns the grant and socket, bounds the HTTP header to 8192 bytes, requires
+GET/HTTP 1.1 and exact Host including port, rejects duplicate Host, request
+bodies and transfer encoding, and enforces a two-second connection read budget
+and a session deadline capped at five minutes. The session closes on success,
+cancellation or expiry; invalid callbacks do not consume the grant. Browser
+responses contain static text only and no secrets. Added three Rust regression
+tests for HTTP parsing, real loopback success after wrong Host, and socket
+closure on cancellation/timeout. These tests require CI or a Rust toolchain.
+Before wiring the UI, implement trusted HTTPS issuer and system browser launch,
+and native token exchange without redirects or IPC token exposure. Validate token audience and scope against the intended
 operation, with provider signature/expiry checks on the server. No network
 activation, token persistence, upload, or production configuration in this
 increment. Existing archive startup stays unchanged.
