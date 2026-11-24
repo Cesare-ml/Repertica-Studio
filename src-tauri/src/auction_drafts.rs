@@ -41,12 +41,12 @@ struct Pending {
     artwork_id: String, idempotency_key: String, body: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Payload {
     tenant_id: String, slug: String, title: String, description: String,
-    starts_at: String, ends_at: String, currency: String,
-    starting_amount: i64, minimum_increment_amount: i64,
+    starts_at: String, ends_at: String,
+    starting_amount: i64, minimum_increment_amount: i64, currency: String,
 }
 
 #[derive(Deserialize)]
@@ -120,10 +120,12 @@ fn parse_record(raw: &str, scope: &str, artwork_id: &str) -> Result<Record, Stri
             return Err(invalid());
         }
         let b: Payload = serde_json::from_str(&p.body).map_err(|_| invalid())?;
-        if !valid_pending_payload(&b) { return Err(invalid()); }
+        if !valid_pending_payload(&b) || serde_json::to_string(&b).map_err(|_| invalid())? != p.body {
+            return Err(invalid());
+        }
     }
-    // Native storage checks payload semantics and field allowlists. Exact
-    // serialized body canonicality remains the editor's responsibility.
+    // Keep the exact same public-field order and compact JSON as preparePreview.
+    // A native write must not persist a body the editor cannot reopen.
     // Do not compare stored schedule with today's clock: reconcile old attempts.
     Ok(record)
 }
@@ -226,9 +228,8 @@ mod tests {
         conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES('a','A','Art','t','t')",[]).unwrap();
     }
     fn record(scope: &str, pending: bool) -> String {
-        let body = json!({"tenantId":"tenant-test","slug":"art","title":"Art","description":"",
-            "startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z",
-            "startingAmount":1000,"minimumIncrementAmount":100,"currency":"EUR"}).to_string();
+        // Literal editor wire order, not the ordering of a serde_json Value map.
+        let body = r#"{"tenantId":"tenant-test","slug":"art","title":"Art","description":"","startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z","startingAmount":1000,"minimumIncrementAmount":100,"currency":"EUR"}"#;
         json!({"version":1,"scope":scope,"draft":{"artworkId":"a","title":"Art","description":"",
             "slug":"art","startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z",
             "startingAmount":1000,"minimumIncrementAmount":100},
@@ -279,7 +280,7 @@ mod tests {
             let mut bad=candidate.clone();
             let mut body: serde_json::Value=serde_json::from_str(bad["pending"]["body"].as_str().unwrap()).unwrap();
             body[field]=value;
-            bad["pending"]["body"]=json!(body.to_string());
+            bad["pending"]["body"]=json!(serde_json::to_string(&serde_json::from_value::<Payload>(body).unwrap()).unwrap());
             assert_eq!(write(&mut conn,input(&draft,bad.to_string())).unwrap_err(),expected);
             assert_eq!(read(&conn,"a").unwrap(),draft);
         }
@@ -291,6 +292,37 @@ mod tests {
         let edited=write(&mut conn,input(&saved,reviewed.to_string())).unwrap();
         let persisted: serde_json::Value=serde_json::from_str(edited.record_json.as_ref().unwrap()).unwrap();
         assert_eq!(persisted["pending"],reviewed["pending"]);
+    }
+
+    #[test]
+    fn noncanonical_pending_json_cannot_poison_a_native_draft() {
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().into()).unwrap();
+        let mut conn=db.conn.lock().unwrap();
+        seed(&conn);
+        let initial=read(&conn,"a").unwrap();
+        let saved=write(&mut conn,input(&initial,record(&initial.scope,false))).unwrap();
+        let candidate: serde_json::Value=serde_json::from_str(&record(&saved.scope,true)).unwrap();
+        let body=candidate["pending"]["body"].as_str().unwrap();
+        for variant in [
+            format!(" {}",body),
+            body.replace(r#""tenantId":"tenant-test","slug":"art""#,r#""slug":"art","tenantId":"tenant-test""#),
+            body.replace(r#""title":"Art""#,r#""title":"\u0041rt""#),
+        ] {
+            assert_ne!(variant,body);
+            let mut bad=candidate.clone();
+            bad["pending"]["body"]=json!(variant);
+            assert_eq!(write(&mut conn,input(&saved,bad.to_string())).unwrap_err(),"invalid_stored_draft");
+            assert_eq!(read(&conn,"a").unwrap(),saved);
+        }
+        // A literal UTF-8 editor body (including control escapes) must survive unchanged.
+        let mut good=candidate;
+        good["draft"]["title"]=json!("Arte 🎨");
+        good["draft"]["description"]=json!("Riga\n2\t\"ciao\"");
+        good["pending"]["body"]=json!(r#"{"tenantId":"tenant-test","slug":"art","title":"Arte 🎨","description":"Riga\n2\t\"ciao\"","startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z","startingAmount":1000,"minimumIncrementAmount":100,"currency":"EUR"}"#);
+        let persisted=write(&mut conn,input(&saved,good.to_string())).unwrap();
+        assert_eq!(read(&conn,"a").unwrap(),persisted);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(persisted.record_json.as_ref().unwrap()).unwrap()["pending"],good["pending"]);
     }
 
     #[test]
