@@ -417,7 +417,7 @@ mod tests {
     }
 
     const RESOURCE_KEY: &str = "synthetic-preview-key-001";
-    const RESOURCE_BODY: &str = r#"{"tenantId":"tenant-test","slug":"art","title":"Art","description":"","startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z","startingAmount":1000,"minimumIncrementAmount":100,"currency":"EUR"}"#;
+    const RESOURCE_BODY: &str = r#"{"tenantId":"tenant-test","slug":"art","title":"Art","description":"","startsAt":"2027-01-15T08:01:40.000Z","endsAt":"2027-01-16T08:01:40.000Z","startingAmount":1000,"minimumIncrementAmount":100,"currency":"EUR"}"#;
     const RESOURCE_ID: &str = "4c2a24d0-bf50-410a-b0f2-1c0b3c96e9a0";
 
     fn verified_resource_token() -> NativeAccessToken {
@@ -453,12 +453,12 @@ mod tests {
             let mut s=accept(&listener);
             assert!(read_resource_request(&mut s,"GET /api/studio/previews?tenantId=tenant-test HTTP/1.1",Some(bearer),None).is_empty());
             reply(&mut s,"200 OK",&json!({"auctions":[{"auctionId":RESOURCE_ID,"slug":"artist--art","title":"Art",
-                "status":"preview","startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z"}]}));
+                "status":"preview","startsAt":"2027-01-15T08:01:40.000Z","endsAt":"2027-01-16T08:01:40.000Z"}]}));
             for (replayed,status) in [(false,"201 Created"),(true,"200 OK")] {
                 resource_tenants(&listener,bearer,"owner");
                 let mut s=accept(&listener);
                 let body=read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY));
-                assert_eq!(body,RESOURCE_BODY.as_bytes());
+                assert_eq!(body.as_slice(),RESOURCE_BODY.as_bytes());
                 reply(&mut s,status,&receipt(replayed,false));
             }
             // A fresh read-only membership must stop a third create before POST.
@@ -474,7 +474,8 @@ mod tests {
             assert_eq!(list[0].auction_id,RESOURCE_ID);
             assert_eq!(list[0].status,"preview");
             let first=api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.unwrap();
-            let replay=api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.unwrap();
+            // Explicit replay after the original start, while the signed token is still valid.
+            let replay=api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW+200)).await.unwrap();
             assert_eq!(first.auction_id,replay.auction_id);
             assert!(!first.idempotent_replay && replay.idempotent_replay);
             assert_eq!(api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.err(),Some("auction_access_denied"));
@@ -510,7 +511,7 @@ mod tests {
             ] {
                 resource_tenants(&listener,bearer,"owner");
                 let mut s=accept(&listener);
-                assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY)),RESOURCE_BODY.as_bytes());
+                assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY)).as_slice(),RESOURCE_BODY.as_bytes());
                 reply(&mut s,status,&body);
             }
             listener
@@ -524,5 +525,29 @@ mod tests {
         });
         let listener=worker.join().unwrap();
         assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn native_resource_post_redirect_never_forwards_bearer_or_body() {
+        use super::resource_http::NativeAuctionsHttp;
+        let (redirect_target,target)=listen();
+        let (listener,addr)=listen();
+        let worker=thread::spawn(move || {
+            let f=fixture();
+            let bearer=f["valid"].as_str().unwrap();
+            resource_tenants(&listener,bearer,"owner");
+            let mut s=accept(&listener);
+            assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY)).as_slice(),RESOURCE_BODY.as_bytes());
+            write!(s,"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{target}/api/studio/previews\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            listener
+        });
+        tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            assert_eq!(api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.err(),Some("auction_http_rejected"));
+        });
+        let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+        assert_eq!(redirect_target.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
     }
 }
