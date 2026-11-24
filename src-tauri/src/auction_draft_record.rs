@@ -38,7 +38,7 @@ where
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Draft {
-    pub(super) artwork_id: String, title: String, description: String, slug: String,
+    pub(super) artwork_id: String, pub(super) title: String, description: String, slug: String,
     starts_at: String, ends_at: String,
     #[serde(deserialize_with = "required_nullable")]
     starting_amount: Option<f64>,

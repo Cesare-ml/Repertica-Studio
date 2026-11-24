@@ -115,6 +115,68 @@ fn write(conn: &mut Connection, input: DraftWrite) -> Result<DraftSnapshot,Strin
     Ok(saved)
 }
 
+
+const DRAFT_PAGE_SIZE: usize = 50;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftSummary {
+    artwork_id: String,
+    title: String,
+    artwork_status: Option<String>,
+    state: &'static str,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftPage {
+    scope: String,
+    rows: Vec<DraftSummary>,
+    next_after: Option<String>,
+}
+
+// Local read-only index. Include retained drafts whose artwork has been removed.
+// Never expose the request key, body, receipt, private notes or credentials in the list.
+fn list(conn: &Connection, expected_scope: Option<&str>, after: Option<&str>) -> Result<DraftPage,String> {
+    let current_scope = scope(conn)?;
+    if expected_scope.is_some_and(|s| s != current_scope) ||
+        (after.is_some() && expected_scope.is_none()) {
+        return Err("auction_draft_conflict".into());
+    }
+    if after.is_some_and(|id| !valid_id(id)) { return Err(invalid()); }
+    let mut stmt = conn.prepare(
+        "SELECT d.artwork_id,d.revision,d.record_json,a.title,a.status
+         FROM auction_drafts d LEFT JOIN artworks a ON a.id=d.artwork_id
+         WHERE (?1 IS NULL OR d.artwork_id > ?1)
+         ORDER BY d.artwork_id LIMIT 51").map_err(error)?;
+    let mut result = stmt.query([after]).map_err(error)?;
+    let mut rows = Vec::new();
+    let mut next_after = None;
+    while let Some(row) = result.next().map_err(error)? {
+        if rows.len() == DRAFT_PAGE_SIZE {
+            next_after = rows.last().map(|r: &DraftSummary| r.artwork_id.clone());
+            break;
+        }
+        let artwork_id: String = row.get(0).map_err(error)?;
+        let revision: String = row.get(1).map_err(error)?;
+        let raw: String = row.get(2).map_err(error)?;
+        let artwork_title: Option<String> = row.get(3).map_err(error)?;
+        let artwork_status: Option<String> = row.get(4).map_err(error)?;
+        if !valid_id(&artwork_id) || Uuid::parse_str(&revision).is_err() { return Err(invalid()); }
+        let record = parse_record(&raw,&current_scope,&artwork_id)?;
+        let state = if record.receipt.is_some() { "receipt" }
+            else if record.pending.is_some() { "pending" } else { "draft" };
+        let title = artwork_title.unwrap_or(record.draft.title);
+        rows.push(DraftSummary { artwork_id, title, artwork_status, state });
+    }
+    Ok(DraftPage { scope: current_scope, rows, next_after })
+}
+
+#[tauri::command]
+pub fn list_auction_drafts(db: State<'_,Database>, expected_scope: Option<String>, after: Option<String>) -> Result<DraftPage,String> {
+    let conn = db.conn.lock().map_err(error)?;
+    list(&conn,expected_scope.as_deref(),after.as_deref())
+}
+
 #[tauri::command]
 pub fn read_auction_draft(db: State<'_,Database>, artwork_id: String) -> Result<DraftSnapshot,String> {
     let conn = db.conn.lock().map_err(error)?;
@@ -147,6 +209,48 @@ mod tests {
     fn input(snapshot: &DraftSnapshot, raw: String) -> DraftWrite {
         DraftWrite {artwork_id:"a".into(),scope:snapshot.scope.clone(),
             expected_revision:snapshot.revision.clone(),record_json:raw}
+    }
+
+
+    #[test]
+    fn list_is_local_paginated_and_keeps_orphans_without_exposing_payloads() {
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().into()).unwrap();
+        let mut conn=db.conn.lock().unwrap();
+        seed(&conn);
+        let first=read(&conn,"a").unwrap();
+        let saved=write(&mut conn,input(&first,record(&first.scope,true))).unwrap();
+        for n in 0..51 {
+            let id=format!("b{n:02}");
+            let mut value: serde_json::Value=serde_json::from_str(&record(&first.scope,false)).unwrap();
+            value["draft"]["artworkId"]=json!(id);
+            conn.execute("INSERT INTO auction_drafts VALUES(?1,?2,?3)",
+                params![id,Uuid::new_v4().to_string(),value.to_string()]).unwrap();
+        }
+        let page=list(&conn,None,None).unwrap();
+        assert_eq!(page.rows.len(),50);
+        assert_eq!(page.rows[0].state,"pending");
+        assert_eq!(page.rows[0].artwork_status.as_deref(),Some("available"));
+        assert!(page.rows[1].artwork_status.is_none());
+        let cursor=page.next_after.as_deref().unwrap();
+        let next=list(&conn,Some(&page.scope),Some(cursor)).unwrap();
+        assert_eq!(next.rows.len(),2);
+        assert!(next.next_after.is_none());
+        assert!(next.rows.iter().all(|r|r.artwork_id.as_str()>cursor));
+        assert!(list(&conn,None,Some(cursor)).is_err());
+        assert!(list(&conn,Some("wrong-archive"),None).is_err());
+        let json=serde_json::to_string(&page).unwrap();
+        assert!(!json.contains("idempotencyKey"));
+        assert!(!json.contains("recordJson"));
+        assert!(!json.contains("startingAmount"));
+        conn.execute("DELETE FROM artworks WHERE id='a'",[]).unwrap();
+        let orphan=list(&conn,None,None).unwrap();
+        assert_eq!(orphan.rows[0].artwork_id,"a");
+        assert_eq!(orphan.rows[0].state,"pending");
+        assert!(orphan.rows[0].artwork_status.is_none());
+        assert_eq!(read(&conn,"a").unwrap(),saved);
+        conn.execute("UPDATE auction_drafts SET record_json='{}' WHERE artwork_id='a'",[]).unwrap();
+        assert!(list(&conn,None,None).is_err());
     }
 
     #[test]

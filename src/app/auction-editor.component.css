@@ -16,3 +16,9 @@ button:disabled { cursor: default; opacity: .6; }
 .error, .pending { border-inline-start: 3px solid currentColor; padding-inline-start: .75rem; }
 footer { justify-content: flex-end; }
 @media (max-width: 560px) { fieldset { grid-template-columns: 1fr; } }
+
+.draft-list { display: grid; gap: .5rem; margin-block: 1rem; }
+.draft-list button { display: grid; text-align: start; gap: .3rem; overflow-wrap: anywhere; }
+.draft-list-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-block: .8rem; }
+.request-details { display: grid; grid-template-columns: minmax(8rem,1fr) 2fr; gap: .4rem; overflow-wrap: anywhere; }
+.request-details dd { margin: 0; white-space: pre-wrap; }

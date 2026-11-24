@@ -94,6 +94,7 @@
     <section *ngIf="section === 'artworks'" class="page">
       <div class="section-tools"><div><h2>{{ tr('Archivio opere') }}</h2></div>
         <div class="finance-top-actions">
+          <button type="button" [disabled]="busy || !initialized" (click)="auctionEditor.showList()">{{ auctionEditor.managementLabel('manage') }}</button>
           <button class="primary action-glyph action-glyph--artworks" type="button" (click)="newArtwork()" [disabled]="!initialized">{{ tr('+ Aggiungi opera') }}</button>
         </div></div>
       <div class="filter-row archive-filters">

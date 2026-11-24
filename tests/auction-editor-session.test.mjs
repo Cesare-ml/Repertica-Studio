@@ -106,3 +106,13 @@ test('overlong source titles are not truncated; draft stays local and incomplete
   await editor.save();
   assert.equal(editor.view.saved, true);
 });
+
+test('a management-list selection cannot reopen a different archive after restore', async () => {
+  const port = storage(), editor = new AuctionEditorSession(port);
+  await assert.rejects(editor.open(artwork, 'previous-archive'), /auction_draft_conflict/);
+  assert.equal(editor.view, null);
+  assert.equal(editor.busy, false);
+  await editor.open(artwork, 'archive');
+  assert.equal(editor.view.artwork.id, 'a');
+  assert.equal(port.records.size, 0);
+});

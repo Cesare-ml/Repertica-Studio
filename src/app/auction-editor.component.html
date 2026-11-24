@@ -1,18 +1,44 @@
 <dialog #dialog class="auction-dialog" aria-labelledby="auction-editor-title" (cancel)="cancel($event)">
   <header>
-    <div><h2 id="auction-editor-title">{{ tr('Bozza asta offline') }}</h2>
+    <div><h2 id="auction-editor-title">{{ listMode ? managementLabel('manage') : tr('Bozza asta offline') }}</h2>
       <p>{{ tr('Nessun account richiesto. Nessuna pubblicazione o offerta online.') }}</p></div>
     <button type="button" (click)="close()" [disabled]="busy || dirty" [attr.aria-label]="tr('Chiudi')">×</button>
   </header>
   <p *ngIf="busy && !form" role="status">{{ tr('Caricamento bozza…') }}</p>
   <p *ngIf="error" class="error" role="alert">{{ tr(error) }}</p>
   <p *ngIf="notice" role="status">{{ tr(notice) }}</p>
+  <ng-container *ngIf="listMode">
+    <p *ngIf="page && !page.rows.length" role="status">{{ managementLabel('empty') }}</p>
+    <div class="draft-list" *ngIf="page as current">
+      <button *ngFor="let row of current.rows" type="button" [disabled]="busy" (click)="openListed(row)">
+        <strong>{{ row.title || row.artworkId }}</strong>
+        <span>{{ managementLabel(row.state) }}<ng-container *ngIf="row.artworkStatus === null"> · {{ managementLabel('missing') }}</ng-container></span>
+      </button>
+    </div>
+    <div class="draft-list-actions">
+      <button type="button" [disabled]="busy" (click)="loadPage(false)">{{ managementLabel('refresh') }}</button>
+      <button type="button" *ngIf="page?.nextAfter" [disabled]="busy" (click)="loadPage(true)">{{ managementLabel('next') }}</button>
+    </div>
+  </ng-container>
   <ng-container *ngIf="form as fields">
     <p class="work"><strong>{{ tr('Opera selezionata') }}:</strong> {{ view?.artwork?.title }}</p>
     <p *ngIf="view?.pending && !view?.receipt" class="pending" role="status">{{ tr('Richiesta precedente da verificare. Il contenuto e la chiave originali restano invariati; nessun reinvio automatico.') }}</p>
     <p *ngIf="view?.receipt as receipt" class="pending" role="status">
       {{ receiptLabel }}: <strong>{{ receipt.slug }}</strong> ({{ receipt.auctionId }})
     </p>
+    <details *ngIf="pendingDetails as original" class="pending">
+      <summary>{{ managementLabel('original') }}</summary>
+      <dl class="request-details">
+        <dt>{{ managementLabel('tenant') }}</dt><dd>{{ original.tenantId }}</dd>
+        <dt>{{ tr('Titolo pubblico') }}</dt><dd>{{ original.title }}</dd>
+        <dt>{{ tr('Descrizione pubblica') }}</dt><dd>{{ original.description || '—' }}</dd>
+        <dt>{{ tr('Identificativo URL') }}</dt><dd>{{ original.slug }}</dd>
+        <dt>{{ tr('Inizio (UTC)') }}</dt><dd>{{ original.startsAt }}</dd>
+        <dt>{{ tr('Fine (UTC)') }}</dt><dd>{{ original.endsAt }}</dd>
+        <dt>{{ tr('Base d’asta (€)') }}</dt><dd>{{ original.startingAmount / 100 | number:'1.2-2' }}</dd>
+        <dt>{{ tr('Rilancio minimo (€)') }}</dt><dd>{{ original.minimumIncrementAmount / 100 | number:'1.2-2' }}</dd>
+      </dl>
+    </details>
     <fieldset [disabled]="busy">
       <legend>{{ tr('Dati dell’anteprima non vincolante') }}</legend>
       <label class="wide">{{ tr('Titolo pubblico') }}<input [(ngModel)]="fields.title" maxlength="160"></label>

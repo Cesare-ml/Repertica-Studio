@@ -37,13 +37,14 @@ export class AuctionEditorSession {
     if (this.inFlight) throw new Error('auction_editor_busy');
   }
 
-  async open(artwork: SelectedAuctionArtwork): Promise<void> {
+  async open(artwork: SelectedAuctionArtwork, expectedScope?: string): Promise<void> {
     this.ensureIdle();
     if (this.session?.dirty) throw new Error('auction_editor_unsaved');
     const selected = { id: artwork.id, title: artwork.title, status: artwork.status };
     this.inFlight = true;
     try {
       const snapshot = await this.storage.read(selected.id);
+      if (expectedScope !== undefined && snapshot.scope !== expectedScope) throw new Error('auction_draft_conflict');
       const existing = this.storage.decode(snapshot, selected.id);
       const draft = existing?.draft ?? this.storage.newDraft(selected);
       // Never silently truncate a source title into a public-facing title.

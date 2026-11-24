@@ -42,6 +42,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            auction_drafts::list_auction_drafts,
             auction_drafts::read_auction_draft,
             auction_drafts::write_auction_draft,
             business_mail::mail_list_accounts,

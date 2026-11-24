@@ -3,6 +3,23 @@ import type { NativeDraftPort, NativeDraftSnapshot } from './auction-preview';
 import { decodeNativeDraft, newAuctionDraft, saveNativeAuctionDraft } from './auction-preview';
 import { AuctionEditorSession } from './auction-editor-session';
 
+export interface AuctionDraftSummary {
+  readonly artworkId: string;
+  readonly title: string;
+  readonly artworkStatus: string | null;
+  readonly state: 'draft' | 'pending' | 'receipt';
+}
+export interface AuctionDraftPage {
+  readonly scope: string;
+  readonly rows: readonly AuctionDraftSummary[];
+  readonly nextAfter: string | null;
+}
+
+export function listNativeAuctionDrafts(expectedScope: string | null = null,
+  after: string | null = null): Promise<AuctionDraftPage> {
+  return invoke<AuctionDraftPage>('list_auction_drafts', { expectedScope, after });
+}
+
 /** Local IPC only; deliberately not wired to any HTTP transport or automatic send. */
 export const nativeAuctionDrafts: NativeDraftPort = {
   read: artworkId => invoke<NativeDraftSnapshot>('read_auction_draft', { artworkId }),
