@@ -11,8 +11,11 @@ available work.
 
 The editor must hold the loaded snapshot and save through the native IPC port.
 On a revision conflict, reload and review. Pending key and body cannot be
-replaced or cleared yet. Native storage validates the field allowlist; the
-TypeScript preview contract validates canonical request semantics. There is no
+replaced or cleared yet. Native storage and the TypeScript preview contract both validate the field
+allowlist, request semantics and exact compact JSON body in editor wire order.
+A noncanonical pending body is rejected, never rewritten or assigned a new key.
+If an older development snapshot contains such a body, leave it untouched for
+explicit review/reconciliation; do not send it automatically. There is no
 HTTP transport, upload, credential storage, UI, or result reconciliation yet.
 Never automatically send a pending request after a restore, particularly an
 older snapshot: explicit account/tenant reconciliation is needed first.
