@@ -1,0 +1,37 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { newAuctionDraft, preparePreview, decodeNativeDraft, saveNativeAuctionDraft } from '../src/app/auction-preview.ts';
+
+const draft = { ...newAuctionDraft({id:'a',title:'Art',status:'available'}),
+  slug:'art',startsAt:'2027-01-02T10:00:00.000Z',endsAt:'2027-01-03T10:00:00.000Z',
+  startingAmount:1000,minimumIncrementAmount:100 };
+const pending = preparePreview(draft,'tenant-test','preview-0123456789',Date.parse(draft.startsAt));
+
+function port() {
+  let current = {scope:'archive-one',revision:null,recordJson:null};
+  let counter = 0;
+  return {
+    read: async () => ({...current}),
+    write: async input => {
+      if (input.scope !== current.scope || input.expectedRevision !== current.revision) throw new Error('auction_draft_conflict');
+      current = {scope:input.scope,revision:String(++counter),recordJson:input.recordJson};
+      return {...current};
+    }
+  };
+}
+
+test('native save uses loaded revision and preserves exact pending payload', async () => {
+  const native = port(), loaded = await native.read('a');
+  assert.equal(decodeNativeDraft(loaded,'a'),null);
+  const saved = await saveNativeAuctionDraft(native,loaded,draft,pending);
+  await assert.rejects(saveNativeAuctionDraft(native,loaded,draft),/auction_draft_conflict/);
+  const edited = await saveNativeAuctionDraft(native,saved,{...draft,title:'Edited'});
+  assert.deepEqual(decodeNativeDraft(edited,'a').pending,pending);
+  assert.equal(decodeNativeDraft(edited,'a').draft.title,'Edited');
+});
+
+test('native persistence failure never returns a saved snapshot', async () => {
+  const loaded = await port().read('a');
+  await assert.rejects(saveNativeAuctionDraft({write:async()=>{throw new Error('disk full')}},loaded,draft,pending),/disk full/);
+  await assert.rejects(saveNativeAuctionDraft({write:async()=>loaded},loaded,draft,pending),/auction_draft_write_failed/);
+});

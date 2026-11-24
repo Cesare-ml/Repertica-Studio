@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::{atomic::AtomicU64, Mutex}};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 18;
+pub const SCHEMA_VERSION: i64 = 19;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -565,6 +565,9 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
         }
         script.push_str("PRAGMA user_version=18; COMMIT;");
         conn.execute_batch(&script)?;
+    }
+    if version < 19 {
+        crate::auction_drafts::migrate(&conn)?;
     }
     // An archive edited with PRAGMA foreign_keys=OFF can contain orphaned sales,
     // collector photographs, or gallery items even after a successful migration.

@@ -154,3 +154,39 @@ export function saveAuctionDraft(storage: AuctionDraftStorage, scope: string, in
   storage.setItem(key, JSON.stringify({ version: 1, scope, draft, pending }));
   return { draft, pending };
 }
+
+
+/** Async native bridge: the read provides both archive identity and CAS revision.
+ * No browser storage and no retry of a stale write. A successful save is NOT publication. */
+export interface NativeDraftSnapshot {
+  readonly scope: string;
+  readonly revision: string | null;
+  readonly recordJson: string | null;
+}
+export interface NativeDraftPort {
+  read(artworkId: string): Promise<NativeDraftSnapshot>;
+  write(input: { artworkId: string; scope: string; expectedRevision: string | null; recordJson: string }): Promise<NativeDraftSnapshot>;
+}
+
+export function decodeNativeDraft(snapshot: NativeDraftSnapshot, artworkId: string): StoredAuctionDraft | null {
+  if ((snapshot.revision === null) !== (snapshot.recordJson === null)) throw new Error('invalid_stored_draft');
+  return loadAuctionDraft({ getItem: () => snapshot.recordJson, setItem: () => { throw new Error('read_only'); } },
+    snapshot.scope, artworkId);
+}
+
+/** Use the snapshot from when the editor loaded, not a newly fetched revision.
+ * The caller must reload/review after auction_draft_conflict, never silently overwrite. */
+export async function saveNativeAuctionDraft(port: NativeDraftPort, snapshot: NativeDraftSnapshot,
+  input: AuctionDraft, attempt?: PreparedPreview): Promise<NativeDraftSnapshot> {
+  decodeNativeDraft(snapshot, input.artworkId);
+  let recordJson = snapshot.recordJson;
+  saveAuctionDraft({ getItem: () => recordJson, setItem: (_key, value) => { recordJson = value; } },
+    snapshot.scope, input, attempt);
+  if (recordJson === null) throw new Error('invalid_stored_draft');
+  const saved = await port.write({ artworkId: input.artworkId, scope: snapshot.scope,
+    expectedRevision: snapshot.revision, recordJson });
+  if (saved.scope !== snapshot.scope || saved.recordJson !== recordJson || !saved.revision) {
+    throw new Error('auction_draft_write_failed');
+  }
+  return saved;
+}
