@@ -273,6 +273,12 @@ fn read_callback(
                     if end + 4 != request.len() {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid_oauth_http"));
                     }
+                    // Recheck after the final read: a complete header must not
+                    // be accepted after this connection's own deadline, even
+                    // when the overall session still has time left.
+                    if cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, "oauth_callback_interrupted"));
+                    }
                     return Ok(request);
                 }
             }
@@ -562,6 +568,54 @@ mod tests {
         let exchange = worker.join().unwrap().unwrap();
         assert_eq!(exchange.expected_audience(), "repertica-auctions");
         assert!(TcpStream::connect(addr).is_err());
+    }
+
+    #[test]
+    fn partial_loopback_header_times_out_without_remote_io() {
+        use std::{io::Write, net::TcpStream, sync::atomic::AtomicBool, time::{Duration, Instant}};
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        // Keep the peer alive: this is a stalled header, not EOF.
+        peer.write_all(b"GET /repertica/oauth/callback HTTP/1.1\r\n").unwrap();
+        let deadline = Instant::now() + Duration::from_millis(100);
+        let error = read_callback(&mut stream, deadline, &AtomicBool::new(false)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(Instant::now() >= deadline);
+        drop(peer);
+    }
+
+    #[test]
+    fn simultaneous_loopback_sessions_reject_swapped_states() {
+        use std::{io::{Read, Write}, net::TcpStream, sync::atomic::AtomicBool, time::Duration};
+        let a = LoopbackSession::bind(GrantClient::Auctions, Duration::from_secs(10)).unwrap();
+        let b = LoopbackSession::bind(GrantClient::StudioApi, Duration::from_secs(10)).unwrap();
+        let addr_a = a.listener.local_addr().unwrap();
+        let addr_b = b.listener.local_addr().unwrap();
+        let state_a = a.grant.state.clone();
+        let state_b = b.grant.state.clone();
+        let worker_a = std::thread::spawn(move || a.wait(&AtomicBool::new(false)));
+        let worker_b = std::thread::spawn(move || b.wait(&AtomicBool::new(false)));
+        for (addr, state, status) in [
+            (addr_a, &state_b, "400"),
+            (addr_b, &state_a, "400"),
+            (addr_a, &state_a, "200"),
+            (addr_b, &state_b, "200"),
+        ] {
+            let mut stream = TcpStream::connect(addr).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            stream.write_all(format!("GET {CALLBACK_PATH}?code={CODE}&state={state} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes()).unwrap();
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply).unwrap();
+            assert!(reply.starts_with(&format!("HTTP/1.1 {status}")));
+            assert!(!reply.contains(CODE));
+            assert!(!reply.contains(&state_a));
+            assert!(!reply.contains(&state_b));
+        }
+        assert_eq!(worker_a.join().unwrap().unwrap().expected_audience(), "repertica-auctions");
+        assert_eq!(worker_b.join().unwrap().unwrap().expected_audience(), "repertica-studio-api");
+        assert!(TcpStream::connect(addr_a).is_err());
+        assert!(TcpStream::connect(addr_b).is_err());
     }
 
     #[test]
