@@ -424,22 +424,33 @@ fn validate_receipt_attachment_evidence(
 ) -> Result<(), String> {
     let conn = Connection::open_with_flags(snapshot, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(error)?;
     let mut statement = conn.prepare(
-        "SELECT receipt_id,media_path,mime_type,size_bytes,sha256 FROM sale_receipt_attachments"
+        "SELECT receipt_id,media_path,mime_type,size_bytes,sha256,original_name FROM sale_receipt_attachments"
     ).map_err(error)?;
     let by_path: HashMap<&str, &FileRecord> =
         files.iter().map(|record| (record.path.as_str(), record)).collect();
     let attachments = statement.query_map([], |r| Ok((
         r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
-        r.get::<_, i64>(3)?, r.get::<_, String>(4)?,
+        r.get::<_, i64>(3)?, r.get::<_, String>(4)?, r.get::<_, String>(5)?,
     ))).map_err(error)?;
     for attachment in attachments {
-        let (receipt_id, relative, stored_mime, stored_bytes, stored_sha) = attachment.map_err(error)?;
+        let (receipt_id, relative, stored_mime, stored_bytes, stored_sha, original_name) = attachment.map_err(error)?;
+        // Match the attachment import rules; SQLite length() stops at NUL
+        // and does not otherwise reject control characters in file names.
+        if original_name.is_empty() || original_name.chars().count() > 240
+            || original_name.chars().any(char::is_control) {
+            return Err(format!("Nome allegato incasso non valido: {receipt_id}"));
+        }
         if !crate::receipt_attachments::safe_media_path(&relative) {
             return Err(format!("Percorso allegato incasso non sicuro: {receipt_id}"));
         }
         let entry = by_path.get(relative.as_str())
             .ok_or_else(|| format!("Allegato incasso assente nel backup: {relative}"))?;
-        if stored_bytes <= 0 || entry.bytes != stored_bytes as u64 || entry.sha256 != stored_sha {
+        // The native attachment reader accepts at most 12 MiB (schema v6).
+        // A rebuilt SQLite table may omit the original size CHECK.
+        if !(1..=12 * 1024 * 1024).contains(&stored_bytes) {
+            return Err(format!("Dimensione allegato incasso non valida: {receipt_id}"));
+        }
+        if entry.bytes != stored_bytes as u64 || entry.sha256 != stored_sha {
             return Err(format!("Allegato incasso non coerente con i metadati SQLite: {relative}"));
         }
         // A matching checksum should not bless an invalid document header or
@@ -1657,6 +1668,75 @@ mod tests {
         let message = inspect_backup_core(folder).unwrap_err();
         assert!(message.contains("Formato allegato incasso"), "{message}");
         assert!(restore_backup_core(&db, folder).is_err());
+    }
+
+    #[test]
+    fn rehashed_invalid_receipt_names_are_rejected_without_losing_live_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let relative = seed_receipt_evidence(&db);
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        for name in ["proof\n.pdf", "proof\0.pdf", "proof\u{0085}.pdf"] {
+            {
+                let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+                snapshot.execute("UPDATE sale_receipt_attachments SET original_name=?1",
+                    params![name]).unwrap();
+                let integrity: String = snapshot.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+                assert_eq!(integrity, "ok");
+            }
+            refresh_manifest_record(folder, DB_FILE);
+            let message = inspect_backup_core(folder).unwrap_err();
+            assert!(message.contains("Nome allegato incasso"), "{message}");
+            assert!(restore_backup_core(&db, folder).is_err());
+            let live_name: String = db.conn.lock().unwrap().query_row(
+                "SELECT original_name FROM sale_receipt_attachments WHERE receipt_id='receipt'",
+                [], |r| r.get(0)).unwrap();
+            assert_eq!(live_name, "proof.pdf");
+            assert_eq!(fs::read(db.directory.join(&relative)).unwrap(), b"%PDF-1.7\nCollection proof");
+        }
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute("UPDATE sale_receipt_attachments SET original_name=?1",
+                params!["Récépissé_日本語.pdf"]).unwrap();
+        }
+        refresh_manifest_record(folder, DB_FILE);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+        assert!(restore_backup_core(&db, folder).is_ok());
+    }
+
+    #[test]
+    fn receipt_evidence_validator_rejects_over_limit_even_with_matching_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::open(tmp.path().join("active")).unwrap();
+        seed(&db);
+        let relative = seed_receipt_evidence(&db);
+        let destination = tmp.path().join("external");
+        fs::create_dir(&destination).unwrap();
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        // Exercise this validator independently of integrity_check, which also
+        // rejects violations when the source retains the original CHECK.
+        let mut bytes = vec![0_u8; 12 * 1024 * 1024 + 1];
+        bytes[..5].copy_from_slice(b"%PDF-");
+        fs::write(folder.join(&relative), &bytes).unwrap();
+        {
+            let snapshot = Connection::open(folder.join(DB_FILE)).unwrap();
+            snapshot.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+            snapshot.execute("UPDATE sale_receipt_attachments SET size_bytes=?1,sha256=?2",
+                params![bytes.len() as i64, format!("{:x}", Sha256::digest(&bytes))]).unwrap();
+        }
+        refresh_manifest_record(folder, &relative);
+        refresh_manifest_record(folder, DB_FILE);
+        let manifest = manifest_from_dir(folder).unwrap();
+        let message = validate_receipt_attachment_evidence(
+            &folder.join(DB_FILE), folder, &manifest.files).unwrap_err();
+        assert!(message.contains("Dimensione allegato incasso"), "{message}");
+        assert!(restore_backup_core(&db, folder).is_err());
+        assert_eq!(fs::read(db.directory.join(&relative)).unwrap(), b"%PDF-1.7\nCollection proof");
     }
 
     #[test]
