@@ -1,6 +1,6 @@
 //! Native-only PKCE contract for the optional Auctions integration.
-//! Not exposed as a Tauri command; no browser launch, HTTP handling, token
-//! transport, credentials on disk, or provider activation is implemented here.
+//! Not exposed as a Tauri command; no browser launch, remote token transport,
+//! credentials on disk, or provider activation is implemented here.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -147,6 +147,154 @@ impl PendingGrant {
     }
 }
 
+
+// A session owns both the grant and the bound socket: callers cannot pair a
+// grant with a different listener. No browser or remote transport is started.
+pub(crate) struct LoopbackSession {
+    listener: TcpListener,
+    grant: PendingGrant,
+    deadline: std::time::Instant,
+}
+
+const MAX_HTTP_HEADER: usize = 8192;
+const POLL: std::time::Duration = std::time::Duration::from_millis(20);
+const CONNECTION_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn callback_target<'a>(request: &'a [u8], expected_host: &str) -> Result<&'a str, &'static str> {
+    if request.len() > MAX_HTTP_HEADER || !request.ends_with(b"\r\n\r\n") {
+        return Err("invalid_oauth_http");
+    }
+    let request = std::str::from_utf8(request).map_err(|_| "invalid_oauth_http")?;
+    let headers = request.strip_suffix("\r\n\r\n").ok_or("invalid_oauth_http")?;
+    let mut lines = headers.split("\r\n");
+    let mut first = lines.next().ok_or("invalid_oauth_http")?.split(' ');
+    if first.next() != Some("GET") { return Err("invalid_oauth_http"); }
+    let target = first.next().ok_or("invalid_oauth_http")?;
+    if first.next() != Some("HTTP/1.1") || first.next().is_some() ||
+        !target.starts_with('/') || target.bytes().any(|b| !b.is_ascii_graphic()) {
+        return Err("invalid_oauth_http");
+    }
+    let mut host = None;
+    let mut length_seen = false;
+    for line in lines {
+        let (name, value) = line.split_once(':').ok_or("invalid_oauth_http")?;
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)) ||
+            value.bytes().any(|b| b.is_ascii_control() && b != b'\t') {
+            return Err("invalid_oauth_http");
+        }
+        let value = value.trim_matches(|c| c == ' ' || c == '\t');
+        if name.eq_ignore_ascii_case("host") {
+            if host.replace(value).is_some() { return Err("invalid_oauth_http"); }
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            return Err("invalid_oauth_http");
+        } else if name.eq_ignore_ascii_case("content-length") {
+            if length_seen || value != "0" { return Err("invalid_oauth_http"); }
+            length_seen = true;
+        }
+    }
+    if host != Some(expected_host) { return Err("invalid_oauth_http"); }
+    Ok(target)
+}
+
+fn read_callback(
+    stream: &mut std::net::TcpStream,
+    deadline: std::time::Instant,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> io::Result<Vec<u8>> {
+    use std::{io::Read, sync::atomic::Ordering, time::Instant};
+    stream.set_nonblocking(true)?;
+    let mut request = Vec::new();
+    let mut buffer = [0u8; 1024];
+    loop {
+        if cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "oauth_callback_interrupted"));
+        }
+        match stream.read(&mut buffer) {
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "invalid_oauth_http")),
+            Ok(n) => {
+                if request.len() + n > MAX_HTTP_HEADER {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid_oauth_http"));
+                }
+                request.extend_from_slice(&buffer[..n]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    // No body, pipelining or bytes after the header.
+                    if end + 4 != request.len() {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid_oauth_http"));
+                    }
+                    return Ok(request);
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::sleep(POLL),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+fn browser_reply(stream: &mut std::net::TcpStream, accepted: bool) {
+    use std::io::Write;
+    // Static text, no reflected parameters, secrets, external resources or redirects.
+    // A closed browser must not undo a valid single-use callback.
+    let (status, body) = if accepted {
+        ("200 OK", "Authorization response received. Return to Repertica Studio.")
+    } else {
+        ("400 Bad Request", "Invalid authorization response.")
+    };
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    // Nonblocking best effort; never extend the deadline to deliver UI text.
+    let _ = stream.write_all(response.as_bytes());
+}
+
+impl LoopbackSession {
+    pub(crate) fn bind(client: GrantClient, timeout: std::time::Duration) -> io::Result<Self> {
+        let (listener, grant) = PendingGrant::bind(client)?;
+        let deadline = std::time::Instant::now() + timeout.min(std::time::Duration::from_secs(300));
+        Ok(Self { listener, grant, deadline })
+    }
+
+    pub(crate) fn authorization(&self) -> Option<AuthorizationParams<'_>> {
+        self.grant.authorization()
+    }
+
+    /// Blocking native worker only (never the UI thread). Consumes the session,
+    /// so the listening socket closes on every exit path. Invalid requests
+    /// cannot consume the grant or extend its original deadline.
+    pub(crate) fn wait(
+        mut self,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<TokenExchange, &'static str> {
+        use std::{sync::atomic::Ordering, time::Instant};
+        let host = format!("127.0.0.1:{}", self.listener.local_addr().map_err(|_| "oauth_listener_error")?.port());
+        loop {
+            if cancelled.load(Ordering::Acquire) { return Err("oauth_cancelled"); }
+            if Instant::now() >= self.deadline { return Err("oauth_timeout"); }
+            match self.listener.accept() {
+                Ok((mut stream, peer)) => {
+                    if peer.ip() != std::net::IpAddr::V4(Ipv4Addr::LOCALHOST) { continue; }
+                    let deadline = self.deadline.min(Instant::now() + CONNECTION_LIMIT);
+                    let request = match read_callback(&mut stream, deadline, cancelled) {
+                        Ok(request) => request,
+                        Err(_) => continue,
+                    };
+                    if cancelled.load(Ordering::Acquire) { return Err("oauth_cancelled"); }
+                    if Instant::now() >= self.deadline { return Err("oauth_timeout"); }
+                    let result = callback_target(&request, &host)
+                        .and_then(|target| self.grant.accept_callback(target));
+                    browser_reply(&mut stream, result.is_ok());
+                    if let Ok(exchange) = result { return Ok(exchange); }
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::sleep(POLL),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => return Err("oauth_listener_error"),
+            }
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,5 +374,65 @@ mod tests {
         assert_ne!(first.verifier, second.verifier);
         assert_eq!(first.verifier.as_ref().unwrap().len(), 96);
         assert_eq!(first.authorization().unwrap().code_challenge.len(), 43);
+    }
+
+    #[test]
+    fn http_parser_requires_exact_host_get_and_bounded_headers() {
+        let host = "127.0.0.1:49152";
+        let target = format!("{CALLBACK_PATH}?code={CODE}&state={STATE}");
+        let good = format!("GET {target} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: test\r\n\r\n");
+        assert_eq!(callback_target(good.as_bytes(), host), Ok(target.as_str()));
+        for bad in [
+            good.replace("GET ", "POST "),
+            good.replace(host, "localhost:49152"),
+            good.replace(host, "127.0.0.1:49153"),
+            good.replace("Host:", " Host:"),
+            good.replace("User-Agent: test", &format!("hOsT: {host}")),
+            good.replace("User-Agent: test", "Transfer-Encoding: chunked"),
+            good.replace("User-Agent: test", "Content-Length: 1"),
+            good.replace("User-Agent: test", "Content-Length: 0\r\nContent-Length: 0"),
+            good.replace("\r\n", "\n"),
+            format!("{good}extra"),
+            good.replace("test", &"x".repeat(MAX_HTTP_HEADER)),
+        ] {
+            assert!(callback_target(bad.as_bytes(), host).is_err());
+        }
+    }
+
+    #[test]
+    fn loopback_wait_rejects_wrong_host_then_accepts_once() {
+        use std::{io::{Read, Write}, net::TcpStream, sync::atomic::AtomicBool, time::Duration};
+        let session = LoopbackSession::bind(GrantClient::Auctions, Duration::from_secs(5)).unwrap();
+        let addr = session.listener.local_addr().unwrap();
+        let state = session.grant.state.clone();
+        let worker = std::thread::spawn(move || session.wait(&AtomicBool::new(false)));
+        let target = format!("{CALLBACK_PATH}?code={CODE}&state={state}");
+        for (host, expected) in [("localhost:49152".to_owned(), "400"), (addr.to_string(), "200")] {
+            let mut stream = TcpStream::connect(addr).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            stream.write_all(format!("GET {target} HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes()).unwrap();
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply).unwrap();
+            assert!(reply.starts_with(&format!("HTTP/1.1 {expected}")));
+            assert!(!reply.contains(CODE));
+            assert!(!reply.contains(&state));
+        }
+        let exchange = worker.join().unwrap().unwrap();
+        assert_eq!(exchange.expected_audience(), "repertica-auctions");
+        assert!(TcpStream::connect(addr).is_err());
+    }
+
+    #[test]
+    fn loopback_wait_closes_on_cancel_and_timeout() {
+        use std::{net::TcpStream, sync::atomic::AtomicBool, time::Duration};
+        let session = LoopbackSession::bind(GrantClient::Auctions, Duration::from_secs(5)).unwrap();
+        let addr = session.listener.local_addr().unwrap();
+        assert_eq!(session.wait(&AtomicBool::new(true)).err(), Some("oauth_cancelled"));
+        assert!(TcpStream::connect(addr).is_err());
+
+        let session = LoopbackSession::bind(GrantClient::Auctions, Duration::ZERO).unwrap();
+        let addr = session.listener.local_addr().unwrap();
+        assert_eq!(session.wait(&AtomicBool::new(false)).err(), Some("oauth_timeout"));
+        assert!(TcpStream::connect(addr).is_err());
     }
 }
