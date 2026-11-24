@@ -1,6 +1,6 @@
 //! Native-only PKCE contract for the optional Auctions integration.
-//! Not exposed as a Tauri command; no browser launch, remote token transport,
-//! credentials on disk, or provider activation is implemented here.
+//! Not exposed as a Tauri command; the browser boundary accepts an injected
+//! opener only. No platform opener, remote transport, or provider activation.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -54,6 +54,42 @@ pub(crate) struct AuthorizationParams<'a> {
     code_challenge_method: &'static str,
     response_type: &'static str,
     scope: &'static str,
+}
+
+
+// Fixed provider contract, not a runtime enablement flag. Never accept an
+// issuer, login path or arbitrary URL from the renderer or a callback.
+const IDENTITY_LOGIN: &str = "https://studio.repertica.com/login";
+
+fn query_component(value: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            write!(&mut encoded, "%{byte:02X}").expect("writing to String");
+        }
+    }
+    encoded
+}
+
+impl AuthorizationParams<'_> {
+    fn browser_url(&self) -> String {
+        let fields = [
+            ("client_id", self.client_id),
+            ("redirect_uri", self.redirect_uri),
+            ("state", self.state),
+            ("code_challenge", self.code_challenge.as_str()),
+            ("code_challenge_method", self.code_challenge_method),
+            ("response_type", self.response_type),
+            ("scope", self.scope),
+        ];
+        let query = fields.iter().map(|(name, value)|
+            format!("{name}={}", query_component(value)))
+            .collect::<Vec<_>>().join("&");
+        format!("{IDENTITY_LOGIN}?{query}")
+    }
 }
 
 #[derive(Serialize)]
@@ -259,6 +295,27 @@ impl LoopbackSession {
         self.grant.authorization()
     }
 
+
+    /// Native worker boundary. The platform opener must be supplied by the
+    /// caller after explicit opt-in and QA approval; there is no default opener.
+    /// The closure must return promptly after asking the OS to open the URL.
+    /// No arbitrary destination or grant fields can be supplied by the renderer.
+    /// Errors are deliberately generic and never include the URL.
+    pub(crate) fn open_and_wait(
+        self,
+        cancelled: &std::sync::atomic::AtomicBool,
+        open_browser: impl FnOnce(&str) -> Result<(), ()>,
+    ) -> Result<TokenExchange, &'static str> {
+        use std::{sync::atomic::Ordering, time::Instant};
+        if cancelled.load(Ordering::Acquire) { return Err("oauth_cancelled"); }
+        if Instant::now() >= self.deadline { return Err("oauth_timeout"); }
+        let url = self.authorization().ok_or("oauth_grant_consumed")?.browser_url();
+        if cancelled.load(Ordering::Acquire) { return Err("oauth_cancelled"); }
+        if Instant::now() >= self.deadline { return Err("oauth_timeout"); }
+        open_browser(&url).map_err(|_| "oauth_browser_open_failed")?;
+        self.wait(cancelled)
+    }
+
     /// Blocking native worker only (never the UI thread). Consumes the session,
     /// so the listening socket closes on every exit path. Invalid requests
     /// cannot consume the grant or extend its original deadline.
@@ -307,6 +364,63 @@ mod tests {
 
     fn fixture(client: GrantClient) -> PendingGrant {
         PendingGrant::with_values(client, 49152, STATE.into(), VERIFIER.into())
+    }
+
+
+    #[test]
+    fn browser_url_pins_provider_and_encodes_exact_grant() {
+        let auth = fixture(GrantClient::StudioApi);
+        let url = auth.authorization().unwrap().browser_url();
+        assert_eq!(url, format!(
+            "https://studio.repertica.com/login?client_id=repertica-desktop-studio-api&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Frepertica%2Foauth%2Fcallback&state={STATE}&code_challenge={CHALLENGE}&code_challenge_method=S256&response_type=code&scope=artworks%3Acreate%20media%3Awrite"
+        ));
+        assert!(!url.contains(VERIFIER));
+        assert!(!url.contains(CODE));
+        assert_eq!(query_component("a&b=#% +é"), "a%26b%3D%23%25%20%2B%C3%A9");
+        let auctions = fixture(GrantClient::Auctions);
+        let url = auctions.authorization().unwrap().browser_url();
+        assert!(url.contains("?client_id=repertica-desktop-auctions&"));
+        assert!(url.ends_with("&scope=profile"));
+    }
+
+    #[test]
+    fn injected_browser_opener_completes_local_flow_without_remote_request() {
+        use std::{io::Write, net::TcpStream, sync::atomic::AtomicBool, time::Duration};
+        let session = LoopbackSession::bind(GrantClient::StudioApi, Duration::from_secs(5)).unwrap();
+        let addr = session.listener.local_addr().unwrap();
+        let state = session.grant.state.clone();
+        let result = session.open_and_wait(&AtomicBool::new(false), |url| {
+            assert!(url.starts_with("https://studio.repertica.com/login?"));
+            assert!(url.contains(&format!("state={state}&")));
+            let mut stream = TcpStream::connect(addr).unwrap();
+            stream.write_all(format!(
+                "GET {CALLBACK_PATH}?code={CODE}&state={state} HTTP/1.1\r\nHost: {addr}\r\n\r\n"
+            ).as_bytes()).unwrap();
+            Ok(())
+        }).unwrap();
+        assert_eq!(result.expected_audience(), "repertica-studio-api");
+        assert!(TcpStream::connect(addr).is_err());
+    }
+
+    #[test]
+    fn opener_failure_cancel_and_expiry_close_listener() {
+        use std::{net::TcpStream, sync::atomic::AtomicBool, time::Duration};
+        for (timeout, cancelled, expected) in [
+            (Duration::from_secs(5), false, "oauth_browser_open_failed"),
+            (Duration::from_secs(5), true, "oauth_cancelled"),
+            (Duration::ZERO, false, "oauth_timeout"),
+        ] {
+            let session = LoopbackSession::bind(GrantClient::Auctions, timeout).unwrap();
+            let addr = session.listener.local_addr().unwrap();
+            let mut opened = false;
+            let result = session.open_and_wait(&AtomicBool::new(cancelled), |_| {
+                opened = true;
+                Err(())
+            });
+            assert_eq!(result.err(), Some(expected));
+            assert_eq!(opened, expected == "oauth_browser_open_failed");
+            assert!(TcpStream::connect(addr).is_err());
+        }
     }
 
     #[test]
