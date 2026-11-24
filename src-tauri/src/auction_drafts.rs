@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
+#[path = "auction_preview_payload.rs"]
+mod preview_payload;
+use preview_payload::{bounded, editor_trim, parse_canonical_payload, valid_token};
+#[cfg(test)]
+use preview_payload::Payload;
+
 pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch("CREATE TABLE IF NOT EXISTS auction_archive_scope (
@@ -24,7 +30,6 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 
 fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn invalid() -> String { "invalid_stored_draft".into() }
-fn bounded(s: &str, max: usize) -> bool { s.encode_utf16().count() <= max }
 fn valid_id(s: &str) -> bool { !s.is_empty() && bounded(s, 256) && !s.chars().any(char::is_control) }
 
 // Option normally accepts an absent field as None in serde. The editor's
@@ -54,14 +59,6 @@ struct Pending {
     artwork_id: String, idempotency_key: String, body: String,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Payload {
-    tenant_id: String, slug: String, title: String, description: String,
-    starts_at: String, ends_at: String,
-    starting_amount: i64, minimum_increment_amount: i64, currency: String,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -70,50 +67,8 @@ struct Record {
     pending: Option<Pending>,
 }
 
-fn valid_token(s: &str, min: usize, max: usize) -> bool {
-    (min..=max).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
-}
-
-// Match the editor's ECMAScript trim semantics (not Rust's Unicode
-// whitespace set), so a reviewed draft and its pending payload agree.
-fn editor_trim(s: &str) -> &str {
-    s.trim_matches(|c: char| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' |
-        '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' |
-        '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'))
-}
-
-fn valid_slug(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 60 && s.split('-').all(|part|
-        !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
-}
-
-fn utc_millis(s: &str) -> Option<i64> {
-    // Require the same exact millisecond UTC form as the editor. Reject
-    // leap seconds, which chrono can represent but JavaScript Date cannot.
-    let bytes = s.as_bytes();
-    if bytes.len() != 24 || bytes.get(17..19)? > &b"59"[..] ||
-        !bytes[..4].iter().all(u8::is_ascii_digit) { return None; }
-    let parsed = chrono::DateTime::parse_from_rfc3339(s).ok()?;
-    if parsed.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Millis, true) != s {
-        return None;
-    }
-    Some(parsed.timestamp_millis())
-}
-
-fn valid_pending_payload(b: &Payload) -> bool {
-    let Some(start) = utc_millis(&b.starts_at) else { return false };
-    let Some(end) = utc_millis(&b.ends_at) else { return false };
-    valid_token(&b.tenant_id,3,80) && b.currency == "EUR" &&
-        (1..=1_000_000_000).contains(&b.starting_amount) &&
-        (1..=1_000_000_000).contains(&b.minimum_increment_amount) &&
-        b.title == editor_trim(&b.title) && b.title.encode_utf16().count() >= 3 &&
-        bounded(&b.title,160) && b.description == editor_trim(&b.description) &&
-        bounded(&b.description,1500) && valid_slug(&b.slug) &&
-        end > start && end - start <= 7 * 86_400_000
-}
-
 fn pending_matches_draft(p: &Pending, d: &Draft) -> Result<bool, String> {
-    let b: Payload = serde_json::from_str(&p.body).map_err(|_| invalid())?;
+    let b = parse_canonical_payload(&p.body).map_err(|_| invalid())?;
     Ok(b.title == editor_trim(&d.title) && b.description == editor_trim(&d.description) &&
         b.slug == d.slug && b.starts_at == d.starts_at && b.ends_at == d.ends_at &&
         d.starting_amount == Some(b.starting_amount as f64) &&
@@ -134,10 +89,7 @@ fn parse_record(raw: &str, scope: &str, artwork_id: &str) -> Result<Record, Stri
         if p.artwork_id != artwork_id || !valid_token(&p.idempotency_key,16,96) || p.body.len()>8192 {
             return Err(invalid());
         }
-        let b: Payload = serde_json::from_str(&p.body).map_err(|_| invalid())?;
-        if !valid_pending_payload(&b) || serde_json::to_string(&b).map_err(|_| invalid())? != p.body {
-            return Err(invalid());
-        }
+        parse_canonical_payload(&p.body).map_err(|_| invalid())?;
     }
     // Keep the exact same public-field order and compact JSON as preparePreview.
     // A native write must not persist a body the editor cannot reopen.

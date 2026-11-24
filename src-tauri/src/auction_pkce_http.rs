@@ -57,9 +57,15 @@ fn http_error(error: reqwest::Error) -> Failure {
 async fn bounded_json<T: serde::de::DeserializeOwned>(
     request: RequestBuilder, deadline: Instant,
 ) -> Result<T, Failure> {
-    let mut response = request.timeout(remaining(deadline)?).send().await.map_err(http_error)?;
+    let response = request.timeout(remaining(deadline)?).send().await.map_err(http_error)?;
     // Do not parse an error/redirect body or follow a Location.
     if response.status() != StatusCode::OK { return Err("oauth_http_rejected"); }
+    read_json(response, deadline).await
+}
+
+async fn read_json<T: serde::de::DeserializeOwned>(
+    mut response: reqwest::Response, deadline: Instant,
+) -> Result<T, Failure> {
     let json = response.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(';').next()).is_some_and(|v| v.trim().eq_ignore_ascii_case("application/json"));
     if !json { return Err("oauth_invalid_response"); }
@@ -176,6 +182,20 @@ fn verified_expiry(token: &str, jwks: &Jwks, client: GrantClient, now: u64) -> R
     Ok(claims.exp)
 }
 
+fn isolated_client() -> Result<Client, Failure> {
+    // The updater unifies reqwest with rustls-no-provider. Explicitly select
+    // ring for this test process before building even a loopback HTTP client.
+    // Concurrent tests may have already installed the same default.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    Client::builder()
+        .no_proxy().redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never())
+        .referer(false).http1_only().connect_timeout(Duration::from_secs(2)).timeout(DEADLINE)
+        .build().map_err(|_| "oauth_http_failed")
+}
+
+#[path = "auction_resource_http.rs"]
+mod resource_http;
+
 impl NativeIdentityHttp {
     pub(super) fn new(provider: IdentityProvider) -> Result<Self, Failure> {
         // This branch cannot succeed in a non-test build.
@@ -187,14 +207,7 @@ impl NativeIdentityHttp {
             IdentityProvider::IsolatedHttp(addr) => addr,
         };
         allowed(addr)?;
-        // The updater unifies reqwest with rustls-no-provider. Explicitly select
-        // ring for this test process before building even a loopback HTTP client.
-        // Concurrent tests may have already installed the same default.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let client = Client::builder()
-            .no_proxy().redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never())
-            .referer(false).http1_only().connect_timeout(Duration::from_secs(2)).timeout(DEADLINE)
-            .build().map_err(|_| "oauth_http_failed")?;
+        let client = isolated_client()?;
         Ok(Self { addr, client })
     }
 
@@ -281,22 +294,35 @@ mod tests {
         }
     }
     fn read_request(stream: &mut TcpStream, expected: &str) -> Vec<u8> {
+        read_resource_request(stream, expected, None, None)
+    }
+    fn read_resource_request(stream: &mut TcpStream, expected: &str, bearer: Option<&str>, key: Option<&str>) -> Vec<u8> {
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         assert_eq!(line.trim_end(), expected);
         let mut size = 0usize;
+        let mut auth = None;
+        let mut attempt = None;
         for _ in 0..64 {
             line.clear();
             assert!(reader.read_line(&mut line).unwrap() > 0);
             if line == "\r\n" { break; }
-            assert!(!line.to_ascii_lowercase().starts_with("origin:"));
-            assert!(!line.to_ascii_lowercase().starts_with("authorization:"));
             if let Some((name,value)) = line.split_once(':') {
+                assert!(!name.eq_ignore_ascii_case("origin"));
+                assert!(!name.eq_ignore_ascii_case("cookie"));
+                if name.eq_ignore_ascii_case("authorization") {
+                    assert!(auth.replace(value.trim().to_owned()).is_none());
+                }
+                if name.eq_ignore_ascii_case("idempotency-key") {
+                    assert!(attempt.replace(value.trim().to_owned()).is_none());
+                }
                 if name.eq_ignore_ascii_case("content-length") { size = value.trim().parse().unwrap(); }
             }
         }
-        assert!(size < 8192);
+        assert_eq!(auth, bearer.map(|b|format!("Bearer {b}")));
+        assert_eq!(attempt.as_deref(),key);
+        assert!(size <= 8192);
         let mut body = vec![0; size];
         reader.read_exact(&mut body).unwrap();
         body
@@ -388,5 +414,115 @@ mod tests {
         });
         worker.join().unwrap();
         assert_eq!(error, Some("oauth_timeout"));
+    }
+
+    const RESOURCE_KEY: &str = "synthetic-preview-key-001";
+    const RESOURCE_BODY: &str = r#"{"tenantId":"tenant-test","slug":"art","title":"Art","description":"","startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z","startingAmount":1000,"minimumIncrementAmount":100,"currency":"EUR"}"#;
+    const RESOURCE_ID: &str = "4c2a24d0-bf50-410a-b0f2-1c0b3c96e9a0";
+
+    fn verified_resource_token() -> NativeAccessToken {
+        let f = fixture();
+        let keys: Jwks = serde_json::from_value(f["jwks"].clone()).unwrap();
+        let bearer = f["valid"].as_str().unwrap().to_owned();
+        let expires_at = verified_expiry(&bearer,&keys,GrantClient::Auctions,NOW).unwrap();
+        NativeAccessToken { bearer, audience: GrantClient::Auctions.audience(), expires_at }
+    }
+    fn tenants(role: &str) -> Value {
+        json!({"month":"2027-01","monthlyPerArtistLimit":3,"globalMonthlyLimit":12,"tenants":[
+            {"tenantId":"tenant-test","status":"active","role":role,"artistSlug":"artist",
+             "artistName":"Synthetic artist","approved":1,"publishedThisMonth":1}]})
+    }
+    fn receipt(replayed: bool, bidding: bool) -> Value {
+        json!({"auctionId":RESOURCE_ID,"slug":"artist--art","status":"preview",
+            "biddingEnabled":bidding,"idempotentReplay":replayed})
+    }
+    fn resource_tenants(listener: &TcpListener, bearer: &str, role: &str) {
+        let mut s = accept(listener);
+        assert!(read_resource_request(&mut s,"GET /api/studio/tenants HTTP/1.1",Some(bearer),None).is_empty());
+        reply(&mut s,"200 OK",&tenants(role));
+    }
+
+    #[test]
+    fn native_resource_client_lists_and_replays_exact_preview_request() {
+        use super::resource_http::NativeAuctionsHttp;
+        let (listener, addr) = listen();
+        let worker = thread::spawn(move || {
+            let f=fixture();
+            let bearer=f["valid"].as_str().unwrap();
+            resource_tenants(&listener,bearer,"owner");
+            let mut s=accept(&listener);
+            assert!(read_resource_request(&mut s,"GET /api/studio/previews?tenantId=tenant-test HTTP/1.1",Some(bearer),None).is_empty());
+            reply(&mut s,"200 OK",&json!({"auctions":[{"auctionId":RESOURCE_ID,"slug":"artist--art","title":"Art",
+                "status":"preview","startsAt":"2027-01-02T10:00:00.000Z","endsAt":"2027-01-03T10:00:00.000Z"}]}));
+            for (replayed,status) in [(false,"201 Created"),(true,"200 OK")] {
+                resource_tenants(&listener,bearer,"owner");
+                let mut s=accept(&listener);
+                let body=read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY));
+                assert_eq!(body,RESOURCE_BODY.as_bytes());
+                reply(&mut s,status,&receipt(replayed,false));
+            }
+            // A fresh read-only membership must stop a third create before POST.
+            resource_tenants(&listener,bearer,"viewer");
+            listener
+        });
+        tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            let list=api.list_tenants(&token,||Ok(NOW)).await.unwrap();
+            assert_eq!(list.tenants[0].tenant_id,"tenant-test");
+            let list=api.list_previews(&token,"tenant-test",||Ok(NOW)).await.unwrap();
+            assert_eq!(list[0].auction_id,RESOURCE_ID);
+            assert_eq!(list[0].status,"preview");
+            let first=api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.unwrap();
+            let replay=api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.unwrap();
+            assert_eq!(first.auction_id,replay.auction_id);
+            assert!(!first.idempotent_replay && replay.idempotent_replay);
+            assert_eq!(api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.err(),Some("auction_access_denied"));
+        });
+        let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn native_resource_rejects_private_fields_expired_tokens_and_unconfirmed_receipts() {
+        use super::resource_http::NativeAuctionsHttp;
+        let (listener, addr)=listen();
+        tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            assert!(NativeAuctionsHttp::new(SocketAddrV4::new(Ipv4Addr::new(192,0,2,1),49152)).is_err());
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            let mut private=RESOURCE_BODY.to_owned();
+            private.pop();
+            private.push_str(r#","collectorEmail":"private@example.test"}"#);
+            assert_eq!(api.create_preview(&token,RESOURCE_KEY,&private,||Ok(NOW)).await.err(),Some("invalid_preview_payload"));
+            assert_eq!(api.list_previews(&token,"tenant-test&other=1",||Ok(NOW)).await.err(),Some("invalid_tenant"));
+            assert_eq!(api.list_tenants(&token,||Ok(NOW+900)).await.err(),Some("oauth_token_rejected"));
+        });
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+
+        let worker=thread::spawn(move || {
+            let f=fixture();
+            let bearer=f["valid"].as_str().unwrap();
+            for (status,body) in [
+                ("201 Created",receipt(false,true)),
+                ("201 Created",receipt(true,false)),
+                ("409 Conflict",json!({"error":"idempotency_conflict"}))
+            ] {
+                resource_tenants(&listener,bearer,"owner");
+                let mut s=accept(&listener);
+                assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY)),RESOURCE_BODY.as_bytes());
+                reply(&mut s,status,&body);
+            }
+            listener
+        });
+        tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            for expected in ["auction_invalid_response","auction_invalid_response","auction_conflict"] {
+                assert_eq!(api.create_preview(&token,RESOURCE_KEY,RESOURCE_BODY,||Ok(NOW)).await.err(),Some(expected));
+            }
+        });
+        let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
     }
 }
