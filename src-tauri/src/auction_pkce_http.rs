@@ -135,6 +135,7 @@ struct Claims {
     exp: u64,
     nbf: Option<u64>,
     jti: String,
+    sid: Option<String>,
 }
 
 fn decode(segment: &str) -> Result<Vec<u8>, Failure> {
@@ -145,6 +146,13 @@ fn decode(segment: &str) -> Result<Vec<u8>, Failure> {
 fn safe_identifier(value: &str) -> bool {
     !value.is_empty() && value.len() <= 80 &&
         value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+// The shared provider requires a canonical RFC 4122 v4 live-session ID.
+// This checks its shape only: revocation remains server-authoritative.
+fn valid_session_id(sid: &str) -> bool {
+    uuid::Uuid::parse_str(sid).is_ok_and(|id| id.to_string() == sid &&
+        id.get_version_num() == 4 && id.get_variant() == uuid::Variant::RFC4122)
 }
 
 fn verified_expiry(token: &str, jwks: &Jwks, client: GrantClient, now: u64) -> Result<u64, Failure> {
@@ -174,7 +182,8 @@ fn verified_expiry(token: &str, jwks: &Jwks, client: GrantClient, now: u64) -> R
         .filter(|id| *id > 0 && claims.sub == format!("repertica:{id}"));
     if claims.iss != ISSUER || claims.aud != client.audience() || claims.scope != client.scope() ||
         claims.token_use != "access" || claims.security_version == 0 || claims.security_version > i32::MAX as u32 ||
-        subject.is_none() || !safe_identifier(&claims.jti) || claims.iat > now || claims.exp <= now ||
+        subject.is_none() || !safe_identifier(&claims.jti) ||
+        !claims.sid.as_deref().is_some_and(valid_session_id) || claims.iat > now || claims.exp <= now ||
         claims.exp.checked_sub(claims.iat).is_none_or(|ttl| ttl == 0 || ttl > 900) ||
         claims.nbf.is_some_and(|nbf| nbf > now) {
         return Err("oauth_claims_rejected");
@@ -362,7 +371,7 @@ mod tests {
     fn signed_wrong_scope_audience_expiry_and_ambiguous_key_fail_closed() {
         let f = fixture();
         let keys: Jwks = serde_json::from_value(f["jwks"].clone()).unwrap();
-        for name in ["wrong_scope","wrong_audience","expired"] {
+        for name in ["wrong_scope","wrong_audience","expired","missing_sid","malformed_sid","wrong_sid_version","wrong_sid_variant"] {
             assert_eq!(verified_expiry(f[name].as_str().unwrap(), &keys, GrantClient::Auctions, NOW),
                 Err("oauth_claims_rejected"));
         }
@@ -628,6 +637,11 @@ mod tests {
             assert_eq!(body, expected_grant);
             reply(&mut s, "200 OK", &json!({"access_token":bearer,"token_type":"Bearer","expires_in":900,"scope":"profile"}));
             drop(s);
+            // A locally valid signature does not imply a live server session.
+            let mut s = accept(&listener);
+            assert!(read_resource_request(&mut s,"GET /api/studio/tenants HTTP/1.1",Some(bearer),None).is_empty());
+            reply(&mut s,"401 Unauthorized",&json!({"error":"synthetic_revoked_session"}));
+            drop(s);
             let mut private = tenants("owner");
             private["tenants"][0]["publicationEligible"] = json!(false);
             let mut s = accept(&listener);
@@ -635,13 +649,18 @@ mod tests {
             reply(&mut s,"200 OK",&private);
             drop(s);
             for role in ["viewer","owner","owner","owner"] { resource_tenants(&listener,bearer,role); }
-            // Only the key generated and persisted by native preparation is
-            // accepted by the fixture; explicit reconciliation follows.
+            // The server may revoke access after the membership GET. A rejected
+            // POST leaves the saved key and exact bytes intact for reconciliation.
             let key = key_rx.recv_timeout(Duration::from_secs(15)).unwrap();
-            resource_tenants(&listener,bearer,"owner");
-            let mut s = accept(&listener);
-            assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(&key)).as_slice(),RESOURCE_BODY.as_bytes());
-            reply(&mut s,"201 Created",&receipt(false,false));
+            for (status, body) in [
+                ("403 Forbidden",json!({"error":"synthetic_revoked_session"})),
+                ("200 OK",receipt(true,false)),
+            ] {
+                resource_tenants(&listener,bearer,"owner");
+                let mut s = accept(&listener);
+                assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(&key)).as_slice(),RESOURCE_BODY.as_bytes());
+                reply(&mut s,status,&body);
+            }
             listener
         });
         let mut conn=Connection::open_in_memory().unwrap();
@@ -668,6 +687,8 @@ mod tests {
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW+200)).await.unwrap_err(),"invalid_schedule");
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&uuid::Uuid::new_v4().to_string(),RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_draft_conflict");
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
+            assert_eq!(stored(&conn),(revision.clone(),raw.clone()));
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
             // An approved but private profile must also deny preparation.
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
             let other=RESOURCE_BODY.replace("tenant-test","tenant-other");
@@ -687,8 +708,11 @@ mod tests {
             assert!(uuid::Uuid::parse_str(value["pending"]["idempotencyKey"].as_str().unwrap()).is_ok());
             assert!(value.get("receipt").is_none());
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&next,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"pending_preview_unresolved");
-            assert_eq!(stored(&conn),(actual,record));
+            assert_eq!(stored(&conn),(actual,record.clone()));
             key_tx.send(value["pending"]["idempotencyKey"].as_str().unwrap().to_owned()).unwrap();
+            assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&next,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
+            assert_eq!(stored(&conn),(next.clone(),record.clone()));
+            // Explicit retry only; simulate successful server reconciliation.
             let confirmed = api.reconcile_preview(&mut conn,&token,"a",&scope,&next,||Ok(NOW)).await.unwrap();
             let (confirmed_revision, confirmed_record) = stored(&conn);
             assert_ne!(confirmed_revision, next);
