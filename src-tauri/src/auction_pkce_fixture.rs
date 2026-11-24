@@ -141,6 +141,7 @@ fn fixture_redemption_replay_and_expired_request() {
 // earlier transport closure, it rejects altered grant fields instead of
 // asserting on them. It is not a database, signature verifier or HTTP server.
 struct BoundCode {
+    client: GrantClient,
     code_hash: [u8; 32],
     client_id: &'static str,
     redirect_uri: String,
@@ -153,6 +154,7 @@ struct BoundCode {
 impl BoundCode {
     fn issue(grant: &TokenExchange, now: u64, version: u64) -> Self {
         Self {
+            client: grant.expected_client,
             code_hash: Sha256::digest(grant.code.as_bytes()).into(),
             client_id: grant.client_id,
             redirect_uri: grant.redirect_uri.clone(),
@@ -175,7 +177,7 @@ impl BoundCode {
             return Err("oauth_invalid_grant");
         }
         self.used = true;
-        let mut c = claims(grant.expected_client);
+        let mut c = claims(self.client);
         c.security_version = self.security_version;
         Ok((200, c))
     }
@@ -221,5 +223,22 @@ fn fixture_code_binding_denies_expired_or_revoked_grants() {
                 |_, g| store.redeem(g, now, current_version, verified)), Err("oauth_invalid_grant"));
             assert!(!store.used);
         }
+    }
+}
+
+
+#[test]
+fn fixture_code_uses_issued_audience_not_local_expected_audience() {
+    for (client, other) in [(GrantClient::Auctions, GrantClient::StudioApi),
+                           (GrantClient::StudioApi, GrantClient::Auctions)] {
+        let mut store = BoundCode::issue(&exchange(client), NOW, 1);
+        let mut grant = exchange(client);
+        grant.expected_client = other;
+        assert_eq!(redeem(grant, IdentityProvider::IsolatedFixture, ENDPOINT, deadline(),
+            |_, g| store.redeem(g, NOW, 1, true)), Err("oauth_claims_rejected"));
+        // The provider already redeemed the code; no silent retry is permitted.
+        assert!(store.used);
+        assert_eq!(redeem(exchange(client), IdentityProvider::IsolatedFixture, ENDPOINT, deadline(),
+            |_, g| store.redeem(g, NOW, 1, true)), Err("oauth_invalid_grant"));
     }
 }
