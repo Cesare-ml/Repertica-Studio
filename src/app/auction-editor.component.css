@@ -1,0 +1,18 @@
+.auction-dialog { width: min(42rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem);
+  overflow: auto; padding: 1.4rem; border-radius: 12px; border: 1px solid currentColor;
+  background: Canvas; color: CanvasText; box-sizing: border-box; }
+.auction-dialog::backdrop { background: rgba(0,0,0,.45); }
+header, footer { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+header h2 { margin: 0; }
+header p, .hint { font-size: .9rem; }
+fieldset { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .75rem; border: 1px solid currentColor; border-radius: 8px; padding: .9rem; }
+label { display: grid; gap: .3rem; min-width: 0; }
+.wide { grid-column: 1 / -1; }
+input, textarea, button { font: inherit; }
+input, textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: .5rem; }
+button { cursor: pointer; padding: .5rem .75rem; }
+button:disabled { cursor: default; opacity: .6; }
+.work { overflow-wrap: anywhere; }
+.error, .pending { border-inline-start: 3px solid currentColor; padding-inline-start: .75rem; }
+footer { justify-content: flex-end; }
+@media (max-width: 560px) { fieldset { grid-template-columns: 1fr; } }

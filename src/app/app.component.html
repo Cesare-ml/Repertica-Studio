@@ -126,6 +126,7 @@
             <td class="actions"><button class="small action-glyph action-glyph--edit" type="button" (click)="editArtwork(a)">{{ tr('Modifica') }}</button>
               <button class="small action-glyph action-glyph--photo" type="button" [disabled]="busy" (click)="chooseCoverPhoto(a)">{{ tr('Foto') }}</button>
               <button class="small action-glyph action-glyph--gallery" type="button" (click)="openGallery(a)">{{ tr('Galleria') }}</button>
+              <button class="small" type="button" [disabled]="busy || !initialized" (click)="auctionEditor.show(a)">{{ tr('Bozza asta offline') }}</button>
               <button class="small danger-text action-glyph action-glyph--delete" type="button" (click)="deleteArtwork(a)">{{ tr('Elimina') }}</button></td>
           </tr></tbody></table>
         <div class="empty-state" *ngIf="!visibleArtworks.length"><strong>{{ tr('Nessuna opera trovata') }}</strong><p>{{ tr('Modifica i filtri o la ricerca per visualizzare altre opere.') }}</p>
@@ -540,6 +541,8 @@
     </section>
   </main>
 </div>
+
+<rp-auction-editor #auctionEditor [language]="language"></rp-auction-editor>
 
 <rp-artwork-viewer *ngIf="viewerIndex !== null" [artworks]="viewerArtworks" [startIndex]="viewerIndex" [language]="language" [buyers]="buyersByArtwork" [prices]="pricesByArtwork"
   (closed)="viewerIndex = null" (edit)="viewerIndex = null; editArtwork($event)" (gallery)="viewerIndex = null; openGallery($event)"></rp-artwork-viewer>
