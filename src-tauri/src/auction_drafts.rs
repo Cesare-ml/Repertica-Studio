@@ -59,6 +59,52 @@ fn valid_token(s: &str, min: usize, max: usize) -> bool {
     (min..=max).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 
+// Match the editor's ECMAScript trim semantics (not Rust's Unicode
+// whitespace set), so a reviewed draft and its pending payload agree.
+fn editor_trim(s: &str) -> &str {
+    s.trim_matches(|c: char| matches!(c, '\u{0009}'..='\u{000d}' | '\u{0020}' |
+        '\u{00a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' |
+        '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'))
+}
+
+fn valid_slug(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 60 && s.split('-').all(|part|
+        !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
+}
+
+fn utc_millis(s: &str) -> Option<i64> {
+    // Require the same exact millisecond UTC form as the editor. Reject
+    // leap seconds, which chrono can represent but JavaScript Date cannot.
+    let bytes = s.as_bytes();
+    if bytes.len() != 24 || bytes.get(17..19)? > &b"59"[..] ||
+        !bytes[..4].iter().all(u8::is_ascii_digit) { return None; }
+    let parsed = chrono::DateTime::parse_from_rfc3339(s).ok()?;
+    if parsed.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Millis, true) != s {
+        return None;
+    }
+    Some(parsed.timestamp_millis())
+}
+
+fn valid_pending_payload(b: &Payload) -> bool {
+    let Some(start) = utc_millis(&b.starts_at) else { return false };
+    let Some(end) = utc_millis(&b.ends_at) else { return false };
+    valid_token(&b.tenant_id,3,80) && b.currency == "EUR" &&
+        (1..=1_000_000_000).contains(&b.starting_amount) &&
+        (1..=1_000_000_000).contains(&b.minimum_increment_amount) &&
+        b.title == editor_trim(&b.title) && b.title.encode_utf16().count() >= 3 &&
+        bounded(&b.title,160) && b.description == editor_trim(&b.description) &&
+        bounded(&b.description,1500) && valid_slug(&b.slug) &&
+        end > start && end - start <= 7 * 86_400_000
+}
+
+fn pending_matches_draft(p: &Pending, d: &Draft) -> Result<bool, String> {
+    let b: Payload = serde_json::from_str(&p.body).map_err(|_| invalid())?;
+    Ok(b.title == editor_trim(&d.title) && b.description == editor_trim(&d.description) &&
+        b.slug == d.slug && b.starts_at == d.starts_at && b.ends_at == d.ends_at &&
+        d.starting_amount == Some(b.starting_amount as f64) &&
+        d.minimum_increment_amount == Some(b.minimum_increment_amount as f64))
+}
+
 fn parse_record(raw: &str, scope: &str, artwork_id: &str) -> Result<Record, String> {
     if raw.len() > 64000 { return Err(invalid()); }
     let record: Record = serde_json::from_str(raw).map_err(|_| invalid())?;
@@ -74,16 +120,11 @@ fn parse_record(raw: &str, scope: &str, artwork_id: &str) -> Result<Record, Stri
             return Err(invalid());
         }
         let b: Payload = serde_json::from_str(&p.body).map_err(|_| invalid())?;
-        if !valid_token(&b.tenant_id,3,80) || b.currency != "EUR" ||
-            !(1..=1_000_000_000).contains(&b.starting_amount) ||
-            !(1..=1_000_000_000).contains(&b.minimum_increment_amount) ||
-            !bounded(&b.title,160) || !bounded(&b.description,1500) || !bounded(&b.slug,60) ||
-            !bounded(&b.starts_at,64) || !bounded(&b.ends_at,64) {
-            return Err(invalid());
-        }
+        if !valid_pending_payload(&b) { return Err(invalid()); }
     }
-    // Full preview semantics and canonical body validation remain in preparePreview.
-    // Native storage additionally rejects unknown fields (including credentials).
+    // Native storage checks payload semantics and field allowlists. Exact
+    // serialized body canonicality remains the editor's responsibility.
+    // Do not compare stored schedule with today's clock: reconcile old attempts.
     Ok(record)
 }
 
@@ -134,6 +175,15 @@ fn write(conn: &mut Connection, input: DraftWrite) -> Result<DraftSnapshot,Strin
     let old_pending = old.as_ref().and_then(|r|r.pending.as_ref());
     if old_pending.is_some() && old_pending != next.pending.as_ref() {
         return Err("pending_preview_unresolved".into());
+    }
+    // Bind a first pending request to the reviewed draft at the native IPC
+    // boundary too. Later edits may differ; the original pending body is frozen.
+    if old_pending.is_none() {
+        if let Some(p) = &next.pending {
+            if !pending_matches_draft(p, &next.draft)? {
+                return Err("preview_draft_changed".into());
+            }
+        }
     }
     // A new draft or attempt must still refer to an available local work.
     // Retain existing drafts/pending requests even if the artwork is later sold/deleted.
@@ -206,6 +256,41 @@ mod tests {
         assert_eq!(read(&conn,"a").unwrap(),saved);
         conn.execute("DELETE FROM artworks WHERE id='a'",[]).unwrap();
         assert_eq!(read(&conn,"a").unwrap(),saved);
+    }
+
+    #[test]
+    fn native_rejects_invalid_or_unreviewed_pending_payloads_atomically() {
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().into()).unwrap();
+        let mut conn=db.conn.lock().unwrap();
+        seed(&conn);
+        let initial=read(&conn,"a").unwrap();
+        let draft=write(&mut conn,input(&initial,record(&initial.scope,false))).unwrap();
+        let candidate: serde_json::Value=serde_json::from_str(&record(&draft.scope,true)).unwrap();
+        for (field,value,expected) in [
+            ("slug",json!("Bad--slug"),"invalid_stored_draft"),
+            ("title",json!("  Art"),"invalid_stored_draft"),
+            ("title",json!("Other title"),"preview_draft_changed"),
+            ("startingAmount",json!(2000),"preview_draft_changed"),
+            ("endsAt",json!("2027-01-10T10:00:00.000Z"),"invalid_stored_draft"),
+            ("startsAt",json!("2027-01-02T10:00:60.000Z"),"invalid_stored_draft"),
+            ("startsAt",json!("2027-01-02T10:00:00+00:00"),"invalid_stored_draft"),
+        ] {
+            let mut bad=candidate.clone();
+            let mut body: serde_json::Value=serde_json::from_str(bad["pending"]["body"].as_str().unwrap()).unwrap();
+            body[field]=value;
+            bad["pending"]["body"]=json!(body.to_string());
+            assert_eq!(write(&mut conn,input(&draft,bad.to_string())).unwrap_err(),expected);
+            assert_eq!(read(&conn,"a").unwrap(),draft);
+        }
+        let mut reviewed=candidate;
+        reviewed["draft"]["title"]=json!("\u{feff}Art ");
+        let saved=write(&mut conn,input(&draft,reviewed.to_string())).unwrap();
+        // The original reviewed body must survive subsequent editor changes.
+        reviewed["draft"]["title"]=json!("Edited title");
+        let edited=write(&mut conn,input(&saved,reviewed.to_string())).unwrap();
+        let persisted: serde_json::Value=serde_json::from_str(edited.record_json.as_ref().unwrap()).unwrap();
+        assert_eq!(persisted["pending"],reviewed["pending"]);
     }
 
     #[test]
