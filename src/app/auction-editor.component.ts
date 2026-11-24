@@ -93,7 +93,7 @@ export class AuctionEditorComponent {
       this.refreshForm();
       this.listMode = false;
       this.page = null;
-    } catch (error) { this.error = auctionEditorError(error); }
+    } catch (error) { this.page = null; this.error = auctionEditorError(error); }
     finally { this.cdr.markForCheck(); }
   }
 

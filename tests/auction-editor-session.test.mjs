@@ -112,7 +112,12 @@ test('a management-list selection cannot reopen a different archive after restor
   await assert.rejects(editor.open(artwork, 'previous-archive'), /auction_draft_conflict/);
   assert.equal(editor.view, null);
   assert.equal(editor.busy, false);
+  await assert.rejects(editor.open(artwork, 'archive'), /auction_draft_conflict/);
+  assert.equal(port.records.size, 0);
+  await editor.open(artwork);
+  await editor.save();
+  editor.close();
   await editor.open(artwork, 'archive');
   assert.equal(editor.view.artwork.id, 'a');
-  assert.equal(port.records.size, 0);
+  assert.equal(port.records.size, 1);
 });

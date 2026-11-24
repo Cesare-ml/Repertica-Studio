@@ -46,6 +46,7 @@ export class AuctionEditorSession {
       const snapshot = await this.storage.read(selected.id);
       if (expectedScope !== undefined && snapshot.scope !== expectedScope) throw new Error('auction_draft_conflict');
       const existing = this.storage.decode(snapshot, selected.id);
+      if (expectedScope !== undefined && !existing) throw new Error('auction_draft_conflict');
       const draft = existing?.draft ?? this.storage.newDraft(selected);
       // Never silently truncate a source title into a public-facing title.
       // The original stays visible as artwork.title; the artist must edit the draft.
