@@ -63,3 +63,94 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   if (new TextEncoder().encode(body).length > 8192) throw new Error('payload_too_large');
   return Object.freeze({ artworkId: draft.artworkId, idempotencyKey, body });
 }
+
+/** Explicit offline storage boundary. The caller must supply a stable local archive scope
+ * and a single-writer storage adapter. No default browser storage, network or credentials.
+ * Until wired to native archive storage this is not part of SQLite backups. */
+export interface AuctionDraftStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+export interface StoredAuctionDraft {
+  readonly draft: AuctionDraft;
+  readonly pending: PreparedPreview | null;
+}
+
+function draftStorageKey(scope: string, artworkId: string): string {
+  if (!scope || scope.length > 256 || !artworkId || artworkId.length > 256) {
+    throw new Error('invalid_draft_scope');
+  }
+  return 'repertica.auction-draft.v1:' + JSON.stringify([scope, artworkId]);
+}
+
+function object(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_stored_draft');
+  return value as Record<string, unknown>;
+}
+function stringField(value: unknown, max: number): string {
+  if (typeof value !== 'string' || value.length > max) throw new Error('invalid_stored_draft');
+  return value;
+}
+function draftAmount(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('invalid_stored_draft');
+  return value;
+}
+function projectDraft(value: unknown): AuctionDraft {
+  const d = object(value);
+  // An unfinished draft need not be publishable yet. Persist only editor fields.
+  return { artworkId: stringField(d['artworkId'], 256), title: stringField(d['title'], 160),
+    description: stringField(d['description'], 1500), slug: stringField(d['slug'], 60),
+    startsAt: stringField(d['startsAt'], 64), endsAt: stringField(d['endsAt'], 64),
+    startingAmount: draftAmount(d['startingAmount']), minimumIncrementAmount: draftAmount(d['minimumIncrementAmount']) };
+}
+function restorePending(value: unknown, artworkId: string): PreparedPreview {
+  const p = object(value);
+  const id = stringField(p['artworkId'], 256), key = stringField(p['idempotencyKey'], 96);
+  const body = stringField(p['body'], 8192);
+  if (id !== artworkId) throw new Error('invalid_stored_draft');
+  const payload = object(JSON.parse(body));
+  const draft = projectDraft({ ...payload, artworkId });
+  // Validate against the original start, not today's clock: an already sent request
+  // may need reconciliation after its scheduled start. Never regenerate the key/body.
+  const expected = preparePreview(draft, stringField(payload['tenantId'], 80), key, utc(draft.startsAt));
+  if (expected.body !== body) throw new Error('invalid_stored_draft');
+  return Object.freeze({ artworkId, idempotencyKey: key, body });
+}
+
+export function loadAuctionDraft(storage: AuctionDraftStorage, scope: string, artworkId: string): StoredAuctionDraft | null {
+  const raw = storage.getItem(draftStorageKey(scope, artworkId));
+  if (raw === null) return null;
+  if (raw.length > 64_000) throw new Error('invalid_stored_draft');
+  const record = object(JSON.parse(raw));
+  if (record['version'] !== 1 || record['scope'] !== scope) throw new Error('invalid_stored_draft');
+  const draft = projectDraft(record['draft']);
+  if (draft.artworkId !== artworkId) throw new Error('invalid_stored_draft');
+  const pending = record['pending'] === null ? null : restorePending(record['pending'], artworkId);
+  return { draft, pending };
+}
+
+/** A saved pending request survives editor changes and cannot be replaced before
+ * reconciliation. The caller must not send if setItem throws. No send is performed here. */
+export function saveAuctionDraft(storage: AuctionDraftStorage, scope: string, input: AuctionDraft,
+  attempt?: PreparedPreview): StoredAuctionDraft {
+  const draft = projectDraft(input);
+  const key = draftStorageKey(scope, draft.artworkId);
+  const previous = loadAuctionDraft(storage, scope, draft.artworkId);
+  let pending = previous?.pending ?? null;
+  if (attempt !== undefined) {
+    const candidate = restorePending(attempt, draft.artworkId);
+    if (pending && (pending.body !== candidate.body || pending.idempotencyKey !== candidate.idempotencyKey)) {
+      throw new Error('pending_preview_unresolved');
+    }
+    if (!pending) {
+      const payload = object(JSON.parse(candidate.body));
+      const reviewed = preparePreview(draft, stringField(payload['tenantId'], 80), candidate.idempotencyKey,
+        utc(draft.startsAt));
+      if (reviewed.body !== candidate.body) throw new Error('preview_draft_changed');
+    }
+    pending = candidate;
+  }
+  storage.setItem(key, JSON.stringify({ version: 1, scope, draft, pending }));
+  return { draft, pending };
+}
