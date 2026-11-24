@@ -187,6 +187,10 @@ impl NativeIdentityHttp {
             IdentityProvider::IsolatedHttp(addr) => addr,
         };
         allowed(addr)?;
+        // The updater unifies reqwest with rustls-no-provider. Explicitly select
+        // ring for this test process before building even a loopback HTTP client.
+        // Concurrent tests may have already installed the same default.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = Client::builder()
             .no_proxy().redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never())
             .referer(false).http1_only().connect_timeout(Duration::from_secs(2)).timeout(DEADLINE)

@@ -645,5 +645,6 @@ mod tests {
 #[path = "auction_pkce_fixture.rs"]
 mod fixture_exchange;
 
+#[cfg(test)]
 #[path = "auction_pkce_http.rs"]
 mod native_http;

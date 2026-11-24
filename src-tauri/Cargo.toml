@@ -24,9 +24,6 @@ chrono = { version = "0.4", features = ["serde", "clock"] }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 sha2 = "0.10"
-# Existing locked versions, native Auctions isolated acceptance only.
-reqwest = { version = "0.13.5", default-features = false }
-ring = "0.17.14"
 imap = "2.4.1"
 native-tls = "0.2"
 mailparse = "0.15"
@@ -39,3 +36,7 @@ tauri-plugin-updater = "2"
 
 [dev-dependencies]
 tempfile = "3"
+# Native Auctions HTTP acceptance is compiled only in integration tests.
+reqwest = { version = "0.13.5", default-features = false }
+ring = "0.17.14"
+rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
