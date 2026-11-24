@@ -57,9 +57,24 @@ pub(crate) struct AuthorizationParams<'a> {
 }
 
 
-// Fixed provider contract, not a runtime enablement flag. Never accept an
-// issuer, login path or arbitrary URL from the renderer or a callback.
-const IDENTITY_LOGIN: &str = "https://studio.repertica.com/login";
+// No enabled provider in non-test builds. Native selection only, with no
+// environment, IPC or arbitrary URL override.
+#[derive(Clone, Copy)]
+pub(crate) enum IdentityProvider {
+    Disabled,
+    #[cfg(test)]
+    IsolatedFixture,
+}
+
+impl IdentityProvider {
+    fn login(self) -> Result<&'static str, &'static str> {
+        match self {
+            Self::Disabled => Err("oauth_provider_disabled"),
+            #[cfg(test)]
+            Self::IsolatedFixture => Ok("https://studio.example.test/login"),
+        }
+    }
+}
 
 fn query_component(value: &str) -> String {
     use std::fmt::Write;
@@ -75,7 +90,8 @@ fn query_component(value: &str) -> String {
 }
 
 impl AuthorizationParams<'_> {
-    fn browser_url(&self) -> String {
+    fn browser_url(&self, provider: IdentityProvider) -> Result<String, &'static str> {
+        let login = provider.login()?;
         let fields = [
             ("client_id", self.client_id),
             ("redirect_uri", self.redirect_uri),
@@ -88,7 +104,7 @@ impl AuthorizationParams<'_> {
         let query = fields.iter().map(|(name, value)|
             format!("{name}={}", query_component(value)))
             .collect::<Vec<_>>().join("&");
-        format!("{IDENTITY_LOGIN}?{query}")
+        Ok(format!("{login}?{query}"))
     }
 }
 
@@ -304,12 +320,13 @@ impl LoopbackSession {
     pub(crate) fn open_and_wait(
         self,
         cancelled: &std::sync::atomic::AtomicBool,
+        provider: IdentityProvider,
         open_browser: impl FnOnce(&str) -> Result<(), ()>,
     ) -> Result<TokenExchange, &'static str> {
         use std::{sync::atomic::Ordering, time::Instant};
         if cancelled.load(Ordering::Acquire) { return Err("oauth_cancelled"); }
         if Instant::now() >= self.deadline { return Err("oauth_timeout"); }
-        let url = self.authorization().ok_or("oauth_grant_consumed")?.browser_url();
+        let url = self.authorization().ok_or("oauth_grant_consumed")?.browser_url(provider)?;
         if cancelled.load(Ordering::Acquire) { return Err("oauth_cancelled"); }
         if Instant::now() >= self.deadline { return Err("oauth_timeout"); }
         open_browser(&url).map_err(|_| "oauth_browser_open_failed")?;
@@ -370,15 +387,15 @@ mod tests {
     #[test]
     fn browser_url_pins_provider_and_encodes_exact_grant() {
         let auth = fixture(GrantClient::StudioApi);
-        let url = auth.authorization().unwrap().browser_url();
+        let url = auth.authorization().unwrap().browser_url(IdentityProvider::IsolatedFixture).unwrap();
         assert_eq!(url, format!(
-            "https://studio.repertica.com/login?client_id=repertica-desktop-studio-api&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Frepertica%2Foauth%2Fcallback&state={STATE}&code_challenge={CHALLENGE}&code_challenge_method=S256&response_type=code&scope=artworks%3Acreate%20media%3Awrite"
+            "https://studio.example.test/login?client_id=repertica-desktop-studio-api&redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Frepertica%2Foauth%2Fcallback&state={STATE}&code_challenge={CHALLENGE}&code_challenge_method=S256&response_type=code&scope=artworks%3Acreate%20media%3Awrite"
         ));
         assert!(!url.contains(VERIFIER));
         assert!(!url.contains(CODE));
         assert_eq!(query_component("a&b=#% +é"), "a%26b%3D%23%25%20%2B%C3%A9");
         let auctions = fixture(GrantClient::Auctions);
-        let url = auctions.authorization().unwrap().browser_url();
+        let url = auctions.authorization().unwrap().browser_url(IdentityProvider::IsolatedFixture).unwrap();
         assert!(url.contains("?client_id=repertica-desktop-auctions&"));
         assert!(url.ends_with("&scope=profile"));
     }
@@ -389,8 +406,8 @@ mod tests {
         let session = LoopbackSession::bind(GrantClient::StudioApi, Duration::from_secs(5)).unwrap();
         let addr = session.listener.local_addr().unwrap();
         let state = session.grant.state.clone();
-        let result = session.open_and_wait(&AtomicBool::new(false), |url| {
-            assert!(url.starts_with("https://studio.repertica.com/login?"));
+        let result = session.open_and_wait(&AtomicBool::new(false), IdentityProvider::IsolatedFixture, |url| {
+            assert!(url.starts_with("https://studio.example.test/login?"));
             assert!(url.contains(&format!("state={state}&")));
             let mut stream = TcpStream::connect(addr).unwrap();
             stream.write_all(format!(
@@ -413,7 +430,7 @@ mod tests {
             let session = LoopbackSession::bind(GrantClient::Auctions, timeout).unwrap();
             let addr = session.listener.local_addr().unwrap();
             let mut opened = false;
-            let result = session.open_and_wait(&AtomicBool::new(cancelled), |_| {
+            let result = session.open_and_wait(&AtomicBool::new(cancelled), IdentityProvider::IsolatedFixture, |_| {
                 opened = true;
                 Err(())
             });
@@ -421,6 +438,17 @@ mod tests {
             assert_eq!(opened, expected == "oauth_browser_open_failed");
             assert!(TcpStream::connect(addr).is_err());
         }
+    }
+
+    #[test]
+    fn disabled_provider_never_calls_opener() {
+        use std::{net::TcpStream, sync::atomic::AtomicBool, time::Duration};
+        let session = LoopbackSession::bind(GrantClient::Auctions, Duration::from_secs(5)).unwrap();
+        let addr = session.listener.local_addr().unwrap();
+        assert_eq!(session.open_and_wait(&AtomicBool::new(false), IdentityProvider::Disabled,
+            |_| panic!("disabled provider must never open a browser")).err(),
+            Some("oauth_provider_disabled"));
+        assert!(TcpStream::connect(addr).is_err());
     }
 
     #[test]
