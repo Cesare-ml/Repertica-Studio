@@ -582,6 +582,63 @@ mod tests {
     }
 
     #[test]
+    fn native_reviewed_preparation_only_gets_membership_and_persists_exact_bytes() {
+        use super::resource_http::NativeAuctionsHttp;
+        use rusqlite::{Connection,params};
+        let (listener,addr)=listen();
+        let worker=thread::spawn(move || {
+            let f=fixture();
+            let bearer=f["valid"].as_str().unwrap();
+            for role in ["viewer","owner","owner","owner"] { resource_tenants(&listener,bearer,role); }
+            listener
+        });
+        let mut conn=Connection::open_in_memory().unwrap();
+        let scope=uuid::Uuid::new_v4().to_string();
+        let revision=uuid::Uuid::new_v4().to_string();
+        let raw=json!({"version":1,"scope":scope,"draft":{"artworkId":"a","title":"Art","description":"",
+            "slug":"art","startsAt":"2027-01-15T08:01:40.000Z","endsAt":"2027-01-16T08:01:40.000Z",
+            "startingAmount":1000,"minimumIncrementAmount":100},"pending":null}).to_string();
+        conn.execute_batch("CREATE TABLE auction_archive_scope(singleton INTEGER PRIMARY KEY,scope TEXT NOT NULL);
+            CREATE TABLE auction_drafts(artwork_id TEXT PRIMARY KEY,revision TEXT NOT NULL,record_json TEXT NOT NULL);
+            CREATE TABLE artworks(id TEXT PRIMARY KEY,status TEXT NOT NULL);
+            INSERT INTO artworks VALUES('a','available');").unwrap();
+        conn.execute("INSERT INTO auction_archive_scope VALUES(1,?1)",[&scope]).unwrap();
+        conn.execute("INSERT INTO auction_drafts VALUES('a',?1,?2)",params![revision,raw]).unwrap();
+        fn stored(c: &Connection) -> (String,String) {
+            c.query_row("SELECT revision,record_json FROM auction_drafts",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap()
+        }
+        tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            let altered=RESOURCE_BODY.replace(r#""title":"Art""#,r#""title":"Other""#);
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,&altered,||Ok(NOW)).await.unwrap_err(),"preview_draft_changed");
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW+200)).await.unwrap_err(),"invalid_schedule");
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&uuid::Uuid::new_v4().to_string(),RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_draft_conflict");
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
+            let other=RESOURCE_BODY.replace("tenant-test","tenant-other");
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,&other,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
+            assert_eq!(stored(&conn),(revision.clone(),raw.clone()));
+            conn.execute_batch("CREATE TRIGGER ignore_preview BEFORE UPDATE ON auction_drafts BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_draft_write_failed");
+            assert_eq!(stored(&conn),(revision.clone(),raw.clone()));
+            conn.execute_batch("DROP TRIGGER ignore_preview").unwrap();
+            let next=api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap();
+            let (actual,record)=stored(&conn);
+            assert_ne!(revision,next);
+            assert_eq!(actual,next);
+            let value:Value=serde_json::from_str(&record).unwrap();
+            assert_eq!(value["pending"]["body"],RESOURCE_BODY);
+            assert_eq!(value["pending"]["artworkId"],"a");
+            assert!(uuid::Uuid::parse_str(value["pending"]["idempotencyKey"].as_str().unwrap()).is_ok());
+            assert!(value.get("receipt").is_none());
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&next,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"pending_preview_unresolved");
+            assert_eq!(stored(&conn),(actual,record));
+        });
+        let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
     fn native_resource_post_redirect_never_forwards_bearer_or_body() {
         use super::resource_http::NativeAuctionsHttp;
         let (redirect_target,target)=listen();

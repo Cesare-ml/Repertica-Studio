@@ -11,7 +11,8 @@ mod preview_payload;
 use preview_payload::{parse_canonical_payload, valid_token, valid_slug, utc_millis};
 #[path = "auction_draft_record.rs"]
 mod draft_record;
-use draft_record::{StoredReceipt, reconciliation};
+use draft_record::{StoredReceipt, reconciliation, parse_record, Pending, pending_matches_draft};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 const TENANTS: &str = "/api/studio/tenants";
 const PREVIEWS: &str = "/api/studio/previews";
@@ -90,6 +91,45 @@ fn valid_preview(p: &Preview) -> bool {
         utc_millis(&p.starts_at).zip(utc_millis(&p.ends_at)).is_some_and(|(a,b)| a < b)
 }
 
+// A reviewed local snapshot is never a server confirmation. The native test
+// adapter binds the exact bytes to the selected work, archive and revision.
+fn reviewable_record(conn: &Connection, artwork_id: &str, scope: &str, revision: &str,
+    body: &str) -> Result<String, String> {
+    let conflict = || "auction_draft_conflict".to_string();
+    if !canonical_uuid(scope) || !canonical_uuid(revision) { return Err(conflict()); }
+    let current_scope: String = conn.query_row(
+        "SELECT scope FROM auction_archive_scope WHERE singleton=1", [], |r| r.get(0))
+        .map_err(|_| conflict())?;
+    if current_scope != scope { return Err(conflict()); }
+    let raw: String = conn.query_row(
+        "SELECT record_json FROM auction_drafts WHERE artwork_id=?1 AND revision=?2",
+        params![artwork_id,revision], |r| r.get(0)).optional()
+        .map_err(|_| conflict())?.ok_or_else(conflict)?;
+    let record = parse_record(&raw, scope, artwork_id)?;
+    if record.pending.is_some() { return Err("pending_preview_unresolved".into()); }
+    let status: Option<String> = conn.query_row("SELECT status FROM artworks WHERE id=?1",
+        [artwork_id], |r| r.get(0)).optional().map_err(|_| conflict())?;
+    if status.as_deref() != Some("available") { return Err("artwork_not_available".into()); }
+    let candidate = Pending { artwork_id: artwork_id.into(), idempotency_key: String::new(), body: body.into() };
+    if !pending_matches_draft(&candidate, &record.draft)? { return Err("preview_draft_changed".into()); }
+    Ok(raw)
+}
+
+fn check_new_schedule(body: &str, now: u64) -> Result<(), String> {
+    let payload = parse_canonical_payload(body).map_err(str::to_owned)?;
+    let millis = i64::try_from(now).ok().and_then(|s| s.checked_mul(1000))
+        .ok_or_else(|| "invalid_schedule".to_string())?;
+    if utc_millis(&payload.starts_at).is_none_or(|s| s < millis) {
+        return Err("invalid_schedule".into());
+    }
+    Ok(())
+}
+
+fn eligible_tenant(t: &Tenant) -> bool {
+    t.status == "active" && matches!(t.role.as_str(), "owner" | "editor") &&
+        t.approved == Some(1) && t.artist_slug.is_some()
+}
+
 impl NativeAuctionsHttp {
     pub(super) fn new(addr: SocketAddrV4) -> Result<Self, Failure> {
         allowed(addr)?;
@@ -157,6 +197,57 @@ impl NativeAuctionsHttp {
         Ok(list.auctions)
     }
 
+    // Only the fresh, validated server membership may supply eligible IDs.
+    // No token, private profile or archive is projected into the chooser.
+    pub(super) async fn eligible_tenants(
+        &self, token: &NativeAccessToken, clock: impl Fn() -> Result<u64, Failure>,
+    ) -> Result<Vec<String>, Failure> {
+        let list = self.list_tenants(token, clock).await?;
+        Ok(list.tenants.into_iter().filter(eligible_tenant).map(|t| t.tenant_id).collect())
+    }
+
+    /// Explicit confirmation of the exact public body on a SAVED draft. Native
+    /// generates the key and persists before any future POST. This method
+    /// performs only a membership GET; there is no automatic publication.
+    pub(super) async fn prepare_reviewed_preview(
+        &self, conn: &mut Connection, token: &NativeAccessToken, artwork_id: &str,
+        scope: &str, revision: &str, reviewed_body: &str,
+        clock: impl Fn() -> Result<u64, Failure>,
+    ) -> Result<String, String> {
+        let payload = parse_canonical_payload(reviewed_body).map_err(str::to_owned)?;
+        check_new_schedule(reviewed_body, clock().map_err(str::to_owned)?)?;
+        let original = reviewable_record(conn, artwork_id, scope, revision, reviewed_body)?;
+        let eligible = self.eligible_tenants(token, &clock).await.map_err(str::to_owned)?;
+        if !eligible.contains(&payload.tenant_id) { return Err("auction_access_denied".into()); }
+        let now = clock().map_err(str::to_owned)?;
+        token.bearer_for(GrantClient::Auctions, now).map_err(str::to_owned)?;
+        check_new_schedule(reviewed_body, now)?;
+        let failed = || "auction_draft_write_failed".to_string();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(|_| failed())?;
+        let current = reviewable_record(&tx, artwork_id, scope, revision, reviewed_body)?;
+        if current != original { return Err("auction_draft_conflict".into()); }
+        let key = uuid::Uuid::new_v4().to_string();
+        let mut value: serde_json::Value = serde_json::from_str(&current).map_err(|_| failed())?;
+        value["pending"] = serde_json::json!({"artworkId":artwork_id,"idempotencyKey":key,"body":reviewed_body});
+        let raw = serde_json::to_string(&value).map_err(|_| failed())?;
+        parse_record(&raw, scope, artwork_id)?;
+        let next_revision = uuid::Uuid::new_v4().to_string();
+        let count = tx.execute(
+            "UPDATE auction_drafts SET revision=?1,record_json=?2 WHERE artwork_id=?3 AND revision=?4 AND record_json=?5",
+            params![next_revision,raw,artwork_id,revision,current]).map_err(|_| failed())?;
+        if count != 1 { return Err(failed()); }
+        let saved = reconciliation::load(&tx, artwork_id, scope, &next_revision)?;
+        if saved.pending.idempotency_key != key || saved.pending.body != reviewed_body || saved.receipt.is_some() {
+            return Err(failed());
+        }
+        // Detect a trigger that silently rewrites even a valid non-pending field.
+        let actual: String = tx.query_row("SELECT record_json FROM auction_drafts WHERE artwork_id=?1",
+            [artwork_id], |r| r.get(0)).map_err(|_| failed())?;
+        if actual != raw { return Err(failed()); }
+        tx.commit().map_err(|_| failed())?;
+        Ok(next_revision)
+    }
+
     /// Explicit reconciliation of one previously saved request in isolated tests.
     /// No automatic send, no IPC, no archive-wide synchronization. A rejected
     /// or lost response leaves the exact pending attempt untouched.
@@ -190,7 +281,7 @@ impl NativeAuctionsHttp {
         // independently authorizes POST after this fresh membership check.
         let tenants = self.tenants_until(token, &clock, deadline).await?;
         let tenant = tenants.tenants.iter().find(|t| t.tenant_id == payload.tenant_id)
-            .filter(|t| t.status == "active" && matches!(t.role.as_str(),"owner" | "editor") && t.approved == Some(1))
+            .filter(|t| eligible_tenant(t))
             .ok_or("auction_access_denied")?;
         let artist = tenant.artist_slug.as_ref().ok_or("auction_access_denied")?;
         let expected_slug = format!("{artist}--{}",payload.slug);
