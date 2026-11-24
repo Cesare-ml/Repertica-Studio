@@ -9,6 +9,9 @@ use std::{net::SocketAddrV4, time::Instant};
 #[path = "auction_preview_payload.rs"]
 mod preview_payload;
 use preview_payload::{parse_canonical_payload, valid_token, valid_slug, utc_millis};
+#[path = "auction_draft_record.rs"]
+mod draft_record;
+use draft_record::{StoredReceipt, reconciliation};
 
 const TENANTS: &str = "/api/studio/tenants";
 const PREVIEWS: &str = "/api/studio/previews";
@@ -152,6 +155,25 @@ impl NativeAuctionsHttp {
         }
         // Read-only view: never creates a local sale or enables bidding.
         Ok(list.auctions)
+    }
+
+    /// Explicit reconciliation of one previously saved request in isolated tests.
+    /// No automatic send, no IPC, no archive-wide synchronization. A rejected
+    /// or lost response leaves the exact pending attempt untouched.
+    pub(super) async fn reconcile_preview(
+        &self, conn: &mut rusqlite::Connection, token: &NativeAccessToken,
+        artwork_id: &str, scope: &str, revision: &str,
+        clock: impl Fn() -> Result<u64, Failure>,
+    ) -> Result<StoredReceipt, String> {
+        let attempt = reconciliation::load(conn, artwork_id, scope, revision)?;
+        if let Some(receipt) = &attempt.receipt { return Ok(receipt.clone()); }
+        let payload = parse_canonical_payload(&attempt.pending.body).map_err(str::to_owned)?;
+        let response = self.create_preview(token, &attempt.pending.idempotency_key, &attempt.pending.body, clock)
+            .await.map_err(str::to_owned)?;
+        let receipt = StoredReceipt { tenant_id: payload.tenant_id,
+            idempotency_key: attempt.pending.idempotency_key.clone(), auction_id: response.auction_id,
+            slug: response.slug };
+        reconciliation::persist(conn, &attempt, &receipt)
     }
 
     /// The future native caller must supply the exact key and body from a successfully

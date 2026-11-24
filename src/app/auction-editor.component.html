@@ -9,7 +9,10 @@
   <p *ngIf="notice" role="status">{{ tr(notice) }}</p>
   <ng-container *ngIf="form as fields">
     <p class="work"><strong>{{ tr('Opera selezionata') }}:</strong> {{ view?.artwork?.title }}</p>
-    <p *ngIf="view?.pending" class="pending" role="status">{{ tr('Richiesta precedente da verificare. Il contenuto e la chiave originali restano invariati; nessun reinvio automatico.') }}</p>
+    <p *ngIf="view?.pending && !view?.receipt" class="pending" role="status">{{ tr('Richiesta precedente da verificare. Il contenuto e la chiave originali restano invariati; nessun reinvio automatico.') }}</p>
+    <p *ngIf="view?.receipt as receipt" class="pending" role="status">
+      {{ receiptLabel }}: <strong>{{ receipt.slug }}</strong> ({{ receipt.auctionId }})
+    </p>
     <fieldset [disabled]="busy">
       <legend>{{ tr('Dati dell’anteprima non vincolante') }}</legend>
       <label class="wide">{{ tr('Titolo pubblico') }}<input [(ngModel)]="fields.title" maxlength="160"></label>

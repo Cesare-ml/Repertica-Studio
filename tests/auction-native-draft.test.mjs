@@ -43,3 +43,25 @@ test('an empty snapshot is bound to the selected artwork too', async () => {
   await assert.rejects(saveNativeAuctionDraft(native,loaded,{...draft,artworkId:'b'}),/invalid_stored_draft/);
   assert.equal((await native.read('a')).revision,null);
 });
+
+test('native receipt is read-only in editor saves, bound to the pending tenant and key', async () => {
+  const native=port(), loaded=await native.read('a');
+  const saved=await saveNativeAuctionDraft(native,loaded,draft,pending);
+  const receipt={tenantId:'tenant-test',idempotencyKey:pending.idempotencyKey,
+    auctionId:'4c2a24d0-bf50-410a-b0f2-1c0b3c96e9a0',slug:'artist--art'};
+  const record=JSON.parse(saved.recordJson);
+  const confirmed=await native.write({artworkId:'a',scope:saved.scope,expectedRevision:saved.revision,
+    recordJson:JSON.stringify({...record,receipt})});
+  assert.deepEqual(decodeNativeDraft(confirmed,'a').receipt,receipt);
+  const edited=await saveNativeAuctionDraft(native,confirmed,{...draft,title:'Local edit'});
+  assert.deepEqual(decodeNativeDraft(edited,'a').receipt,receipt);
+  assert.deepEqual(decodeNativeDraft(edited,'a').pending,pending);
+  for (const bad of [
+    {...receipt,tenantId:'another-tenant'}, {...receipt,idempotencyKey:'another-preview-key'},
+    {...receipt,auctionId:'not-a-uuid'}, {...receipt,slug:'artist--other'},
+    {...receipt,accessToken:'never persist'}
+  ]) {
+    assert.throws(()=>decodeNativeDraft({...confirmed,recordJson:JSON.stringify({...record,receipt:bad})},'a'),/invalid_stored_draft/);
+  }
+  assert.throws(()=>decodeNativeDraft({...confirmed,recordJson:JSON.stringify({...record,pending:null,receipt})},'a'),/invalid_stored_draft/);
+});

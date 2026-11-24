@@ -528,6 +528,60 @@ mod tests {
     }
 
     #[test]
+    fn native_reconciliation_reuses_saved_bytes_and_keeps_receipt_after_reopen() {
+        use super::resource_http::NativeAuctionsHttp;
+        use rusqlite::{Connection,params};
+        let (listener,addr)=listen();
+        let worker=thread::spawn(move || {
+            let f=fixture();
+            let bearer=f["valid"].as_str().unwrap();
+            // First response is unsafe, second is a successful idempotent replay.
+            for (status,body) in [("201 Created",receipt(false,true)),("200 OK",receipt(true,false))] {
+                resource_tenants(&listener,bearer,"owner");
+                let mut s=accept(&listener);
+                assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY)).as_slice(),RESOURCE_BODY.as_bytes());
+                reply(&mut s,status,&body);
+            }
+            listener
+        });
+        let dir=tempfile::tempdir().unwrap();
+        let file=dir.path().join("isolated-preview.sqlite");
+        let scope=uuid::Uuid::new_v4().to_string();
+        let revision=uuid::Uuid::new_v4().to_string();
+        let raw=json!({"version":1,"scope":scope,"draft":{"artworkId":"a","title":"Art","description":"",
+            "slug":"art","startsAt":"2027-01-15T08:01:40.000Z","endsAt":"2027-01-16T08:01:40.000Z",
+            "startingAmount":1000,"minimumIncrementAmount":100},
+            "pending":{"artworkId":"a","idempotencyKey":RESOURCE_KEY,"body":RESOURCE_BODY}}).to_string();
+        let mut conn=Connection::open(&file).unwrap();
+        conn.execute_batch("CREATE TABLE auction_archive_scope(singleton INTEGER PRIMARY KEY,scope TEXT NOT NULL);
+            CREATE TABLE auction_drafts(artwork_id TEXT PRIMARY KEY,revision TEXT NOT NULL,record_json TEXT NOT NULL);").unwrap();
+        conn.execute("INSERT INTO auction_archive_scope VALUES(1,?1)",[&scope]).unwrap();
+        conn.execute("INSERT INTO auction_drafts VALUES('a',?1,?2)",params![revision,raw]).unwrap();
+        let confirmed=tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            assert!(api.reconcile_preview(&mut conn,&token,"a",&uuid::Uuid::new_v4().to_string(),&revision,||Ok(NOW)).await.is_err());
+            assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&revision,||Ok(NOW)).await.unwrap_err(),"auction_invalid_response");
+            assert_eq!(conn.query_row("SELECT record_json FROM auction_drafts",[],|r|r.get::<_,String>(0)).unwrap(),raw);
+            api.reconcile_preview(&mut conn,&token,"a",&scope,&revision,||Ok(NOW+200)).await.unwrap()
+        });
+        drop(conn);
+        let mut conn=Connection::open(&file).unwrap();
+        let (new_revision, stored):(String,String)=conn.query_row("SELECT revision,record_json FROM auction_drafts",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_ne!(revision,new_revision);
+        let value:Value=serde_json::from_str(&stored).unwrap();
+        assert_eq!(value["pending"]["body"],RESOURCE_BODY);
+        assert_eq!(value["receipt"]["auctionId"],RESOURCE_ID);
+        tauri::async_runtime::block_on(async {
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            let token=verified_resource_token();
+            assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&new_revision,||Ok(NOW)).await.unwrap(),confirmed);
+        });
+        let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
     fn native_resource_post_redirect_never_forwards_bearer_or_body() {
         use super::resource_http::NativeAuctionsHttp;
         let (redirect_target,target)=listen();

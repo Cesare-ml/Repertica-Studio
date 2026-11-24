@@ -24,6 +24,15 @@ export class AuctionEditorComponent {
   constructor(private readonly cdr: ChangeDetectorRef) {}
 
   tr(key: string): string { return translate(key, this.language); }
+  get receiptLabel(): string {
+    return ({
+      it: 'Ricevuta locale dell’anteprima non vincolante (nessuna offerta o vendita)',
+      en: 'Local non-binding preview receipt (no bid or sale)',
+      es: 'Recibo local de vista previa no vinculante (sin puja ni venta)',
+      fr: 'Reçu local de l’aperçu non contraignant (ni enchère ni vente)',
+      de: 'Lokaler Beleg der unverbindlichen Vorschau (kein Gebot oder Verkauf)'
+    })[this.language];
+  }
   get view() { return this.editor.view; }
   get busy(): boolean { return this.editor.busy; }
   get dirty(): boolean {

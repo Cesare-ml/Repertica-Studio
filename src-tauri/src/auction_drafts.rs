@@ -7,7 +7,10 @@ use uuid::Uuid;
 
 #[path = "auction_preview_payload.rs"]
 mod preview_payload;
-use preview_payload::{bounded, editor_trim, parse_canonical_payload, valid_token};
+use preview_payload::bounded;
+#[path = "auction_draft_record.rs"]
+mod draft_record;
+use draft_record::{invalid, parse_record, pending_matches_draft};
 #[cfg(test)]
 use preview_payload::Payload;
 
@@ -29,73 +32,8 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
-fn invalid() -> String { "invalid_stored_draft".into() }
 fn valid_id(s: &str) -> bool { !s.is_empty() && bounded(s, 256) && !s.chars().any(char::is_control) }
 
-// Option normally accepts an absent field as None in serde. The editor's
-// stored format requires explicit null for nullable fields, not omission.
-fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer)
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Draft {
-    artwork_id: String, title: String, description: String, slug: String,
-    starts_at: String, ends_at: String,
-    #[serde(deserialize_with = "required_nullable")]
-    starting_amount: Option<f64>,
-    #[serde(deserialize_with = "required_nullable")]
-    minimum_increment_amount: Option<f64>,
-}
-
-#[derive(Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Pending {
-    artwork_id: String, idempotency_key: String, body: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Record {
-    version: u8, scope: String, draft: Draft,
-    #[serde(deserialize_with = "required_nullable")]
-    pending: Option<Pending>,
-}
-
-fn pending_matches_draft(p: &Pending, d: &Draft) -> Result<bool, String> {
-    let b = parse_canonical_payload(&p.body).map_err(|_| invalid())?;
-    Ok(b.title == editor_trim(&d.title) && b.description == editor_trim(&d.description) &&
-        b.slug == d.slug && b.starts_at == d.starts_at && b.ends_at == d.ends_at &&
-        d.starting_amount == Some(b.starting_amount as f64) &&
-        d.minimum_increment_amount == Some(b.minimum_increment_amount as f64))
-}
-
-fn parse_record(raw: &str, scope: &str, artwork_id: &str) -> Result<Record, String> {
-    if raw.len() > 64000 { return Err(invalid()); }
-    let record: Record = serde_json::from_str(raw).map_err(|_| invalid())?;
-    let d = &record.draft;
-    if record.version != 1 || record.scope != scope || d.artwork_id != artwork_id ||
-        !bounded(&d.title,160) || !bounded(&d.description,1500) || !bounded(&d.slug,60) ||
-        !bounded(&d.starts_at,64) || !bounded(&d.ends_at,64) ||
-        [d.starting_amount,d.minimum_increment_amount].into_iter().flatten().any(|n| !n.is_finite()) {
-        return Err(invalid());
-    }
-    if let Some(p) = &record.pending {
-        if p.artwork_id != artwork_id || !valid_token(&p.idempotency_key,16,96) || p.body.len()>8192 {
-            return Err(invalid());
-        }
-        parse_canonical_payload(&p.body).map_err(|_| invalid())?;
-    }
-    // Keep the exact same public-field order and compact JSON as preparePreview.
-    // A native write must not persist a body the editor cannot reopen.
-    // Do not compare stored schedule with today's clock: reconcile old attempts.
-    Ok(record)
-}
 
 fn scope(conn: &Connection) -> Result<String,String> {
     let value: String = conn.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",
@@ -141,6 +79,9 @@ fn write(conn: &mut Connection, input: DraftWrite) -> Result<DraftSnapshot,Strin
     }
     let next = parse_record(&input.record_json,&input.scope,&input.artwork_id)?;
     let old = previous.record_json.as_deref().map(|raw|parse_record(raw,&input.scope,&input.artwork_id)).transpose()?;
+    if old.as_ref().and_then(|r|r.receipt.as_ref()) != next.receipt.as_ref() {
+        return Err("auction_receipt_read_only".into());
+    }
     let old_pending = old.as_ref().and_then(|r|r.pending.as_ref());
     if old_pending.is_some() && old_pending != next.pending.as_ref() {
         return Err("pending_preview_unresolved".into());
@@ -320,6 +261,48 @@ mod tests {
             tx.rollback().unwrap();
             assert_eq!(read(&conn,"a").unwrap(),saved);
         }
+    }
+
+    #[test]
+    fn receipt_is_native_only_and_survives_restore_without_creating_a_sale() {
+        use draft_record::{StoredReceipt,reconciliation};
+        let dir=tempfile::tempdir().unwrap();
+        let dest=dir.path().join("backups");
+        std::fs::create_dir(&dest).unwrap();
+        let db=crate::db::open(dir.path().join("live")).unwrap();
+        let saved={
+            let mut conn=db.conn.lock().unwrap();
+            seed(&conn);
+            let initial=read(&conn,"a").unwrap();
+            let pending=write(&mut conn,input(&initial,record(&initial.scope,true))).unwrap();
+            let receipt=StoredReceipt {tenant_id:"tenant-test".into(),idempotency_key:"preview-0123456789".into(),
+                auction_id:"4c2a24d0-bf50-410a-b0f2-1c0b3c96e9a0".into(),slug:"artist--art".into()};
+            let mut forged: serde_json::Value=serde_json::from_str(pending.record_json.as_ref().unwrap()).unwrap();
+            forged["receipt"]=json!(receipt);
+            assert_eq!(write(&mut conn,input(&pending,forged.to_string())).unwrap_err(),"auction_receipt_read_only");
+            let attempt=reconciliation::load(&conn,"a",&pending.scope,pending.revision.as_deref().unwrap()).unwrap();
+            let mut wrong=receipt.clone();
+            wrong.tenant_id="wrong-tenant".into();
+            assert!(reconciliation::persist(&mut conn,&attempt,&wrong).is_err());
+            assert_eq!(read(&conn,"a").unwrap(),pending);
+            // An ignored update cannot be mistaken for a confirmed receipt.
+            conn.execute_batch("CREATE TEMP TRIGGER ignore_auction_receipt BEFORE UPDATE ON auction_drafts BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+            assert!(reconciliation::persist(&mut conn,&attempt,&receipt).is_err());
+            assert_eq!(read(&conn,"a").unwrap(),pending);
+            conn.execute_batch("DROP TRIGGER ignore_auction_receipt").unwrap();
+            assert_eq!(reconciliation::persist(&mut conn,&attempt,&receipt).unwrap(),receipt);
+            assert!(reconciliation::persist(&mut conn,&attempt,&receipt).is_err()); // stale revision
+            let confirmed=read(&conn,"a").unwrap();
+            let current=reconciliation::load(&conn,"a",&confirmed.scope,confirmed.revision.as_deref().unwrap()).unwrap();
+            assert_eq!(reconciliation::persist(&mut conn,&current,&receipt).unwrap(),receipt);
+            assert_eq!(read(&conn,"a").unwrap(),confirmed); // exact duplicate: no new revision
+            assert_eq!(write(&mut conn,input(&confirmed,record(&confirmed.scope,true))).unwrap_err(),"auction_receipt_read_only");
+            assert_eq!(conn.query_row("SELECT count(*) FROM sales",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+            confirmed
+        };
+        let backup=crate::backup::create_backup_core(&db,&dest).unwrap();
+        crate::backup::restore_backup_core(&db,std::path::Path::new(&backup.directory)).unwrap();
+        assert_eq!(read(&db.conn.lock().unwrap(),"a").unwrap(),saved);
     }
 
     #[test]

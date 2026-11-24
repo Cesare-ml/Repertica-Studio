@@ -71,9 +71,16 @@ export interface AuctionDraftStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 }
+export interface StoredPreviewReceipt {
+  readonly tenantId: string;
+  readonly idempotencyKey: string;
+  readonly auctionId: string;
+  readonly slug: string;
+}
 export interface StoredAuctionDraft {
   readonly draft: AuctionDraft;
   readonly pending: PreparedPreview | null;
+  readonly receipt?: StoredPreviewReceipt;
 }
 
 function draftStorageKey(scope: string, artworkId: string): string {
@@ -118,6 +125,22 @@ function restorePending(value: unknown, artworkId: string): PreparedPreview {
   return Object.freeze({ artworkId, idempotencyKey: key, body });
 }
 
+function restoreReceipt(value: unknown, pending: PreparedPreview | null): StoredPreviewReceipt {
+  const r = object(value);
+  if (!pending || Object.keys(r).sort().join(',') !== 'auctionId,idempotencyKey,slug,tenantId') {
+    throw new Error('invalid_stored_draft');
+  }
+  const payload = object(JSON.parse(pending.body));
+  const tenantId = stringField(r['tenantId'], 80), idempotencyKey = stringField(r['idempotencyKey'], 96);
+  const auctionId = stringField(r['auctionId'], 36), slug = stringField(r['slug'], 122);
+  const [artist, work, ...extra] = slug.split('--');
+  if (tenantId !== payload['tenantId'] || idempotencyKey !== pending.idempotencyKey ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(auctionId) ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(artist) || artist.length > 60 ||
+      work !== payload['slug'] || extra.length) throw new Error('invalid_stored_draft');
+  return Object.freeze({ tenantId, idempotencyKey, auctionId, slug });
+}
+
 export function loadAuctionDraft(storage: AuctionDraftStorage, scope: string, artworkId: string): StoredAuctionDraft | null {
   const raw = storage.getItem(draftStorageKey(scope, artworkId));
   if (raw === null) return null;
@@ -127,7 +150,8 @@ export function loadAuctionDraft(storage: AuctionDraftStorage, scope: string, ar
   const draft = projectDraft(record['draft']);
   if (draft.artworkId !== artworkId) throw new Error('invalid_stored_draft');
   const pending = record['pending'] === null ? null : restorePending(record['pending'], artworkId);
-  return { draft, pending };
+  const receipt = record['receipt'] == null ? undefined : restoreReceipt(record['receipt'], pending);
+  return { draft, pending, ...(receipt ? { receipt } : {}) };
 }
 
 /** A saved pending request survives editor changes and cannot be replaced before
@@ -151,8 +175,9 @@ export function saveAuctionDraft(storage: AuctionDraftStorage, scope: string, in
     }
     pending = candidate;
   }
-  storage.setItem(key, JSON.stringify({ version: 1, scope, draft, pending }));
-  return { draft, pending };
+  const receipt = previous?.receipt;
+  storage.setItem(key, JSON.stringify({ version: 1, scope, draft, pending, ...(receipt ? { receipt } : {}) }));
+  return { draft, pending, ...(receipt ? { receipt } : {}) };
 }
 
 

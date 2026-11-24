@@ -1,4 +1,4 @@
-import type { AuctionDraft, NativeDraftSnapshot, PreparedPreview, StoredAuctionDraft } from './auction-preview';
+import type { AuctionDraft, NativeDraftSnapshot, PreparedPreview, StoredAuctionDraft, StoredPreviewReceipt } from './auction-preview';
 
 export type SelectedAuctionArtwork = Readonly<{ id: string; title: string; status: string }>;
 export interface AuctionEditorStorage {
@@ -13,6 +13,7 @@ interface Session {
   snapshot: NativeDraftSnapshot;
   draft: AuctionDraft;
   pending: PreparedPreview | null;
+  receipt?: StoredPreviewReceipt;
   dirty: boolean;
 }
 
@@ -28,7 +29,7 @@ export class AuctionEditorSession {
   get view() {
     const s = this.session;
     return s && { artwork: { ...s.artwork }, draft: { ...s.draft },
-      pending: s.pending ? { ...s.pending } : null, dirty: s.dirty,
+      pending: s.pending ? { ...s.pending } : null, receipt: s.receipt ? { ...s.receipt } : undefined, dirty: s.dirty,
       saved: s.snapshot.revision !== null };
   }
 
@@ -49,7 +50,7 @@ export class AuctionEditorSession {
       // The original stays visible as artwork.title; the artist must edit the draft.
       if (!existing && draft.title.length > 160) draft.title = '';
       this.session = { artwork: selected, snapshot, draft: { ...draft },
-        pending: existing?.pending ?? null, dirty: false };
+        pending: existing?.pending ?? null, receipt: existing?.receipt, dirty: false };
     } finally { this.inFlight = false; }
   }
 
@@ -77,11 +78,12 @@ export class AuctionEditorSession {
       const decoded = this.storage.decode(saved, s.artwork.id);
       if (!decoded || saved.scope !== s.snapshot.scope || !saved.revision ||
           decoded.pending?.body !== s.pending?.body ||
-          decoded.pending?.idempotencyKey !== s.pending?.idempotencyKey) {
+          decoded.pending?.idempotencyKey !== s.pending?.idempotencyKey ||
+          JSON.stringify(decoded.receipt) !== JSON.stringify(s.receipt)) {
         throw new Error('auction_draft_write_failed');
       }
       this.session = { ...s, snapshot: saved, draft: { ...decoded.draft },
-        pending: decoded.pending, dirty: false };
+        pending: decoded.pending, receipt: decoded.receipt, dirty: false };
     } finally { this.inFlight = false; }
   }
 
