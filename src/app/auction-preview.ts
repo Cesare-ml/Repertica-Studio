@@ -159,6 +159,7 @@ export function saveAuctionDraft(storage: AuctionDraftStorage, scope: string, in
 /** Async native bridge: the read provides both archive identity and CAS revision.
  * No browser storage and no retry of a stale write. A successful save is NOT publication. */
 export interface NativeDraftSnapshot {
+  readonly artworkId: string;
   readonly scope: string;
   readonly revision: string | null;
   readonly recordJson: string | null;
@@ -169,7 +170,7 @@ export interface NativeDraftPort {
 }
 
 export function decodeNativeDraft(snapshot: NativeDraftSnapshot, artworkId: string): StoredAuctionDraft | null {
-  if ((snapshot.revision === null) !== (snapshot.recordJson === null)) throw new Error('invalid_stored_draft');
+  if (snapshot.artworkId !== artworkId || (snapshot.revision === null) !== (snapshot.recordJson === null)) throw new Error('invalid_stored_draft');
   return loadAuctionDraft({ getItem: () => snapshot.recordJson, setItem: () => { throw new Error('read_only'); } },
     snapshot.scope, artworkId);
 }
@@ -185,7 +186,7 @@ export async function saveNativeAuctionDraft(port: NativeDraftPort, snapshot: Na
   if (recordJson === null) throw new Error('invalid_stored_draft');
   const saved = await port.write({ artworkId: input.artworkId, scope: snapshot.scope,
     expectedRevision: snapshot.revision, recordJson });
-  if (saved.scope !== snapshot.scope || saved.recordJson !== recordJson || !saved.revision) {
+  if (saved.artworkId !== input.artworkId || saved.scope !== snapshot.scope || saved.recordJson !== recordJson || !saved.revision) {
     throw new Error('auction_draft_write_failed');
   }
   return saved;

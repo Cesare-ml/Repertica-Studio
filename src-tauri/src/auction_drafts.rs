@@ -97,7 +97,7 @@ fn scope(conn: &Connection) -> Result<String,String> {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftSnapshot {
-    scope: String, revision: Option<String>, record_json: Option<String>,
+    artwork_id: String, scope: String, revision: Option<String>, record_json: Option<String>,
 }
 
 fn read(conn: &Connection, artwork_id: &str) -> Result<DraftSnapshot,String> {
@@ -114,7 +114,7 @@ fn read(conn: &Connection, artwork_id: &str) -> Result<DraftSnapshot,String> {
         },
         None => (None,None),
     };
-    Ok(DraftSnapshot {scope,revision,record_json})
+    Ok(DraftSnapshot {artwork_id:artwork_id.into(),scope,revision,record_json})
 }
 
 #[derive(Deserialize)]
