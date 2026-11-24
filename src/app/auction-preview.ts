@@ -39,15 +39,10 @@ function cents(value: number | null): number {
   return value;
 }
 
-/** Call only after the user reviews the public fields and chooses a tenant.
- * Persist the returned body + key before attempting a request; retries must reuse both.
- * A changed payload is a new attempt, not a retry. Never queue automatic publication.
- */
-export function preparePreview(draft: AuctionDraft, tenantId: string, idempotencyKey: string,
-  now: number = Date.now()): PreparedPreview {
+/** Exact public fields, independent of login or a chosen organization.
+ * A local review is not a pending request, key, or consent to send. */
+export function publicPreviewFields(draft: AuctionDraft, now: number = Date.now()) {
   if (!draft.artworkId) throw new Error('artwork_not_selected');
-  if (!/^[A-Za-z0-9_-]{3,80}$/.test(tenantId)) throw new Error('invalid_tenant');
-  if (!/^[A-Za-z0-9_-]{16,96}$/.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(draft.slug) || draft.slug.length > 60) throw new Error('invalid_slug');
   if (draft.title.trim().length < 3 || draft.title.length > 160) throw new Error('invalid_title');
   if (draft.description.length > 1500) throw new Error('invalid_description');
@@ -55,11 +50,22 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   if (!Number.isFinite(now) || start < now || end <= start || end - start > 7 * 86_400_000) {
     throw new Error('invalid_schedule');
   }
-  // Explicit allowlist: never spread the draft or the artwork into a network payload.
-  const body = JSON.stringify({ tenantId, slug: draft.slug, title: draft.title.trim(),
+  return Object.freeze({ slug: draft.slug, title: draft.title.trim(),
     description: draft.description.trim(), startsAt: draft.startsAt, endsAt: draft.endsAt,
     startingAmount: cents(draft.startingAmount), minimumIncrementAmount: cents(draft.minimumIncrementAmount),
-    currency: 'EUR' });
+    currency: 'EUR' as const });
+}
+
+/** Call only after the user reviews the public fields and chooses a tenant.
+ * Persist the returned body + key before attempting a request; retries must reuse both.
+ * A changed payload is a new attempt, not a retry. Never queue automatic publication.
+ */
+export function preparePreview(draft: AuctionDraft, tenantId: string, idempotencyKey: string,
+  now: number = Date.now()): PreparedPreview {
+  if (!/^[A-Za-z0-9_-]{3,80}$/.test(tenantId)) throw new Error('invalid_tenant');
+  if (!/^[A-Za-z0-9_-]{16,96}$/.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
+  // Explicit allowlist: never spread the draft or the artwork into a network payload.
+  const body = JSON.stringify({ tenantId, ...publicPreviewFields(draft, now) });
   if (new TextEncoder().encode(body).length > 8192) throw new Error('payload_too_large');
   return Object.freeze({ artworkId: draft.artworkId, idempotencyKey, body });
 }

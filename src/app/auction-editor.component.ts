@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { translate, type AppLanguage } from './i18n';
 import { createNativeAuctionEditor, listNativeAuctionDrafts, type AuctionDraftPage, type AuctionDraftSummary } from './auction-native-api';
 import type { SelectedAuctionArtwork } from './auction-editor-session';
+import { publicPreviewFields } from './auction-preview';
 import { auctionDraftEdits, auctionEditorError, fieldsFromAuctionDraft, type AuctionEditorFields } from './auction-editor-fields';
 
 @Component({
@@ -23,6 +24,8 @@ export class AuctionEditorComponent {
   listMode = false;
   page: AuctionDraftPage | null = null;
   private listLoading = false;
+  private reviewed: ReturnType<typeof publicPreviewFields> | null = null;
+  reviewError = false;
 
   constructor(private readonly cdr: ChangeDetectorRef) {}
 
@@ -53,6 +56,35 @@ export class AuctionEditorComponent {
       de: { manage: 'Auktionsentwürfe und Vorschauen', empty: 'Keine lokalen Entwürfe.', draft: 'Lokaler Entwurf', pending: 'Abgleich erforderlich', receipt: 'Lokaler Beleg', missing: 'Werk nicht mehr vorhanden', next: 'Nächste Seite', refresh: 'Erste Seite / aktualisieren', original: 'Ursprüngliche Daten der gespeicherten Anfrage', tenant: 'Organisation' }
     };
     return labels[this.language][key];
+  }
+
+  reviewLabel(key: 'review' | 'invalid' | 'localOnly'): string {
+    return ({
+      it: { review: 'Rivedi i dati pubblici', invalid: 'Completa titolo, identificativo, date future UTC e importi positivi. La durata massima è 7 giorni.', localOnly: 'Solo revisione locale. Nessuna organizzazione selezionata, nessuna richiesta preparata o inviata. La connessione non è ancora abilitata.' },
+      en: { review: 'Review public details', invalid: 'Complete the title, URL identifier, future UTC dates and positive amounts. Maximum duration is 7 days.', localOnly: 'Local review only. No organization selected, no request prepared or sent. Connection is not enabled yet.' },
+      es: { review: 'Revisar datos públicos', invalid: 'Completa título, identificador, fechas futuras UTC e importes positivos. Duración máxima: 7 días.', localOnly: 'Solo revisión local. Ninguna organización seleccionada ni solicitud preparada o enviada. La conexión aún no está habilitada.' },
+      fr: { review: 'Vérifier les données publiques', invalid: 'Complétez le titre, l’identifiant, les dates UTC futures et les montants positifs. Durée maximale : 7 jours.', localOnly: 'Vérification locale uniquement. Aucune organisation sélectionnée, aucune demande préparée ou envoyée. La connexion n’est pas encore activée.' },
+      de: { review: 'Öffentliche Angaben prüfen', invalid: 'Titel, URL-Kennung, zukünftige UTC-Daten und positive Beträge ausfüllen. Höchstdauer: 7 Tage.', localOnly: 'Nur lokale Prüfung. Keine Organisation ausgewählt, keine Anfrage vorbereitet oder gesendet. Verbindung noch nicht aktiviert.' }
+    })[this.language][key];
+  }
+
+  get canReview(): boolean {
+    const v = this.view;
+    return !!v?.saved && !v.pending && v.artwork.status === 'available' && !this.dirty && !this.busy;
+  }
+  get reviewedDetails() { return this.canReview ? this.reviewed : null; }
+
+  reviewPublicDetails(): void {
+    if (!this.canReview) return;
+    this.reviewed = null;
+    this.reviewError = false;
+    try { this.reviewed = publicPreviewFields(this.view!.draft); }
+    catch { this.reviewError = true; }
+  }
+
+  invalidateReview(): void {
+    this.reviewed = null;
+    this.reviewError = false;
   }
 
   get pendingDetails(): { tenantId: string; title: string; description: string; slug: string;
@@ -98,6 +130,7 @@ export class AuctionEditorComponent {
   }
 
   private refreshForm(): void {
+    this.invalidateReview();
     const view = this.editor.view;
     this.form = view ? fieldsFromAuctionDraft(view.draft) : null;
     this.baseline = this.form ? JSON.stringify(this.form) : '';
@@ -136,6 +169,7 @@ export class AuctionEditorComponent {
   close(discard = false): void {
     if (this.busy || (this.dirty && !discard)) return;
     this.editor.close(discard);
+    this.invalidateReview();
     this.dialog.nativeElement.close();
     this.listMode = false;
     this.page = null;

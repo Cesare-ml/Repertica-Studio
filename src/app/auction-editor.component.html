@@ -41,17 +41,32 @@
     </details>
     <fieldset [disabled]="busy">
       <legend>{{ tr('Dati dell’anteprima non vincolante') }}</legend>
-      <label class="wide">{{ tr('Titolo pubblico') }}<input [(ngModel)]="fields.title" maxlength="160"></label>
-      <label class="wide">{{ tr('Descrizione pubblica') }}<textarea rows="4" [(ngModel)]="fields.description" maxlength="1500"></textarea></label>
-      <label class="wide">{{ tr('Identificativo URL') }}<input [(ngModel)]="fields.slug" maxlength="60" placeholder="paesaggio-01"></label>
-      <label>{{ tr('Inizio (UTC)') }}<input [(ngModel)]="fields.startsAt" maxlength="64" placeholder="2027-03-04T10:00"></label>
-      <label>{{ tr('Fine (UTC)') }}<input [(ngModel)]="fields.endsAt" maxlength="64" placeholder="2027-03-06T10:00"></label>
-      <label>{{ tr('Base d’asta (€)') }}<input [(ngModel)]="fields.startingEuros" inputmode="decimal" maxlength="12"></label>
-      <label>{{ tr('Rilancio minimo (€)') }}<input [(ngModel)]="fields.incrementEuros" inputmode="decimal" maxlength="12"></label>
+      <label class="wide">{{ tr('Titolo pubblico') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.title" maxlength="160"></label>
+      <label class="wide">{{ tr('Descrizione pubblica') }}<textarea rows="4"  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.description" maxlength="1500"></textarea></label>
+      <label class="wide">{{ tr('Identificativo URL') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.slug" maxlength="60" placeholder="paesaggio-01"></label>
+      <label>{{ tr('Inizio (UTC)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.startsAt" maxlength="64" placeholder="2027-03-04T10:00"></label>
+      <label>{{ tr('Fine (UTC)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.endsAt" maxlength="64" placeholder="2027-03-06T10:00"></label>
+      <label>{{ tr('Base d’asta (€)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.startingEuros" inputmode="decimal" maxlength="12"></label>
+      <label>{{ tr('Rilancio minimo (€)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.incrementEuros" inputmode="decimal" maxlength="12"></label>
     </fieldset>
     <p class="hint">{{ tr('Gli orari sono UTC (AAAA-MM-GGThh:mm). Puoi salvare una bozza incompleta e completarla in seguito.') }}</p>
     <p class="hint">{{ tr('Nessuna foto, nota privata o informazione sui collezionisti viene copiata nella bozza.') }}</p>
     <p *ngIf="dirty" role="status">{{ tr('Modifiche non salvate') }}</p>
+    <button type="button" *ngIf="view?.saved && !view?.pending" [disabled]="!canReview" (click)="reviewPublicDetails()">{{ reviewLabel('review') }}</button>
+    <p *ngIf="reviewError && canReview" role="alert">{{ reviewLabel('invalid') }}</p>
+    <section *ngIf="reviewedDetails as reviewed" class="pending" aria-live="polite">
+      <h3>{{ reviewLabel('review') }}</h3>
+      <p>{{ reviewLabel('localOnly') }}</p>
+      <dl class="request-details">
+        <dt>{{ tr('Titolo pubblico') }}</dt><dd>{{ reviewed.title }}</dd>
+        <dt>{{ tr('Descrizione pubblica') }}</dt><dd>{{ reviewed.description || '—' }}</dd>
+        <dt>{{ tr('Identificativo URL') }}</dt><dd>{{ reviewed.slug }}</dd>
+        <dt>{{ tr('Inizio (UTC)') }}</dt><dd>{{ reviewed.startsAt }}</dd>
+        <dt>{{ tr('Fine (UTC)') }}</dt><dd>{{ reviewed.endsAt }}</dd>
+        <dt>{{ tr('Base d’asta (€)') }}</dt><dd>{{ reviewed.startingAmount / 100 | number:'1.2-2' }}</dd>
+        <dt>{{ tr('Rilancio minimo (€)') }}</dt><dd>{{ reviewed.minimumIncrementAmount / 100 | number:'1.2-2' }}</dd>
+      </dl>
+    </section>
   </ng-container>
   <footer>
     <button type="button" *ngIf="dirty" [disabled]="busy" (click)="close(true)">{{ tr('Scarta modifiche non salvate e chiudi') }}</button>

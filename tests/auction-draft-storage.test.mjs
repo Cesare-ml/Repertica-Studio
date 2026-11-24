@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newAuctionDraft, preparePreview, loadAuctionDraft, saveAuctionDraft } from '../src/app/auction-preview.ts';
+import { newAuctionDraft, publicPreviewFields, preparePreview, loadAuctionDraft, saveAuctionDraft } from '../src/app/auction-preview.ts';
 
 const scope = 'archive-one';
 const artwork = { id: 'work-one', title: 'Paesaggio', status: 'available' };
@@ -70,4 +70,18 @@ test('storage errors are propagated and empty archive scopes are rejected', () =
   const storage = { getItem: () => null, setItem: () => { throw new Error('disk full'); } };
   assert.throws(() => saveAuctionDraft(storage, scope, complete(), prepare()), /disk full/);
   assert.throws(() => loadAuctionDraft(storage, '', artwork.id), /invalid_draft_scope/);
+});
+
+test('local public review is the exact allowlist used by later preparation, without tenant or key', () => {
+  const draft = { ...complete(), title: '  Paesaggio  ', description: '  Olio  ', buyer: 'private', imagePath: '/private/raw' };
+  const now = Date.parse(draft.startsAt);
+  const review = publicPreviewFields(draft, now);
+  assert.deepEqual(review, { slug: 'paesaggio', title: 'Paesaggio', description: 'Olio',
+    startsAt: draft.startsAt, endsAt: draft.endsAt, startingAmount: 10000, minimumIncrementAmount: 500, currency: 'EUR' });
+  assert.ok(Object.isFrozen(review));
+  assert.equal(preparePreview(draft, 'tenant-test', 'preview-0123456789', now).body,
+    JSON.stringify({ tenantId: 'tenant-test', ...review }));
+  assert.throws(() => publicPreviewFields(draft, now + 1), /invalid_schedule/);
+  assert.throws(() => publicPreviewFields({ ...draft, title: ' ' }, now), /invalid_title/);
+  assert.throws(() => publicPreviewFields({ ...draft, startingAmount: 0 }, now), /invalid_amount/);
 });
