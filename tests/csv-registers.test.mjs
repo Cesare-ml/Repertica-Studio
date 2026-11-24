@@ -5,9 +5,9 @@ import { csvRegisterOptions } from '../src/app/csv-registers.ts';
 import { translate } from '../src/app/i18n.ts';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
-const kinds = ['artworks', 'gallery', 'collectors', 'collector_photos', 'raw_files', 'certificates', 'sales', 'balances', 'receipts', 'expenses', 'allocations', 'installments'];
+const kinds = ['artworks', 'gallery', 'collectors', 'collector_photos', 'raw_files', 'certificates', 'sales', 'balances', 'receipts', 'expenses', 'allocations', 'installments', 'media_items', 'media_revisions'];
 
-test('all twelve backend CSV register kinds have unique local export labels and filenames', () => {
+test('all fourteen backend CSV register kinds have unique local export labels and filenames', () => {
   assert.deepEqual(Object.keys(csvRegisterOptions).sort(), [...kinds].sort());
   const backend = read('src-tauri/src/export.rs');
   const filenames = new Set();
@@ -98,4 +98,19 @@ test('collector photos and RAW metadata CSV exports are accessible and translate
   }
   assert.match(backend, /FROM collector_images p JOIN collectors c ON c.id=p.collector_id/);
   assert.match(backend, /FROM artwork_raw_files r JOIN artworks a ON a.id=r.artwork_id/);
+});
+
+test('media metadata exports include full catalog and revision history with translated labels', () => {
+  const backend = read('src-tauri/src/export.rs');
+  const html = read('src/app/app.component.html');
+  for (const kind of ['media_items', 'media_revisions']) {
+    assert.ok(html.includes("exportLedger('" + kind + "')"));
+    for (const locale of ['en', 'es', 'fr', 'de']) {
+      assert.notEqual(translate(csvRegisterOptions[kind].title, locale), csvRegisterOptions[kind].title);
+      assert.notEqual(translate(csvRegisterOptions[kind].success, locale), csvRegisterOptions[kind].success);
+    }
+  }
+  assert.match(backend, /FROM media_items ORDER BY created_at,id/);
+  assert.match(backend, /FROM media_revisions ORDER BY media_id,number,id/);
+  assert.match(backend, /r\.id=m\.current_revision_id AND r\.media_id=m\.id/);
 });
