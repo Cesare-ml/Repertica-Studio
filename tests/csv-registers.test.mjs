@@ -69,6 +69,17 @@ test('sale balances export includes exact cents and does not infer receipt recor
   }
 });
 
+test('artwork register appends purchaser UUIDs and keeps the unsold works via LEFT JOIN', () => {
+  const backend = read('src-tauri/src/export.rs');
+  assert.match(backend, /fixed_price_cents;sale_id;collector_id;collector_name;sold_at"/);
+  assert.match(backend, /FROM artworks a\s+LEFT JOIN sales s ON s\.artwork_id=a\.id\s+LEFT JOIN collectors c ON c\.id=s\.collector_id/);
+  assert.match(backend, /s\.id,s\.collector_id,c\.name,s\.sold_at/);
+  assert.equal(csvRegisterOptions.artworks.title, 'Esporta opere CSV (con acquirenti)');
+  for (const locale of ['en', 'es', 'fr', 'de']) {
+    assert.notEqual(translate(csvRegisterOptions.artworks.title, locale), csvRegisterOptions.artworks.title);
+  }
+});
+
 test('gallery metadata export preserves image UUIDs, artwork relation, captions and order', () => {
   const backend = read('src-tauri/src/export.rs');
   const html = read('src/app/app.component.html');
