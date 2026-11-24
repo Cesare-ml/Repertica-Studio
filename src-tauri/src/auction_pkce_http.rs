@@ -637,11 +637,6 @@ mod tests {
             assert_eq!(body, expected_grant);
             reply(&mut s, "200 OK", &json!({"access_token":bearer,"token_type":"Bearer","expires_in":900,"scope":"profile"}));
             drop(s);
-            // A locally valid signature does not imply a live server session.
-            let mut s = accept(&listener);
-            assert!(read_resource_request(&mut s,"GET /api/studio/tenants HTTP/1.1",Some(bearer),None).is_empty());
-            reply(&mut s,"401 Unauthorized",&json!({"error":"synthetic_revoked_session"}));
-            drop(s);
             let mut private = tenants("owner");
             private["tenants"][0]["publicationEligible"] = json!(false);
             let mut s = accept(&listener);
@@ -649,18 +644,13 @@ mod tests {
             reply(&mut s,"200 OK",&private);
             drop(s);
             for role in ["viewer","owner","owner","owner"] { resource_tenants(&listener,bearer,role); }
-            // The server may revoke access after the membership GET. A rejected
-            // POST leaves the saved key and exact bytes intact for reconciliation.
+            // Only the key generated and persisted by native preparation is
+            // accepted by the fixture; explicit reconciliation follows.
             let key = key_rx.recv_timeout(Duration::from_secs(15)).unwrap();
-            for (status, body) in [
-                ("403 Forbidden",json!({"error":"synthetic_revoked_session"})),
-                ("200 OK",receipt(true,false)),
-            ] {
-                resource_tenants(&listener,bearer,"owner");
-                let mut s = accept(&listener);
-                assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(&key)).as_slice(),RESOURCE_BODY.as_bytes());
-                reply(&mut s,status,&body);
-            }
+            resource_tenants(&listener,bearer,"owner");
+            let mut s = accept(&listener);
+            assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(&key)).as_slice(),RESOURCE_BODY.as_bytes());
+            reply(&mut s,"201 Created",&receipt(false,false));
             listener
         });
         let mut conn=Connection::open_in_memory().unwrap();
@@ -687,8 +677,6 @@ mod tests {
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW+200)).await.unwrap_err(),"invalid_schedule");
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&uuid::Uuid::new_v4().to_string(),RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_draft_conflict");
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
-            assert_eq!(stored(&conn),(revision.clone(),raw.clone()));
-            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
             // An approved but private profile must also deny preparation.
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
             let other=RESOURCE_BODY.replace("tenant-test","tenant-other");
@@ -708,11 +696,8 @@ mod tests {
             assert!(uuid::Uuid::parse_str(value["pending"]["idempotencyKey"].as_str().unwrap()).is_ok());
             assert!(value.get("receipt").is_none());
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&next,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"pending_preview_unresolved");
-            assert_eq!(stored(&conn),(actual,record.clone()));
+            assert_eq!(stored(&conn),(actual,record));
             key_tx.send(value["pending"]["idempotencyKey"].as_str().unwrap().to_owned()).unwrap();
-            assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&next,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
-            assert_eq!(stored(&conn),(next.clone(),record.clone()));
-            // Explicit retry only; simulate successful server reconciliation.
             let confirmed = api.reconcile_preview(&mut conn,&token,"a",&scope,&next,||Ok(NOW)).await.unwrap();
             let (confirmed_revision, confirmed_record) = stored(&conn);
             assert_ne!(confirmed_revision, next);
@@ -721,6 +706,73 @@ mod tests {
             assert_eq!(saved["receipt"]["auctionId"], RESOURCE_ID);
             assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&confirmed_revision,||Ok(NOW)).await.unwrap(),confirmed);
             assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
+        });
+        let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn native_revoked_session_preserves_reviewed_draft_and_pending_request() {
+        use super::resource_http::NativeAuctionsHttp;
+        use rusqlite::{Connection,params};
+        // Independent denial scenarios: no revoked token is later treated as
+        // reauthorized. A signed, unexpired fixture is not proof of live status.
+        let (listener,addr)=listen();
+        let worker=thread::spawn(move || {
+            let f=fixture();
+            let bearer=f["valid"].as_str().unwrap();
+            let mut s=accept(&listener);
+            assert!(read_resource_request(&mut s,"GET /api/studio/tenants HTTP/1.1",Some(bearer),None).is_empty());
+            reply(&mut s,"401 Unauthorized",&json!({"error":"synthetic_revoked_session"}));
+            listener
+        });
+        let mut conn=Connection::open_in_memory().unwrap();
+        let scope=uuid::Uuid::new_v4().to_string();
+        let revision=uuid::Uuid::new_v4().to_string();
+        let raw=json!({"version":1,"scope":scope,"draft":{"artworkId":"a","title":"Art","description":"",
+            "slug":"art","startsAt":"2027-01-15T08:01:40.000Z","endsAt":"2027-01-16T08:01:40.000Z",
+            "startingAmount":1000,"minimumIncrementAmount":100},"pending":null}).to_string();
+        conn.execute_batch("CREATE TABLE auction_archive_scope(singleton INTEGER PRIMARY KEY,scope TEXT NOT NULL);
+            CREATE TABLE auction_drafts(artwork_id TEXT PRIMARY KEY,revision TEXT NOT NULL,record_json TEXT NOT NULL);
+            CREATE TABLE artworks(id TEXT PRIMARY KEY,status TEXT NOT NULL);
+            INSERT INTO artworks VALUES('a','available');").unwrap();
+        conn.execute("INSERT INTO auction_archive_scope VALUES(1,?1)",[&scope]).unwrap();
+        conn.execute("INSERT INTO auction_drafts VALUES('a',?1,?2)",params![revision,raw]).unwrap();
+        fn stored(c: &Connection) -> (String,String) {
+            c.query_row("SELECT revision,record_json FROM auction_drafts",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap()
+        }
+        tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
+            assert_eq!(stored(&conn),(revision.clone(),raw.clone()));
+        });
+        let listener=worker.join().unwrap();
+        assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
+        drop(listener);
+
+        // Separate fixture: the request had been explicitly prepared before
+        // revocation. Membership GET succeeds, then the POST is denied.
+        let mut pending:Value=serde_json::from_str(&raw).unwrap();
+        pending["pending"]=json!({"artworkId":"a","idempotencyKey":RESOURCE_KEY,"body":RESOURCE_BODY});
+        let pending=pending.to_string();
+        let next=uuid::Uuid::new_v4().to_string();
+        conn.execute("UPDATE auction_drafts SET revision=?1,record_json=?2 WHERE artwork_id='a'",params![next,pending]).unwrap();
+        let (listener,addr)=listen();
+        let worker=thread::spawn(move || {
+            let f=fixture();
+            let bearer=f["valid"].as_str().unwrap();
+            resource_tenants(&listener,bearer,"owner");
+            let mut s=accept(&listener);
+            assert_eq!(read_resource_request(&mut s,"POST /api/studio/previews HTTP/1.1",Some(bearer),Some(RESOURCE_KEY)).as_slice(),RESOURCE_BODY.as_bytes());
+            reply(&mut s,"403 Forbidden",&json!({"error":"synthetic_revoked_session"}));
+            listener
+        });
+        tauri::async_runtime::block_on(async {
+            let token=verified_resource_token();
+            let api=NativeAuctionsHttp::new(addr).unwrap();
+            assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&next,||Ok(NOW)).await.unwrap_err(),"auction_access_denied");
+            assert_eq!(stored(&conn),(next,pending));
         });
         let listener=worker.join().unwrap();
         assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
