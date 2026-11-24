@@ -27,12 +27,25 @@ fn invalid() -> String { "invalid_stored_draft".into() }
 fn bounded(s: &str, max: usize) -> bool { s.encode_utf16().count() <= max }
 fn valid_id(s: &str) -> bool { !s.is_empty() && bounded(s, 256) && !s.chars().any(char::is_control) }
 
+// Option normally accepts an absent field as None in serde. The editor's
+// stored format requires explicit null for nullable fields, not omission.
+fn required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Draft {
     artwork_id: String, title: String, description: String, slug: String,
     starts_at: String, ends_at: String,
-    starting_amount: Option<f64>, minimum_increment_amount: Option<f64>,
+    #[serde(deserialize_with = "required_nullable")]
+    starting_amount: Option<f64>,
+    #[serde(deserialize_with = "required_nullable")]
+    minimum_increment_amount: Option<f64>,
 }
 
 #[derive(Deserialize, PartialEq)]
@@ -52,7 +65,9 @@ struct Payload {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
-    version: u8, scope: String, draft: Draft, pending: Option<Pending>,
+    version: u8, scope: String, draft: Draft,
+    #[serde(deserialize_with = "required_nullable")]
+    pending: Option<Pending>,
 }
 
 fn valid_token(s: &str, min: usize, max: usize) -> bool {
@@ -323,6 +338,36 @@ mod tests {
         let persisted=write(&mut conn,input(&saved,good.to_string())).unwrap();
         assert_eq!(read(&conn,"a").unwrap(),persisted);
         assert_eq!(serde_json::from_str::<serde_json::Value>(persisted.record_json.as_ref().unwrap()).unwrap()["pending"],good["pending"]);
+    }
+
+    #[test]
+    fn missing_nullable_fields_cannot_poison_a_native_draft() {
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().into()).unwrap();
+        let mut conn=db.conn.lock().unwrap();
+        seed(&conn);
+        let initial=read(&conn,"a").unwrap();
+        let mut unfinished: serde_json::Value=serde_json::from_str(&record(&initial.scope,false)).unwrap();
+        unfinished["draft"]["startingAmount"]=serde_json::Value::Null;
+        unfinished["draft"]["minimumIncrementAmount"]=serde_json::Value::Null;
+        let saved=write(&mut conn,input(&initial,unfinished.to_string())).unwrap();
+        assert_eq!(read(&conn,"a").unwrap(),saved);
+        for field in ["startingAmount","minimumIncrementAmount","pending"] {
+            let mut bad=unfinished.clone();
+            let object=if field=="pending" {bad.as_object_mut().unwrap()}
+                else {bad["draft"].as_object_mut().unwrap()};
+            assert_eq!(object.remove(field),Some(serde_json::Value::Null));
+            let raw=bad.to_string();
+            assert_eq!(write(&mut conn,input(&saved,raw.clone())).unwrap_err(),"invalid_stored_draft");
+            assert_eq!(read(&conn,"a").unwrap(),saved);
+            // A malformed external development record must also fail on read,
+            // never be silently repaired or turned into a fresh draft.
+            let tx=conn.transaction().unwrap();
+            tx.execute("UPDATE auction_drafts SET record_json=?1 WHERE artwork_id='a'",[raw]).unwrap();
+            assert_eq!(read(&tx,"a").unwrap_err(),"invalid_stored_draft");
+            tx.rollback().unwrap();
+            assert_eq!(read(&conn,"a").unwrap(),saved);
+        }
     }
 
     #[test]
