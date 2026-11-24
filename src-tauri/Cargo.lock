@@ -3351,6 +3351,8 @@ dependencies = [
  "lettre",
  "mailparse",
  "native-tls",
+ "reqwest",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

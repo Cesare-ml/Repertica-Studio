@@ -1,6 +1,7 @@
 //! Native-only PKCE contract for the optional Auctions integration.
 //! Not exposed as a Tauri command; the browser boundary accepts an injected
-//! opener only. No platform opener, remote transport, or provider activation.
+//! opener only. Native HTTP acceptance can use an isolated test provider;
+//! no platform opener or production provider activation.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -64,14 +65,21 @@ pub(crate) enum IdentityProvider {
     Disabled,
     #[cfg(test)]
     IsolatedFixture,
+    #[cfg(test)]
+    IsolatedHttp(std::net::SocketAddrV4),
 }
 
 impl IdentityProvider {
-    fn login(self) -> Result<&'static str, &'static str> {
+    fn login(self) -> Result<String, &'static str> {
         match self {
             Self::Disabled => Err("oauth_provider_disabled"),
             #[cfg(test)]
-            Self::IsolatedFixture => Ok("https://studio.example.test/login"),
+            Self::IsolatedFixture => Ok("https://studio.example.test/login".into()),
+            #[cfg(test)]
+            Self::IsolatedHttp(addr) if *addr.ip() == Ipv4Addr::LOCALHOST && addr.port() >= 1024 =>
+                Ok(format!("http://{addr}/login")),
+            #[cfg(test)]
+            Self::IsolatedHttp(_) => Err("oauth_destination_denied"),
         }
     }
 }
@@ -636,3 +644,6 @@ mod tests {
 #[cfg(test)]
 #[path = "auction_pkce_fixture.rs"]
 mod fixture_exchange;
+
+#[path = "auction_pkce_http.rs"]
+mod native_http;
