@@ -1,0 +1,51 @@
+# Repertica Auctions in Studio Desktop — istruzioni per Claude Code
+
+Stato: **incarico in definizione, non funzionalità già disponibile**. Ultimo aggiornamento: 25 novembre 2026. Le indicazioni confermate qui hanno precedenza sulle vecchie roadmap che richiedono il Desktop nella prima versione di Auctions. Aggiorna questo documento quando il proprietario precisa un requisito.
+
+## Incarico
+
+Realizza in Repertica Studio Desktop la gestione completa delle aste Repertica, prevista per **MVP 2**. L'utente potrà affidare questo file a Claude Code come punto di partenza. L'implementazione deve usare il servizio Auctions e le API comuni dell'ecosistema, senza replicare il motore d'asta nel computer. Il lavoro sul sito e sui servizi online è affidato a Codex; il relativo incarico è `docs/AUCTIONS_ONLINE_HANDOFF.md` nel repository Repertica-auctions.
+
+**MVP 1:** Auctions funziona autonomamente da browser: l'artista inserisce un'opera e crea un'asta; l'opera viene inserita anche nel suo account Studio tramite API. Nessuna interfaccia asta in Studio Desktop o Studio Online è prerequisito.
+
+**MVP 2:** Studio Desktop offre creazione e gestione completa delle aste; anche il sito offre la gestione completa delle offerte. **MVP 3:** integrazione bot Telegram, funzioni da definire: non anticiparla nella MVP 2.
+
+## Stato e vincoli da verificare prima di modificare
+
+- Il Desktop è un'app Angular 20, Tauri 2, Rust e SQLite, gratuita e offline-first. L'archivio locale deve restare utilizzabile senza account e senza Internet. Leggi `README.md`, `docs/MVP.md`, eventuali `AGENTS.md` e `CLAUDE.md`, lo stato Git e il codice attuale; non sovrascrivere modifiche preesistenti.
+- Al momento della stesura non esistono nel Desktop un login Repertica né la gestione aste. Il sito Auctions mostra una demo con offerte simulate e un catalogo in sola lettura. Identità federata e API di scrittura sono ancora da completare e verificare: codice sperimentale o documenti non dimostrano che siano attivi.
+- Gli endpoint e i formati effettivi vanno concordati e verificati con il progetto online prima di integrarli. `docs/STUDIO_API.md` nel repository Auctions descrive solo un precedente contratto sperimentale per anteprime: non trattarlo come un'API di produzione esistente.
+- Non copiare interi archivi, credenziali, chiavi o configurazioni di produzione. Il collegamento al cloud è esplicito e limitato all'opera e alle immagini selezionate; nessuna sincronizzazione completa del Desktop è richiesta per usare Auctions.
+- Preserva Studio e Sites, i dati esistenti e i backup. Nessun dato personale reale nei test o nei log. Evita cambiamenti di schema distruttivi; prevedi migrazione e rollback.
+
+## Esperienza richiesta per l'artista
+
+1. Offri una sezione Aste facilmente raggiungibile e una possibilità chiara di avviare un'asta dalla scheda di un'opera. Spiega quando serve connettersi o accedere, senza richiedere un account per le altre funzioni dell'archivio.
+2. L'artista sceglie l'opera locale, le immagini da pubblicare e i dati consentiti. Visualizza una revisione dei soli dati che saranno inviati e pubblicati; note private, dati dei collezionisti e altre opere non devono partire implicitamente. Caricamento, salvataggio dell'opera nell'account Studio e associazione all'asta devono seguire il contratto online, evitando copie e pubblicazioni duplicate in caso di ritentativo.
+3. Consenti creazione, bozza, revisione, pubblicazione, visualizzazione e gestione dell'asta tramite le capacità effettivamente supportate dal server. Mostra stato, importi, rilancio minimo, inizio/fine e risultati restituiti dal server, distinguendo chiaramente orari e fuso. Dopo una risposta incerta mostra che la conferma è in sospeso e recupera lo stato, senza dichiarare riuscita un'operazione non confermata.
+4. Per ogni asta dell'artista mostra le offerte, il relativo importo e l'email dell'offerente. Consenti l'annullamento di un'offerta ritenuta sospetta attraverso l'API autorizzata, con conferma, eventuale motivazione se prevista e riscontro dell'esito. Dopo l'operazione ricarica stato, cronologia e offerta guida dal server; non calcolare o alterare localmente il risultato ufficiale. Rendere chiaro se l'operazione è impossibile o è contestata.
+5. Mostra chiusura, vincitore/esito e notifiche disponibili. Aggiudicazione e pagamento sono eventi distinti: non creare o segnare automaticamente una vendita come pagata. L'eventuale registrazione locale segue una conferma esplicita e un contratto verificato.
+6. In assenza di rete, lascia usare le funzioni locali e indica chiaramente che aste, offerte e annullamenti non sono aggiornabili. Eventuali bozze e cache devono essere contrassegnate come locali; non inventare conferme o offerte offline.
+
+## Identità, dati e interfaccia
+
+- Usa l'identità Repertica condivisa e le autorizzazioni effettive. Per l'accesso Desktop adotta browser di sistema e Authorization Code con PKCE quando il provider sarà pronto; non incorporare segreti nell'app. Proteggi e revoca le sessioni usando i meccanismi supportati dalla piattaforma e dal provider. I ruoli e l'isolamento degli account sono verificati dal server, non da un identificativo fidato dal client.
+- Le email degli offerenti sono dati riservati: esporle solo all'artista autorizzato nella gestione privata; mai in catalogo pubblico, log o notifiche visibili ad altri. Limita cache e conservazione in base al contratto e alle scelte definite per il prodotto.
+- Integra UI, accessibilità, gestione errori e lingue nel sistema già presente nel Desktop. Verifica gli stati vuoti, scadenze, sessione scaduta, autorizzazione negata, rete assente, richieste duplicate e aggiornamenti concorrenti.
+- Il server è autorevole su offerte, scadenze, annullamenti, identità e risultato. Il Desktop non deve richiedere che il computer resti acceso durante l'asta.
+
+## Integrazione con il lavoro online
+
+Prima di collegare un flusso reale, concorda con Codex un contratto versionato per: identità/sessione e revoca; selezione e proprietà dell'opera; upload delle immagini; bozze/pubblicazione; elenco e dettaglio delle aste; lettura privata delle offerte con email; annullamento autorizzato e motivazioni; notifiche e sincronizzazione dell'esito; idempotenza e recupero dopo risposta persa. Definisci esempi, errori, ruoli, paginazione e regole temporali con test comuni. Se un'API manca, sviluppa e testa in isolamento ciò che non dipende da essa; non presentare il collegamento come operativo e non aggirare le verifiche di sicurezza.
+
+## Criteri di completamento
+
+- Con dati sintetici, un'artista seleziona una sola opera locale, vede i dati che invierà, pubblica un'asta e la ritrova sia sul sito sia nel Desktop; l'opera associata esiste nell'account Studio corretto.
+- Due account distinti restano isolati: un artista non può vedere email, offerte o aste private altrui né annullare offerte su aste altrui. La pagina pubblica non espone email.
+- Offerte simultanee e annullamento sono regolati dal server; importo guida e cronologia coincidono sui due canali. Ritentativi, risposta persa, riavvio, sessione scaduta e rete assente non producono duplicati o falsi successi.
+- La chiusura dell'asta non registra automaticamente un pagamento; gestione locale, migrazioni, backup e ripristino continuano a funzionare. Verifica UI accessibile e multilingua, test mirati di integrazione e regressione, build e test pertinenti del progetto. Registra ciò che è passato e ciò che non è stato eseguito.
+- Lavora con modifiche compatibili con lo stato presente; al termine fai commit e push su `main` solo dei tuoi cambiamenti, senza includere o scartare lavoro preesistente. Non distribuire una release Desktop né attivare aste reali finché i rispettivi flussi non sono pronti e verificati.
+
+## Decisioni ancora aperte
+
+Il proprietario sta definendo la roadmap. Raccogli progressivamente: campi obbligatori per asta/opera, ruoli e condizioni dell'annullamento, motivazione e visibilità dell'offerta annullata, conseguenze su tempi e offerte successive, notifiche e conservazione dei dati. Non inventare regole vincolanti: dove una decisione è necessaria, prepara il lavoro indipendente e segnala il punto preciso. Telegram appartiene alla MVP 3.
