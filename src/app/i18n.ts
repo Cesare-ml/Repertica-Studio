@@ -5,6 +5,7 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  "Chiudi la sessione di importazione prima di ripristinare un backup.": "Close the import session before restoring a backup.",
   "Scegli cartella di migrazione": "Choose migration folder",
   "Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.": "Confirm each package separately. Imported packages remain in the archive if you stop.",
   "Pacchetti confermati:": "Confirmed packages:",
@@ -910,6 +911,7 @@ const EN: Record<string,string> = {
   "Altre opere dell’archivio": "Other artworks in the archive",
 };
 const ES:Record<string,string> = {
+  "Chiudi la sessione di importazione prima di ripristinare un backup.": "Cierra la sesión de importación antes de restaurar una copia de seguridad.",
   "Scegli cartella di migrazione": "Elegir carpeta de migración",
   "Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.": "Confirma cada paquete por separado. Los paquetes importados permanecen en el archivo si interrumpes el proceso.",
   "Pacchetti confermati:": "Paquetes confirmados:",
@@ -1657,6 +1659,7 @@ const ES:Record<string,string> = {
   "Altre opere dell’archivio": "Otras obras del archivo",
 };
 const FR:Record<string,string> = {
+  "Chiudi la sessione di importazione prima di ripristinare un backup.": "Fermez la session d’importation avant de restaurer une sauvegarde.",
   "Scegli cartella di migrazione": "Choisir le dossier de migration",
   "Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.": "Confirmez chaque lot séparément. Les lots importés restent dans les archives si vous interrompez la procédure.",
   "Pacchetti confermati:": "Lots confirmés :",
@@ -2407,6 +2410,7 @@ const FR:Record<string,string> = {
   "Altre opere dell’archivio": "Autres œuvres de l’archive",
 };
 const DE:Record<string,string> = {
+  "Chiudi la sessione di importazione prima di ripristinare un backup.": "Schließen Sie die Importsitzung, bevor Sie eine Sicherung wiederherstellen.",
   "Scegli cartella di migrazione": "Migrationsordner auswählen",
   "Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.": "Jedes Paket muss einzeln bestätigt werden. Importierte Pakete bleiben beim Abbruch im Archiv.",
   "Pacchetti confermati:": "Bestätigte Pakete:",

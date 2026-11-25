@@ -481,6 +481,7 @@
         <div class="backup-block">
           <h3>{{ tr('Ripristina o trasferisci un archivio') }}</h3>
           <p>{{ tr('Puoi utilizzare un backup creato su questo computer o proveniente da un altro archivio Repertica Studio compatibile.') }}</p>
+          <p class="hint" *ngIf="batchState">{{ tr('Chiudi la sessione di importazione prima di ripristinare un backup.') }}</p>
           <div class="backup-actions">
             <button type="button" class="secondary action-glyph action-glyph--folder" (click)="chooseRestoreFolder()" [disabled]="busy || !initialized">{{ tr('Seleziona backup da verificare…') }}</button>
           </div>
@@ -489,7 +490,7 @@
             <p>{{ date(restoreCandidate.createdAt) }} · {{ restoreCandidate.artworks }} opere · {{ restoreCandidate.collectors }} collezionisti · {{ bytes(restoreCandidate.totalBytes) }}</p>
             <code class="path">{{ restoreCandidate.directory }}</code>
             <p class="warning">{{ tr('Il ripristino sostituisce l\'archivio attuale. Repertica conserverà prima una copia dell\'archivio presente, senza cancellarla.') }}</p>
-            <button type="button" class="primary action-glyph action-glyph--restore" (click)="restoreSelectedBackup()" [disabled]="busy">{{ tr('Conferma ripristino') }}</button>
+            <button type="button" class="primary action-glyph action-glyph--restore" (click)="restoreSelectedBackup()" [disabled]="busy || !!batchState">{{ tr('Conferma ripristino') }}</button>
           </div>
           <p class="backup-note">{{ tr('Prima di eliminare una vecchia copia, verifica di riuscire ad aprire e utilizzare l\'archivio ripristinato.') }}</p>
         </div>
