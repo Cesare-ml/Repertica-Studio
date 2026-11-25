@@ -603,6 +603,44 @@ mod tests {
         let stamp:String = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
         assert_eq!(stamp,"2026-11-25T04:02:00.000Z");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
+
+        // Same typed workspace dispatch as the profile UI; the settlement
+        // grant is independent and the verifier is native-only.
+        use super::resource_http::{dispatch_workspace_isolated, NativePreviewSession};
+        let mut active = Some(NativePreviewSession::new(resource,profile,NOW).unwrap());
+        let mut settlement = None;
+        tauri::async_runtime::block_on(async {
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                request(),||Ok(NOW), |_| panic!("missing grant must not resolve"))
+                .await.unwrap_err(),"settlement_access_denied");
+            settlement = Some(verified_resource_token());
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                request(),||Ok(NOW), |_| panic!("wrong scope must not resolve"))
+                .await.unwrap_err(),"settlement_access_denied");
+            assert!(settlement.is_none());
+            settlement = Some(result);
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                request(),||Ok(NOW), |_| Err("settlement_access_denied"))
+                .await.unwrap_err(),"settlement_access_denied");
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                request(),||Ok(NOW),verify).await.unwrap(),summary);
+            // Archive switching must not leak a cached result through IPC.
+            db.execute("UPDATE auction_archive_scope SET scope='cccccccc-cccc-4ccc-8ccc-cccccccccccc'",[]).unwrap();
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                request(),||Ok(NOW), |_| panic!("wrong archive must not resolve"))
+                .await.unwrap_err(),"settlement_binding_mismatch");
+            db.execute("UPDATE auction_archive_scope SET scope=?1",[&binding.scope]).unwrap();
+            let disconnect = serde_json::from_value(json!({"action":"disconnect"})).unwrap();
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                disconnect,||Ok(NOW), |_| panic!("disconnect must not resolve"))
+                .await.unwrap(),json!({"status":"disconnected"}));
+            assert!(active.is_none() && settlement.is_none());
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                request(),||Ok(NOW), |_| panic!("disconnected must not resolve"))
+                .await.unwrap_err(),"settlement_access_denied");
+        });
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
     }
 
     #[test]
