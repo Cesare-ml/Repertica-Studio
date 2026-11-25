@@ -3,6 +3,7 @@ mod archive_code;
 mod auto_backup;
 mod auction_archive_schema;
 mod auction_drafts;
+mod auction_preview_ipc;
 #[path = "auction_settlement_ledger.rs"]
 mod settlement_ledger;
 #[path = "auction_settlement_store.rs"]
@@ -58,6 +59,7 @@ pub fn run() {
             auction_drafts::read_auction_draft,
             auction_drafts::write_auction_draft,
             auction_drafts::remove_auction_draft,
+            auction_preview_ipc::auction_preview_command,
             business_mail::mail_list_accounts,
             business_mail::mail_save_account,
             business_mail::mail_remove_account,
