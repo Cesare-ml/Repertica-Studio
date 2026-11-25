@@ -36,6 +36,7 @@ test('bids: cancelled needs a time, pages dedupe and sort by server time', () =>
   const page = parseBidPage({ items: [bid('bid_b', 14000, '2027-03-04T12:00:00.000Z'), bid('bid_a', 13000, '2027-03-04T11:00:00.000Z'),
     bid('bid_b', 14000, '2027-03-04T12:00:00.000Z')], nextCursor: null });
   assert.deepEqual(page.bids.map(b => b.bidId), ['bid_a', 'bid_b']);
+  assert.throws(() => parseBidPage({ items: [bid('bid_b', 14000, '2027-03-04T12:00:00.000Z'), bid('bid_b', 15000, '2027-03-04T12:00:00.000Z')] }), /invalid_response/);
   assert.equal(maskEmail('synthetic@example.test'), 's***@example.test');
 });
 
@@ -68,7 +69,8 @@ test('a lost response is pending, not success; retry keeps key and body; only th
   assert.equal(again.body, op.body);
   assert.equal(again.attempts, 2);
   assert.equal(confirmPublication(again, []).state, 'pending_confirmation');
-  assert.equal(confirmPublication(again, [parseAuction(auction())]).state, 'confirmed');
+  assert.equal(confirmPublication(again, [parseAuction(auction())]).state, 'pending_confirmation');
+  assert.equal(confirmPublication(again, [parseAuction(auction())], 'auc_1').state, 'confirmed');
   assert.equal(afterTransport(beginOperation('publish', 's', key, '{}'), { kind: 'response', status: 201 }).state, 'pending_confirmation');
   assert.equal(afterTransport(beginOperation('publish', 's', key, '{}'), { kind: 'response', status: 403 }).state, 'rejected');
   assert.equal(afterTransport(beginOperation('publish', 's', key, '{}'), { kind: 'response', status: 503 }).state, 'pending_confirmation');

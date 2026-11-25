@@ -10,7 +10,7 @@ const prepared = { artworkId: 'art-1', idempotencyKey: 'idem-0123456789abcdef', 
 
 function fake(over = {}) {
   const t = { calls: [], published: false, cancelled: false,
-    async publish(body, key) { t.calls.push(['publish', key, body]); if (t.failPublish) throw new Error('network'); t.published = true; return { status: t.publishStatus ?? 201 }; },
+    async publish(body, key) { t.calls.push(['publish', key, body]); if (t.failPublish) throw new Error('network'); t.published = true; return { status: t.publishStatus ?? 201, auctionId: auction.auctionId }; },
     async listAuctions() { if (t.failList) throw new Error('network'); return { items: t.published ? [auction] : [] }; },
     async listBids(id, cursor) {
       if (t.failBids) throw new Error('network');
@@ -90,4 +90,39 @@ test('a cancellation answered "cancelled" but not visible in the history is not 
   const t = fake({ async cancelBid() { return { status: 200, body: { bidId: 'bid_b', outcome: 'cancelled' } }; } });
   const out = await manager(t).cancelBid('auc_1', 'bid_b', null, 'idem-0123456789abcdef');
   assert.equal(out.outcome.operation.state, 'pending_confirmation');
+});
+
+test('publication requires an attributed receipt, not an existing matching slug', async () => {
+  const lost = fake({ published: true, failPublish: true });
+  assert.equal((await manager(lost).publish(prepared)).operation.state, 'pending_confirmation');
+  const other = fake({ published: true, async publish() { return { status: 201, auctionId: 'auc_other' }; } });
+  assert.equal((await manager(other).publish(prepared)).operation.state, 'pending_confirmation');
+});
+test('cancellation retry refuses a different key before any mutation', async () => {
+  const t = fake({ failCancel: true, failBids: true });
+  const key = prepared.idempotencyKey;
+  const first = await manager(t).cancelBid('auc_1', 'bid_b', null, key);
+  await assert.rejects(manager(t).cancelBid('auc_1', 'bid_b', null, 'different-key-123456', first.outcome.operation), /request_changed/);
+  assert.equal(t.calls.length, 1);
+  t.failCancel = false; t.failBids = false;
+  const second = await manager(t).cancelBid('auc_1', 'bid_b', null, key, first.outcome.operation);
+  assert.equal(second.outcome.operation.state, 'confirmed');
+  assert.deepEqual(t.calls, [['cancel', key], ['cancel', key]]);
+});
+test('a cancellation response for another bid cannot confirm or reject this operation', async () => {
+  const t = fake({ cancelled: true, async cancelBid() { return { status: 200, body: { bidId: 'bid_other', outcome: 'contested' } }; } });
+  assert.equal((await manager(t).cancelBid('auc_1', 'bid_b', null, prepared.idempotencyKey)).outcome.operation.state, 'pending_confirmation');
+});
+test('history rejects non-adjacent cursor loops, contradictory duplicates and mid-read disconnection', async () => {
+  let count = 0;
+  const cycle = fake({ async listBids() { return { items: [], nextCursor: ['a','b','a'][count++] }; } });
+  await assert.rejects(manager(cycle).loadBids('auc_1'), /invalid_response/);
+  assert.equal(count, 3);
+  const conflict = fake({ async listBids(id, cursor) {
+    return { items: [bid('bid_a', '2027-03-04T11:00:00.000Z', { amount: cursor ? 14000 : 13000 })], nextCursor: cursor ? null : 'next' };
+  } });
+  await assert.rejects(manager(conflict).loadBids('auc_1'), /invalid_response/);
+  let online = true;
+  const disconnect = fake({ async listBids() { online = false; return { items: [bid('bid_a', '2027-03-04T11:00:00.000Z')], nextCursor: null }; } });
+  await assert.rejects(createAuctionManager(disconnect, () => online).loadBids('auc_1'), /offline/);
 });

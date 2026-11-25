@@ -14,7 +14,7 @@ import type { PreparedPreview } from './auction-preview.ts';
 
 export interface AuctionTransport {
   /** Throws (or rejects) when the response is lost. */
-  publish(body: string, idempotencyKey: string): Promise<{ status: number }>;
+  publish(body: string, idempotencyKey: string): Promise<{ status: number; auctionId?: string }>;
   listAuctions(): Promise<unknown>;
   listBids(auctionId: string, cursor: string | null): Promise<unknown>;
   cancelBid(auctionId: string, bidId: string, reason: string | null, idempotencyKey: string): Promise<{ status: number; body?: unknown }>;
@@ -42,8 +42,11 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
   async function loadAuctions(): Promise<AuctionSummary[]> {
     requireOnline();
     const raw = await transport.listAuctions() as { items?: unknown };
-    if (!raw || !Array.isArray(raw.items)) throw new Error('invalid_response');
-    return raw.items.map(parseAuction);
+    requireOnline();
+    if (!raw || !Array.isArray(raw.items) || raw.items.length > 500) throw new Error('invalid_response');
+    const items = raw.items.map(parseAuction);
+    if (new Set(items.map(a => a.auctionId)).size !== items.length) throw new Error('invalid_response');
+    return items;
   }
 
   /** The complete private history, read page by page; never cached beyond the caller's own lifetime. */
@@ -51,13 +54,23 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
     requireOnline();
     const all = new Map<string, AuctionBid>();
     let cursor: string | null = null;
+    const seenCursors = new Set<string>();
     for (let page = 0; page < MAX_PAGES; page++) {
+      requireOnline();
       const { bids, nextCursor } = parseBidPage(await transport.listBids(auctionId, cursor));
-      for (const bid of bids) all.set(bid.bidId, bid);
+      requireOnline();
+      for (const bid of bids) {
+        const prior = all.get(bid.bidId);
+        // An unstable history must be read again explicitly, never silently
+        // combine contradictory versions of a private bid.
+        if (prior && JSON.stringify(prior) !== JSON.stringify(bid)) throw new Error('invalid_response');
+        all.set(bid.bidId, bid);
+      }
       if (nextCursor === null) {
         return [...all.values()].sort((a, b) => a.placedAt.localeCompare(b.placedAt) || a.bidId.localeCompare(b.bidId));
       }
-      if (nextCursor === cursor) throw new Error('invalid_response');
+      if (seenCursors.has(nextCursor)) throw new Error('invalid_response');
+      seenCursors.add(nextCursor);
       cursor = nextCursor;
     }
     throw new Error('too_many_pages');
@@ -67,17 +80,23 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
   async function publish(prepared: PreparedPreview, previous?: Operation): Promise<OperationOutcome> {
     requireOnline();
     const slug = (JSON.parse(prepared.body) as { slug: string }).slug;
-    if (previous && (previous.body !== prepared.body || previous.idempotencyKey !== prepared.idempotencyKey)) {
+    if (previous && (previous.kind !== 'publish' || previous.target !== slug || previous.body !== prepared.body || previous.idempotencyKey !== prepared.idempotencyKey)) {
       throw new Error('request_changed');
     }
     let op = previous ? retry(previous) : beginOperation('publish', slug, prepared.idempotencyKey, prepared.body);
     let status = 0;
+    let receiptId: string | null = null;
     try {
-      status = (await transport.publish(prepared.body, prepared.idempotencyKey)).status;
+      const response = await transport.publish(op.body, op.idempotencyKey);
+      status = response.status;
       op = afterTransport(op, { kind: 'response', status });
+      // This is a transport-port receipt, not a new HTTP response contract.
+      // A lost or malformed receipt cannot be attributed by slug alone.
+      if ((status === 200 || status === 201) && typeof response.auctionId === 'string'
+          && /^[A-Za-z0-9_-]{3,96}$/.test(response.auctionId)) receiptId = response.auctionId;
     } catch { op = afterTransport(op, { kind: 'lost' }); }
-    if (op.state === 'pending_confirmation') {
-      try { op = confirmPublication(op, await loadAuctions()); } catch { /* stays pending */ }
+    if (op.state === 'pending_confirmation' && receiptId !== null) {
+      try { op = confirmPublication(op, await loadAuctions(), receiptId); } catch { /* stays pending */ }
     }
     return { operation: op, needsSignIn: status === 401 };
   }
@@ -88,18 +107,20 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
     requireOnline();
     if (reason !== null && (reason.trim().length === 0 || reason.length > 500)) throw new Error('invalid_reason');
     const body = JSON.stringify({ auctionId, bidId, reason });
-    if (previous && previous.body !== body) throw new Error('request_changed');
+    if (previous && (previous.kind !== 'cancel_bid' || previous.target !== bidId || previous.body !== body || previous.idempotencyKey !== idempotencyKey)) throw new Error('request_changed');
     let op = previous ? retry(previous) : beginOperation('cancel_bid', bidId, idempotencyKey, body);
     let answer: CancelResult | null = null;
     let status = 0;
     try {
-      const response = await transport.cancelBid(auctionId, bidId, reason, idempotencyKey);
+      const response = await transport.cancelBid(auctionId, bidId, reason, op.idempotencyKey);
       status = response.status;
       op = afterTransport(op, { kind: 'response', status });
       if (response.body !== undefined) { try { answer = parseCancelResult(response.body); } catch { answer = null; } }
     } catch { op = afterTransport(op, { kind: 'lost' }); }
     let bids: AuctionBid[] | null = null;
-    try { bids = await loadBids(auctionId); } catch { bids = null; }
+    if (op.state !== 'rejected') {
+      try { bids = await loadBids(auctionId); } catch { bids = null; }
+    }
     if (bids !== null && op.state !== 'rejected') op = confirmCancellation(op, bids, answer);
     return { outcome: { operation: op, needsSignIn: status === 401 }, bids };
   }
