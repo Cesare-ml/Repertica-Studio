@@ -630,24 +630,37 @@ mod tests {
             let bearer = signed.to_owned();
             let worker = thread::spawn(move || {
                 let poll = json!({"action":"poll","auctionId":"fixture-auction","tenantId":"fixture-tenant"});
-                let history = json!({"action":"history","auctionId":"fixture-auction","tenantId":"fixture-tenant","afterSequence":3});
-                let ack = json!({"action":"ack","auctionId":"fixture-auction","tenantId":"fixture-tenant",
-                    "resultId":"fixture-auction:1:fulfillment","deliverySequence":4});
-                let latest = ledger::delivery(4,"review_required");
-                let mut acknowledged = latest.clone();
+                let history = |after: u64| json!({"action":"history","auctionId":"fixture-auction","tenantId":"fixture-tenant","afterSequence":after});
+                let ack = |sequence: u64| json!({"action":"ack","auctionId":"fixture-auction","tenantId":"fixture-tenant",
+                    "resultId":"fixture-auction:1:fulfillment","deliverySequence":sequence});
+                let fourth = ledger::delivery(4,"review_required");
+                let fifth = ledger::delivery(5,"review_required");
+                let mut acknowledged = fourth.clone();
                 acknowledged["acknowledged_at"] = json!("2026-11-25T04:03:00.000Z");
-                let mut confirmation = ledger::reply(acknowledged);
+                let mut fifth_ack = fifth.clone();
+                fifth_ack["acknowledged_at"] = json!("2026-11-25T04:04:00.000Z");
+                let mut confirmation = ledger::reply(fifth_ack);
                 confirmation["replayed"] = json!(false);
-                for (expected,body) in [
-                    (history,ledger::page(vec![latest.clone()],4,None)),
-                    (poll,ledger::reply(latest)),
-                    (ack,confirmation),
+                // The fixture records the fourth ACK but deliberately drops
+                // the HTTP response. A subsequent delivery makes ACK(4) stale.
+                // Only the explicit overlapping history read returns its stamp.
+                for (expected,status,body) in [
+                    (history(1),"200 OK",Some(ledger::page(vec![ledger::delivery(2,"fulfilled"),
+                        ledger::delivery(3,"review_required"),fourth.clone()],4,None))),
+                    (poll.clone(),"200 OK",Some(ledger::reply(fourth))),
+                    (ack(4),"",None),
+                    (ack(4),"409 Conflict",Some(json!({"ok":false,"code":"stale"}))),
+                    (poll, "200 OK",Some(ledger::reply(fifth.clone()))),
+                    (history(3),"200 OK",Some(ledger::page(vec![acknowledged.clone(),fifth],5,None))),
+                    (history(3),"200 OK",Some(ledger::page(vec![acknowledged],4,None))),
+                    (ack(5),"200 OK",Some(confirmation)),
                 ] {
                     let mut stream = accept(&listener);
                     let bytes = read_resource_request(&mut stream,
                         "POST /api/studio/settlement/delivery HTTP/1.1",Some(&bearer),None);
                     assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(),expected);
-                    reply(&mut stream,"200 OK",&body);
+                    if let Some(body) = body { reply(&mut stream,status,&body); }
+                    // None: response lost, no implicit retry permitted.
                 }
                 listener
             });
@@ -659,15 +672,38 @@ mod tests {
                     .await.unwrap(),updated);
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3),||Ok(NOW),verify)
                     .await.unwrap_err(),"settlement_stale_ack");
-                let ack = dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify).await.unwrap();
-                assert_eq!(ack["acknowledgedAt"],"2026-11-25T04:03:00.000Z");
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify)
+                    .await.unwrap_err(),"oauth_http_failed");
+                assert_eq!(ledger::summary(&mut db,&binding).unwrap().unwrap().acknowledged_at,None);
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_conflict");
+                let fifth = dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),verify).await.unwrap();
+                assert_eq!(fifth["sequence"],5);
+                assert!(fifth["acknowledgedAt"].is_null());
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,history_request(),||Ok(NOW),verify)
+                    .await.unwrap(),fifth);
+                let stamp: Option<String> = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=4",[],|r|r.get(0)).unwrap();
+                assert_eq!(stamp.as_deref(),Some("2026-11-25T04:03:00.000Z"));
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,history_request(),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_invalid_history");
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_stale_ack");
+                let ack = dispatch(&mut active,&mut scoped,&mut db,ack_request(5),||Ok(NOW),verify).await.unwrap();
+                assert_eq!(ack["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(5),||Ok(NOW),verify)
                     .await.unwrap(),ack);
             });
             worker.join().unwrap()
         };
+        drop(db);
+        let archive = repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
+        let mut db = archive.conn.into_inner().unwrap();
         let summary = serde_json::to_value(ledger::summary(&mut db,&binding).unwrap()).unwrap();
-        assert_eq!(ledger::count(&db),4);
+        assert_eq!(ledger::count(&db),5);
+        assert_eq!(summary["sequence"],5);
+        assert_eq!(summary["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
+        let recovered: String = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=4",[],|r|r.get(0)).unwrap();
+        assert_eq!(recovered,"2026-11-25T04:03:00.000Z");
         // Same typed workspace dispatch as the profile UI; the settlement
         // grant is independent and the verifier is native-only.
         use super::resource_http::{dispatch_workspace_isolated, NativePreviewSession};

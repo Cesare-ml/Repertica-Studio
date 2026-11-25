@@ -206,6 +206,9 @@ pub(crate) fn history(c:&mut Connection,b:&Binding,after:u64,bytes:&[u8])->Resul
     let t=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
     let mut n=latest(&t,b)?;
     if after>n{return Err("settlement_history_gap")}
+    // An overlapping recovery page must not report a server head behind
+    // already committed local evidence. Reject before any receipt changes.
+    if h.latest_sequence<n{return Err("settlement_invalid_history")}
     for (i,d) in h.items.into_iter().enumerate(){
         if d.delivery_sequence!=after+i as u64+1{return Err("settlement_invalid_history")}
         store(&t,b,d,&mut n)?;

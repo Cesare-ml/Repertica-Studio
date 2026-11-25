@@ -61,7 +61,11 @@ impl NativeSettlementHttp {
     pub(super) async fn history(&self, c: &mut Connection, b: &Binding,
         token: &NativeAccessToken, clock: impl Fn() -> Result<u64, Failure>) -> Result<u64, Failure> {
         self.authorize(token, b, &clock)?;
-        let after = ledger::cursor(c, b)?;
+        // Explicit history overlaps the last two committed deliveries so a
+        // lost ACK response can be recovered even after one newer poll.
+        // No renderer cursor, automatic ACK, or retry; a full page still
+        // advances by at least 48 new deliveries while catching up.
+        let after = ledger::cursor(c, b)?.saturating_sub(2);
         let bytes = self.request(token, b, json!({"action":"history","auctionId":b.auction,
             "tenantId":b.tenant,"afterSequence":after}), &clock).await?;
         ledger::history(c, b, after, &bytes)
