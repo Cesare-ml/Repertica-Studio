@@ -7,10 +7,15 @@ export type SettlementSummary = Readonly<{
   currency: 'EUR';
   fulfilledAt: string;
   acknowledgedAt: string | null;
+  ackPending: number;
+  ackScanned: number;
+  ackConfirmed: number;
 }>;
 export type SettlementLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
-const keys = ['sequence', 'status', 'amount', 'currency', 'fulfilledAt', 'acknowledgedAt'] as const;
+const resultKeys = ['sequence', 'status', 'amount', 'currency', 'fulfilledAt', 'acknowledgedAt'] as const;
+const keys = [...resultKeys, 'ackPending', 'ackScanned', 'ackConfirmed'] as const;
 const positive = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n > 0;
+const count = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 const timestamp = (v: unknown): v is string => typeof v === 'string' && v.length <= 40 &&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(v) && Number.isFinite(Date.parse(v));
 
@@ -21,9 +26,12 @@ export function parseSettlementSummary(raw: unknown): SettlementSummary | null {
   if (Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key)) ||
       !positive(value['sequence']) || !positive(value['amount']) || value['currency'] !== 'EUR' ||
       (value['status'] !== 'fulfilled' && value['status'] !== 'review_required') || !timestamp(value['fulfilledAt']) ||
-      (value['acknowledgedAt'] !== null && !timestamp(value['acknowledgedAt']))) throw new Error('settlement_invalid_summary');
+      (value['acknowledgedAt'] !== null && !timestamp(value['acknowledgedAt'])) ||
+      !count(value['ackPending']) || !count(value['ackScanned']) || !count(value['ackConfirmed']) ||
+      BigInt(value['ackPending']) + BigInt(value['ackScanned']) + BigInt(value['ackConfirmed']) > BigInt(value['sequence'])) throw new Error('settlement_invalid_summary');
   return Object.freeze({sequence: value['sequence'], status: value['status'], amount: value['amount'], currency: value['currency'],
-    fulfilledAt: value['fulfilledAt'], acknowledgedAt: value['acknowledgedAt']});
+    fulfilledAt: value['fulfilledAt'], acknowledgedAt: value['acknowledgedAt'],
+    ackPending:value['ackPending'], ackScanned:value['ackScanned'], ackConfirmed:value['ackConfirmed']});
 }
 
 const labels = {
@@ -32,6 +40,15 @@ const labels = {
   es: ['Cumplimiento comunicado', 'Revisión manual necesaria', 'Recepción confirmada', 'Recepción aún no confirmada', 'Resultado de la subasta: no es un registro de venta ni de cobro.'],
   fr: ['Exécution signalée', 'Révision manuelle requise', 'Réception confirmée', 'Réception non encore confirmée', 'Résultat de la vente aux enchères : aucune vente ni aucun encaissement enregistré.'],
   de: ['Erfüllung gemeldet', 'Manuelle Prüfung erforderlich', 'Empfang bestätigt', 'Empfang noch nicht bestätigt', 'Auktionsergebnis: kein erfasster Verkauf oder Zahlungseingang.'],
+} as const;
+
+// Each count describes explicit local ACK attempts, not payments or all deliveries.
+const recoveryLabels = {
+  it: ['Conferme tentate: da verificare', 'Verificate nello storico, senza conferma', 'Confermate dal server'],
+  en: ['Receipt attempts awaiting verification', 'Checked in history, not confirmed', 'Confirmed by server'],
+  es: ['Intentos de confirmación pendientes de verificar', 'Consultados en el historial, sin confirmar', 'Confirmados por el servidor'],
+  fr: ['Tentatives de confirmation à vérifier', 'Vérifiées dans l’historique, non confirmées', 'Confirmées par le serveur'],
+  de: ['Empfangsbestätigungsversuche noch zu prüfen', 'Im Verlauf geprüft, nicht bestätigt', 'Vom Server bestätigt'],
 } as const;
 
 // Decimal formatting from integer cents, not floating-point division of potentially
@@ -48,9 +65,11 @@ export function settlementPresentation(raw: unknown, language: SettlementLanguag
   const summary = parseSettlementSummary(raw);
   if (!summary) return null;
   const l = labels[language] ?? labels.en;
+  const recovery = recoveryLabels[language] ?? recoveryLabels.en;
   return Object.freeze({ sequence: summary.sequence, status: l[summary.status === 'review_required' ? 1 : 0],
     receipt: l[summary.acknowledgedAt === null ? 3 : 2], notice: l[4], amount: formatCents(summary.amount, language),
-    fulfilledAt: summary.fulfilledAt, acknowledgedAt: summary.acknowledgedAt });
+    fulfilledAt: summary.fulfilledAt, acknowledgedAt: summary.acknowledgedAt,
+    recovery: Object.freeze([summary.ackPending,summary.ackScanned,summary.ackConfirmed].map((n,i)=>({label:recovery[i],count:n}))) });
 }
 
 // A local selection is not an authorization. The native backend must resolve
@@ -113,7 +132,7 @@ export class SettlementReader {
       const value = parseSettlementSummary(await this.read({action:'ackSettlement', artworkId, scope,
         expectedSequence:reviewed.sequence, confirmationId:id}));
       if (!value || value.acknowledgedAt === null ||
-          keys.some(k => k !== 'acknowledgedAt' && value[k] !== reviewed[k])) throw new Error('settlement_invalid_summary');
+          resultKeys.some(k => k !== 'acknowledgedAt' && value[k] !== reviewed[k])) throw new Error('settlement_invalid_summary');
       if (generation === this.generation) this.state = {kind:'ready',summary:value};
     } catch {
       if (generation === this.generation) this.state = {kind:'unavailable'};

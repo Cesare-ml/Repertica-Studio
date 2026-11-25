@@ -4,7 +4,7 @@ import {SettlementReader} from '../src/app/auction-settlement-summary.ts';
 const selected = {artworkId:'local-work',scope:'archive',revision:'r1'};
 const confirmationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const result = {sequence:3,status:'review_required',amount:25000,currency:'EUR',
-  fulfilledAt:'2026-11-25T04:00:00.000Z',acknowledgedAt:null};
+  fulfilledAt:'2026-11-25T04:00:00.000Z',acknowledgedAt:null,ackPending:1,ackScanned:0,ackConfirmed:0};
 
 test('read sends only selected local artwork and archive; no authority or remote IDs',async()=>{
   const calls=[];
@@ -63,7 +63,7 @@ test('poll and one history page are explicit and never send renderer cursors',as
 });
 test('ACK requires the reviewed current result and never sends private or remote identifiers',async()=>{
   const calls=[];
-  const acknowledged={...result,acknowledgedAt:'2026-11-25T04:02:00.000Z'};
+  const acknowledged={...result,acknowledgedAt:'2026-11-25T04:02:00.000Z',ackPending:0,ackConfirmed:1};
   const reader=new SettlementReader(async request=>{calls.push(request);return request.action==='ackSettlement'?acknowledged:request.action==='reviewSettlementAck'?{confirmationId,summary:result}:result;});
   await reader.acknowledge(selected);
   await reader.load(selected);
@@ -102,7 +102,7 @@ test('clear invalidates in-flight ACK and prevents duplicate request while busy'
 });
 
 test('native review mismatch or invalid capability never sends ACK',async()=>{
-  for(const review of [{confirmationId,summary:{...result,amount:1}},{confirmationId:'bad',summary:result}]) {
+  for(const review of [{confirmationId,summary:{...result,amount:1}},{confirmationId,summary:{...result,ackPending:0}},{confirmationId:'bad',summary:result}]) {
     const calls=[];
     const reader=new SettlementReader(async request=>{calls.push(request);return calls.length===1?result:review;});
     await reader.load(selected);

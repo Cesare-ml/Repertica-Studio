@@ -584,7 +584,8 @@ mod tests {
                 |_| Err("settlement_access_denied"))),Err("settlement_access_denied"));
         let summary = settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),resolve).unwrap();
         assert_eq!(summary,json!({"sequence":3,"status":"review_required","amount":25000,"currency":"EUR",
-            "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z"}));
+            "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z",
+            "ackPending":0,"ackScanned":0,"ackConfirmed":1}));
         assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&profile),||Ok(NOW),
             |_,_,_,_| panic!("profile must not resolve")),Err("oauth_token_rejected"));
         assert_eq!(settlement_http::read_selected_summary(&mut db,request(),None,||Ok(NOW),
@@ -727,6 +728,9 @@ mod tests {
                     .await.unwrap();
                 assert_eq!(recovered["sequence"],7);
                 assert!(recovered["acknowledgedAt"].is_null());
+                assert_eq!(recovered["ackPending"],0);
+                assert_eq!(recovered["ackScanned"],0);
+                assert_eq!(recovered["ackConfirmed"],1);
                 assert_eq!(ledger::history_cursor(&mut db,&binding),Ok(5));
                 let stamp: Option<String> = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=4",[],|r|r.get(0)).unwrap();
                 assert_eq!(stamp.as_deref(),Some("2026-11-25T04:03:00.000Z"));
@@ -735,6 +739,7 @@ mod tests {
                 assert_eq!(reviewed_ack!(4).unwrap_err(),"settlement_stale_ack");
                 let ack = reviewed_ack!(7).unwrap();
                 assert_eq!(ack["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
+                assert_eq!(ack["ackConfirmed"],2);
                 assert_eq!(reviewed_ack!(7).unwrap(),ack);
             });
             worker.join().unwrap()

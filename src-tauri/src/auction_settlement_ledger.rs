@@ -336,6 +336,9 @@ pub(crate) struct SettlementSummary {
     pub(crate) currency:String,
     pub(crate) fulfilled_at:String,
     pub(crate) acknowledged_at:Option<String>,
+    pub(crate) ack_pending:u64,
+    pub(crate) ack_scanned:u64,
+    pub(crate) ack_confirmed:u64,
 }
 
 pub(crate) fn summary(c:&mut Connection,b:&Binding)->Result<Option<SettlementSummary>,Error>{
@@ -348,8 +351,17 @@ pub(crate) fn summary(c:&mut Connection,b:&Binding)->Result<Option<SettlementSum
     let d:Delivery=decode(raw.as_bytes())?;
     if !d.valid(b)||d.delivery_sequence!=n||d.acknowledged_at.is_some()||
        ack.as_deref().is_some_and(|s|!date(s)){return Err("settlement_delivery_conflict")}
+    // Counts concern explicit local attempts only, never sales or all remote receipts.
+    // The journal and selected binding were validated by latest() in this transaction.
+    let (ack_pending,ack_scanned,ack_confirmed):(u64,u64,u64)=t.query_row(
+        "SELECT COUNT(CASE WHEN r.acknowledged_at IS NULL AND a.checked_through IS NULL THEN 1 END),
+                COUNT(CASE WHEN r.acknowledged_at IS NULL AND a.checked_through IS NOT NULL THEN 1 END),
+                COUNT(CASE WHEN r.acknowledged_at IS NOT NULL THEN 1 END)
+         FROM auction_settlement_ack_attempts a JOIN auction_settlement_receipts r USING(scope,auction,sequence)
+         WHERE a.scope=?1 AND a.auction=?2 AND a.owner=?3",
+        params![b.scope,b.auction,b.owner],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(db)?;
     let result=SettlementSummary{sequence:n,status:d.status,amount:d.amount,currency:d.currency,
-        fulfilled_at:d.fulfilled_at,acknowledged_at:ack};
+        fulfilled_at:d.fulfilled_at,acknowledged_at:ack,ack_pending,ack_scanned,ack_confirmed};
     t.commit().map_err(db)?;
     Ok(Some(result))
 }
@@ -480,7 +492,8 @@ mod fixtures {
         let view=summary(&mut c,&b).unwrap().unwrap();
         assert_eq!(serde_json::to_value(view).unwrap(),json!({
             "sequence":2,"status":"review_required","amount":25000,"currency":"EUR",
-            "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z"
+            "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z",
+            "ackPending":0,"ackScanned":0,"ackConfirmed":0
         }));
         let mut wrong=b.clone();wrong.owner="repertica:2".into();
         assert_eq!(summary(&mut c,&wrong),Err("settlement_binding_mismatch"));
@@ -549,12 +562,17 @@ mod fixtures {
         for n in 6..=9 {poll(&mut c,&b,&bytes(reply(delivery(n,"review_required")))).unwrap();}
         drop(c);
         let mut c=Connection::open(&path).unwrap();
+        let before=summary(&mut c,&b).unwrap().unwrap();
+        assert_eq!((before.ack_pending,before.ack_scanned,before.ack_confirmed),(2,0,0));
         assert_eq!(history_cursor(&mut c,&b),Ok(0));
         let mut first=delivery(1,"fulfilled");
         first["acknowledged_at"]=json!("2026-11-25T04:02:00.000Z");
         let mut items=vec![first];
         for n in 2..=9 {items.push(delivery(n,"review_required"));}
         assert_eq!(history(&mut c,&b,0,&bytes(page(items,9,None))),Ok(9));
+        let after=summary(&mut c,&b).unwrap().unwrap();
+        assert_eq!((after.ack_pending,after.ack_scanned,after.ack_confirmed),(0,1,1));
+        assert_eq!(after.acknowledged_at,None);
         assert_eq!(history_cursor(&mut c,&b),Ok(7));
         let (stamp,checked):(Option<String>,Option<u64>)=c.query_row(
             "SELECT r.acknowledged_at,a.checked_through FROM auction_settlement_ack_attempts a

@@ -199,6 +199,9 @@ const ERRORS: Record<string, string> = {
         <p>{{ result.receipt }} · {{ result.fulfilledAt }}</p>
         <p *ngIf="result.acknowledgedAt">{{ result.acknowledgedAt }}</p>
         <p class="auctions-muted">{{ result.notice }}</p>
+        <div class="auctions-muted" role="status">
+          <p *ngFor="let item of result.recovery">{{ item.label }}: {{ item.count }}</p>
+        </div>
         <button type="button" *ngIf="!result.acknowledgedAt" (click)="acknowledgeSettlement()"
           [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('ack') }} #{{ result.sequence }}</button>
       </div>
