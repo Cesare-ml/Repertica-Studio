@@ -1,4 +1,6 @@
 //! Explicit, local archive import. Never opens paths from imported data.
+#[path = "archive_import_batches.rs"]
+pub(crate) mod batches;
 use crate::{commands::{clean, required}, db::Database};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::path::Path;
