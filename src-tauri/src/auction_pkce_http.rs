@@ -639,6 +639,21 @@ mod tests {
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW),verify).await.unwrap(),summary);
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW),verify)
                     .await.unwrap_err(),"settlement_review_required");
+                let expired = dispatch(&mut active,&mut scoped,&mut db,review_request(3),||Ok(NOW),verify).await.unwrap();
+                let id = expired["confirmationId"].as_str().unwrap();
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW+60),verify)
+                    .await.unwrap_err(),"settlement_review_required");
+                let cancelled = dispatch(&mut active,&mut scoped,&mut db,review_request(3),||Ok(NOW),verify).await.unwrap();
+                let id = cancelled["confirmationId"].as_str().unwrap();
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,request(),||Ok(NOW),verify).await.unwrap(),summary);
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_review_required");
+                let revoked = dispatch(&mut active,&mut scoped,&mut db,review_request(3),||Ok(NOW),verify).await.unwrap();
+                let id = revoked["confirmationId"].as_str().unwrap();
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW),
+                    |_| Err("settlement_access_denied")).await.unwrap_err(),"settlement_access_denied");
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_review_required");
                 assert_eq!(reviewed_ack!(2).unwrap_err(),"settlement_stale_ack");
                 assert_eq!(reviewed_ack!(3).unwrap(),summary);
             });
