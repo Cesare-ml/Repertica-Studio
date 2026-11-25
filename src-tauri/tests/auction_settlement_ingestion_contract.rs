@@ -20,9 +20,9 @@ CREATE TABLE settlement_fixture_receipts (
 
 // Trusted native fixture, not constructed from the response or renderer.
 #[derive(Clone)]
-struct Binding {
-    scope:String, auction:String, tenant:String, association:String,
-    cloud_work:String, local_work:String, owner:String,
+pub(crate) struct Binding {
+    pub(crate) scope:String, pub(crate) auction:String, pub(crate) tenant:String, pub(crate) association:String,
+    pub(crate) cloud_work:String, pub(crate) local_work:String, pub(crate) owner:String,
 }
 fn id(s:&str,max:usize)->bool {
     !s.is_empty() && s.len()<=max && s.bytes().all(|b|b.is_ascii_alphanumeric()||matches!(b,b':'|b'_'|b'-'))
@@ -123,7 +123,14 @@ fn store(t:&Transaction<'_>,b:&Binding,mut d:Delivery,cursor:&mut u64)->Result<(
     }
     Ok(())
 }
-fn poll(c:&mut Connection,b:&Binding,bytes:&[u8])->Result<u64,Error>{
+// Check the current archive and immutable binding before any fixture network I/O.
+pub(crate) fn cursor(c:&mut Connection,b:&Binding)->Result<u64,Error>{
+    let t=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
+    let n=latest(&t,b)?;
+    t.commit().map_err(db)?;
+    Ok(n)
+}
+pub(crate) fn poll(c:&mut Connection,b:&Binding,bytes:&[u8])->Result<u64,Error>{
     let r:Poll=decode(bytes)?;
     envelope(b,r.ok,&r.artwork_id,&r.association_id)?;
     let t=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
@@ -132,7 +139,7 @@ fn poll(c:&mut Connection,b:&Binding,bytes:&[u8])->Result<u64,Error>{
     t.commit().map_err(db)?;
     Ok(n)
 }
-fn history(c:&mut Connection,b:&Binding,after:u64,bytes:&[u8])->Result<u64,Error>{
+pub(crate) fn history(c:&mut Connection,b:&Binding,after:u64,bytes:&[u8])->Result<u64,Error>{
     let r:HistoryReply=decode(bytes)?;
     envelope(b,r.ok,&r.artwork_id,&r.association_id)?;
     let h=r.history;
@@ -153,7 +160,7 @@ fn history(c:&mut Connection,b:&Binding,after:u64,bytes:&[u8])->Result<u64,Error
     Ok(n)
 }
 #[derive(Debug,PartialEq,Eq)]
-struct AckTarget{result_id:String,sequence:u64}
+pub(crate) struct AckTarget{pub(crate) result_id:String,pub(crate) sequence:u64}
 fn stored_target(t:&Transaction<'_>,b:&Binding)->Result<AckTarget,Error>{
     let n=latest(t,b)?;
     if n==0{return Err("settlement_not_ingested")}
@@ -164,13 +171,13 @@ fn stored_target(t:&Transaction<'_>,b:&Binding)->Result<AckTarget,Error>{
     Ok(AckTarget{result_id:d.result_id,sequence:n})
 }
 // Only committed data can propose an ACK; this function does not send anything.
-fn ack_target(c:&mut Connection,b:&Binding)->Result<AckTarget,Error>{
+pub(crate) fn ack_target(c:&mut Connection,b:&Binding)->Result<AckTarget,Error>{
     let t=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
     let r=stored_target(&t,b)?;
     t.commit().map_err(db)?;
     Ok(r)
 }
-fn ack(c:&mut Connection,b:&Binding,request:&AckTarget,bytes:&[u8])->Result<(),Error>{
+pub(crate) fn ack(c:&mut Connection,b:&Binding,request:&AckTarget,bytes:&[u8])->Result<(),Error>{
     let r:Ack=decode(bytes)?;
     envelope(b,r.ok,&r.artwork_id,&r.association_id)?;
     let _replayed=r.replayed;
@@ -188,9 +195,9 @@ fn ack(c:&mut Connection,b:&Binding,request:&AckTarget,bytes:&[u8])->Result<(),E
 use serde_json::{json,Value};
 const SCOPE:&str="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const WORK:&str="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-fn binding()->Binding{Binding{scope:SCOPE.into(),auction:"fixture-auction".into(),tenant:"fixture-tenant".into(),
+pub(crate) fn binding()->Binding{Binding{scope:SCOPE.into(),auction:"fixture-auction".into(),tenant:"fixture-tenant".into(),
     association:"fixture-published-link".into(),cloud_work:"fixture-cloud-work".into(),local_work:WORK.into(),owner:"repertica:1".into()}}
-fn database()->Connection{
+pub(crate) fn database()->Connection{
     let c=Connection::open_in_memory().unwrap();
     c.execute_batch("CREATE TABLE auction_archive_scope(singleton INTEGER PRIMARY KEY,scope TEXT);
         CREATE TABLE artworks(id TEXT PRIMARY KEY,status TEXT);CREATE TABLE sales(id TEXT PRIMARY KEY);").unwrap();
@@ -198,14 +205,14 @@ fn database()->Connection{
     c.execute("INSERT INTO artworks VALUES(?1,'available')",[WORK]).unwrap();
     c.execute_batch(SCHEMA).unwrap();c
 }
-fn delivery(n:u64,status:&str)->Value{json!({"auction_id":"fixture-auction","result_id":"fixture-auction:1:fulfillment",
+pub(crate) fn delivery(n:u64,status:&str)->Value{json!({"auction_id":"fixture-auction","result_id":"fixture-auction:1:fulfillment",
     "closure_version":1,"delivery_sequence":n,"settlement_revision":2,"runtime_version":3,"fulfillment_revision":2,
     "amount":25000,"currency":"EUR","fulfilled_at":"2026-11-25T04:00:00.000Z","status":status,"acknowledged_at":null})}
-fn reply(d:Value)->Value{json!({"ok":true,"artworkId":"fixture-cloud-work","associationId":"fixture-published-link","delivery":d})}
-fn page(items:Vec<Value>,last:u64,next:Option<u64>)->Value{json!({"ok":true,"artworkId":"fixture-cloud-work","associationId":"fixture-published-link",
+pub(crate) fn reply(d:Value)->Value{json!({"ok":true,"artworkId":"fixture-cloud-work","associationId":"fixture-published-link","delivery":d})}
+pub(crate) fn page(items:Vec<Value>,last:u64,next:Option<u64>)->Value{json!({"ok":true,"artworkId":"fixture-cloud-work","associationId":"fixture-published-link",
     "history":{"latestSequence":last,"items":items,"nextAfterSequence":next}})}
 fn bytes(v:Value)->Vec<u8>{serde_json::to_vec(&v).unwrap()}
-fn count(c:&Connection)->u64{c.query_row("SELECT COUNT(*) FROM settlement_fixture_receipts",[],|r|r.get(0)).unwrap()}
+pub(crate) fn count(c:&Connection)->u64{c.query_row("SELECT COUNT(*) FROM settlement_fixture_receipts",[],|r|r.get(0)).unwrap()}
 #[test]
 fn replay_gap_and_review_restoration(){
     let mut c=database();let b=binding();
