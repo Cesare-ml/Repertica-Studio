@@ -121,3 +121,57 @@ test('a management-list selection cannot reopen a different archive after restor
   assert.equal(editor.view.artwork.id, 'a');
   assert.equal(port.records.size, 1);
 });
+
+test('explicit reload recovers a conflict without writing or losing unsaved edits silently', async () => {
+  const port = storage(), first = new AuctionEditorSession(port), second = new AuctionEditorSession(port);
+  await first.open(artwork);
+  await first.save();
+  await second.open(artwork);
+  first.edit({ ...first.view.draft, title: 'Persisted elsewhere' });
+  await first.save();
+  second.edit({ ...second.view.draft, title: 'Unsaved local edit' });
+  await assert.rejects(second.save(), /auction_draft_conflict/);
+  await assert.rejects(second.reloadSaved(), /auction_editor_unsaved/);
+  await assert.rejects(second.reloadSaved(true, 'wrong-revision'), /auction_draft_conflict/);
+  assert.equal(second.view.draft.title, 'Unsaved local edit');
+  assert.equal(second.view.dirty, true);
+  const current = port.records.get('a');
+  await second.reloadSaved(true, current.revision);
+  assert.equal(second.view.draft.title, 'Persisted elsewhere');
+  assert.equal(second.view.dirty, false);
+  assert.equal(port.records.get('a'), current);
+  second.edit({ ...second.view.draft, title: 'After reload' });
+  await second.save();
+  assert.equal(second.view.draft.title, 'After reload');
+});
+
+test('reload accepts native pending and receipt without sending or replacing the archive', async () => {
+  const port = storage(), editor = new AuctionEditorSession(port);
+  await editor.open(artwork);
+  await editor.save();
+  const saved = port.records.get('a');
+  const record = JSON.parse(saved.recordJson);
+  const receipt = { tenantId:'tenant', auctionId:'synthetic-id', slug:'artist--art', idempotencyKey:pending.idempotencyKey };
+  const changed = { ...saved, revision:'native-revision', recordJson:JSON.stringify({ ...record, pending, receipt }) };
+  port.records.set('a', changed);
+  await editor.reloadSaved(false, changed.revision);
+  assert.deepEqual(editor.view.pending, pending);
+  assert.deepEqual(editor.view.receipt, receipt);
+  assert.equal(port.records.get('a'), changed);
+  port.records.set('a', { ...changed, scope:'other-archive', revision:'other' });
+  await assert.rejects(editor.reloadSaved(), /auction_draft_conflict/);
+  assert.deepEqual(editor.view.receipt, receipt);
+  assert.equal(editor.busy, false);
+});
+
+test('reload is unavailable for unsaved work and locks concurrent editor actions', async () => {
+  const port = storage(), editor = new AuctionEditorSession(port);
+  await editor.open(artwork);
+  await assert.rejects(editor.reloadSaved(), /auction_draft_conflict/);
+  await editor.save();
+  const loading = editor.reloadSaved();
+  assert.throws(() => editor.close(true), /auction_editor_busy/);
+  await assert.rejects(editor.save(), /auction_editor_busy/);
+  await loading;
+  assert.equal(editor.busy, false);
+});

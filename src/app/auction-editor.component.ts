@@ -166,6 +166,29 @@ export class AuctionEditorComponent {
     finally { this.cdr.markForCheck(); }
   }
 
+  reloadLabel(discard: boolean): string {
+    const labels = {
+      it: ['Rileggi bozza salvata', 'Scarta modifiche locali e rileggi bozza'],
+      en: ['Reload saved draft', 'Discard local edits and reload draft'],
+      es: ['Recargar borrador guardado', 'Descartar cambios locales y recargar borrador'],
+      fr: ['Relire le brouillon enregistré', 'Ignorer les modifications locales et relire le brouillon'],
+      de: ['Gespeicherten Entwurf neu laden', 'Lokale Änderungen verwerfen und Entwurf neu laden']
+    };
+    return labels[this.language][discard ? 1 : 0];
+  }
+
+  async reloadDraft(discard = false): Promise<void> {
+    if (this.busy || !this.view?.saved || (this.dirty && !discard)) return;
+    this.invalidateReview();
+    this.error = '';
+    this.notice = '';
+    try {
+      await this.editor.reloadSaved(discard);
+      this.refreshForm();
+    } catch (error) { this.error = auctionEditorError(error); }
+    finally { this.cdr.markForCheck(); }
+  }
+
   close(discard = false): void {
     if (this.busy || (this.dirty && !discard)) return;
     this.editor.close(discard);

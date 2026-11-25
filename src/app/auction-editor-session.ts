@@ -89,6 +89,31 @@ export class AuctionEditorSession {
     } finally { this.inFlight = false; }
   }
 
+  /** Explicit reload after a CAS conflict or a native mutation. Never reopen
+   * a replaced archive, silently discard edits, or write a stale revision.
+   * A native caller can additionally pin the exact revision it just committed.
+   */
+  async reloadSaved(discardUnsaved = false, expectedRevision?: string): Promise<void> {
+    this.ensureIdle();
+    const s = this.session;
+    if (!s || !s.snapshot.revision) throw new Error('auction_draft_conflict');
+    if (s.dirty && !discardUnsaved) throw new Error('auction_editor_unsaved');
+    this.inFlight = true;
+    try {
+      const snapshot = await this.storage.read(s.artwork.id);
+      if (snapshot.artworkId !== s.artwork.id || snapshot.scope !== s.snapshot.scope ||
+          !snapshot.revision || (expectedRevision !== undefined && snapshot.revision !== expectedRevision)) {
+        throw new Error('auction_draft_conflict');
+      }
+      const decoded = this.storage.decode(snapshot, s.artwork.id);
+      if (!decoded) throw new Error('auction_draft_conflict');
+      // Accept only the current persisted record. Local editor fields are not
+      // merged into it, and no prepared request is created or resent.
+      this.session = { ...s, snapshot, draft: { ...decoded.draft },
+        pending: decoded.pending, receipt: decoded.receipt, dirty: false };
+    } finally { this.inFlight = false; }
+  }
+
   /** Discard is explicit and affects only unsaved editor fields, never the database. */
   close(discardUnsaved = false): void {
     this.ensureIdle();

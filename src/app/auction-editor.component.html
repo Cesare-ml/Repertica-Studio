@@ -69,6 +69,7 @@
     </section>
   </ng-container>
   <footer>
+    <button type="button" *ngIf="view?.saved" [disabled]="busy" (click)="reloadDraft(dirty)">{{ reloadLabel(dirty) }}</button>
     <button type="button" *ngIf="dirty" [disabled]="busy" (click)="close(true)">{{ tr('Scarta modifiche non salvate e chiudi') }}</button>
     <button type="button" [disabled]="busy || dirty" (click)="close()">{{ tr('Chiudi') }}</button>
     <button type="button" class="primary" *ngIf="form" [disabled]="busy" (click)="saveDraft()">{{ tr('Salva bozza locale') }}</button>
