@@ -1,10 +1,11 @@
 // Read-only preflight for a completed local export directory. Not an import.
 import { createHash } from 'node:crypto';
-import { lstat, readdir, realpath } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readRegular, PACKAGE_LIMIT } from './add-local-artwork-covers.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
+import { publishLocalPackage } from './publish-local-package.mjs';
 
 const exact = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) &&
   Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v,k));
@@ -14,7 +15,7 @@ const folded = s => s.replace(/[A-Z]/g,c=>c.toLowerCase());
 const boundedInt = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
 const fields = ['file','sha256','bytes','artworks','collectors','sales','photographs'];
 
-export async function verifyArchiveMediaBatches(directory) {
+async function inspectArchiveMediaBatches(directory) {
   const selected=resolve(directory);
   if (!(await lstat(selected)).isDirectory()) throw Error('Unsafe export directory');
   const dir=await realpath(selected);
@@ -65,16 +66,70 @@ export async function verifyArchiveMediaBatches(directory) {
   }
   await checkEntries();
   if(!(await readRegular(manifestPath,1024*1024)).equals(manifestBytes)) throw Error('Manifest changed');
-  return totals;
+  return {dir, manifestBytes, manifest, manifest_digest:sha(manifestBytes), totals};
+}
+
+export async function verifyArchiveMediaBatches(directory) {
+  return (await inspectArchiveMediaBatches(directory)).totals;
+}
+
+// Manual recovery only: the operator has checked the active archive and explicitly
+// selected whole packages known to be absent. This cannot establish commit status.
+export async function prepareRemainingBatches(directory, output, expectedDigest, indexes) {
+  const verified = await inspectArchiveMediaBatches(directory);
+  if (expectedDigest !== verified.manifest_digest) throw Error('Original manifest changed');
+  const entries = verified.manifest.packages;
+  if (!Array.isArray(indexes) || indexes.length < 1 || indexes.length >= entries.length ||
+      indexes.some((i,n) => !boundedInt(i,1,entries.length) || (n>0 && i<=indexes[n-1]))) {
+    throw Error('Select a strict, ascending subset of whole absent packages');
+  }
+  const selected = resolve(output);
+  const parent = await realpath(dirname(selected));
+  const rel = relative(verified.dir,parent);
+  if (!isAbsolute(rel) && (rel==='' || (rel!=='..' && !rel.startsWith('..'+sep)))) {
+    throw Error('Recovery destination must be outside the original export');
+  }
+  const dest = join(parent,basename(selected));
+  await mkdir(dest,{mode:0o700}); // never overwrite or clean up an existing directory
+  try {
+    const packages=[];
+    for (const index of indexes) {
+      const entry=entries[index-1];
+      const bytes=await readRegular(join(verified.dir,entry.file),PACKAGE_LIMIT);
+      if(bytes.length!==entry.bytes || sha(bytes)!==entry.sha256) throw Error('Package integrity mismatch');
+      const file=`package-${String(packages.length+1).padStart(4,'0')}.json`;
+      await publishLocalPackage(join(dest,file),bytes);
+      packages.push({...entry,file});
+    }
+    if (!(await readRegular(join(verified.dir,'manifest.json'),1024*1024)).equals(verified.manifestBytes)) {
+      throw Error('Original manifest changed');
+    }
+    await publishLocalPackage(join(dest,'manifest.json'),JSON.stringify({format:verified.manifest.format,packages},null,2)+'\n');
+    return await verifyArchiveMediaBatches(dest);
+  } catch (error) {
+    await rm(dest,{recursive:true,force:true}).catch(()=>{});
+    throw error;
+  }
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   try {
-    if(process.argv.length!==3) throw Error('Select one completed export directory');
-    const totals=await verifyArchiveMediaBatches(process.argv[2]);
-    console.log(JSON.stringify(totals));
-    console.log('Directory integrity verified. Preview every package in Studio before confirming; this is not semantic validation or an import.');
+    const args=process.argv.slice(2);
+    if(args[0]==='--prepare-remaining') {
+      if(args.length!==6 || args[4]!=='--confirmed-absent' || !/^[1-9][0-9]*(?:,[1-9][0-9]*)*$/.test(args[5])) {
+        throw Error('Explicit confirmed-absent package numbers required');
+      }
+      const totals=await prepareRemainingBatches(args[1],args[2],args[3],args[5].split(',').map(Number));
+      console.log(JSON.stringify(totals));
+      console.log('New recovery folder prepared. This is not proof of absence; run native preflight and confirm each package in Studio.');
+    } else {
+      if(args.length!==1) throw Error('Select one completed export directory');
+      const result=await inspectArchiveMediaBatches(args[0]);
+      console.log(JSON.stringify(result.totals));
+      console.log('Manifest SHA-256: '+result.manifest_digest);
+      console.log('Directory integrity verified. Preview every package in Studio before confirming; this is not semantic validation or an import.');
+    }
   } catch {
-    console.error('Batch verification rejected. Check the complete export directory and manifest; do not import any package.');
+    console.error('Batch verification or recovery rejected. Check the original export, explicit selection and new destination; do not import an unverified package.');
     process.exitCode=1;
   }
 }

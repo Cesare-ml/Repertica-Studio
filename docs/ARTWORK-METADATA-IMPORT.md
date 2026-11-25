@@ -212,7 +212,7 @@ node scripts/verify-archive-media-batches.mjs EXPORT_DIRECTORY
 node --test tests/verify-archive-media-batches.test.mjs
 ```
 
-Before opening any batch in Studio, run the verifier against the original, trusted, unchanged export directory. It checks manifest structure, exact contiguous package names, absence of missing/unlisted entries, regular files, byte counts, SHA-256, package counts and repeated artwork codes or collector contacts across batches. It prints aggregate counts only and never writes files or accesses a database. Hashes check consistency with the manifest, not authenticity. This is a preflight, not a filesystem snapshot, semantic validation, image decoding or an atomic multi-package import. Keep the directory unchanged after verification, make a verified backup and review each package in Studio's native preview. If verification fails, do not import any part; regenerate the complete export from the trusted local copy.
+Before opening any batch in Studio, run the verifier against the original, trusted, unchanged export directory. It checks manifest structure, exact contiguous package names, absence of missing/unlisted entries, regular files, byte counts, SHA-256, package counts and repeated artwork codes or collector contacts across batches. It prints aggregate counts and the manifest SHA-256 only, and never writes files or accesses a database. Hashes check consistency with the manifest, not authenticity. This is a preflight, not a filesystem snapshot, semantic validation, image decoding or an atomic multi-package import. Keep the directory unchanged after verification, make a verified backup and review each package in Studio's native preview. If verification fails, do not import any part; regenerate the complete export from the trusted local copy.
 
 ## Native directory preflight (internal contract, not wired to desktop yet)
 
@@ -227,3 +227,17 @@ The dedicated frontend state module `src/app/archive-batch-progress.ts` is also 
 
 ### Importazione cartella nell’app desktop (implementata, collaudo nativo necessario)
 Da Impostazioni → Importazione/esportazione, scegli la cartella contenente il manifest dei pacchetti. Il preflight nativo verifica tutto il set senza scrivere nell’archivio. Seleziona «Verifica il prossimo pacchetto», controlla l’anteprima completa di opere, foto e relazioni commerciali, quindi conferma esplicitamente il singolo pacchetto. Ripeti per ciascun pacchetto. I contatori riportano solo i commit confermati. L’interruzione non annulla i pacchetti precedenti; una risposta IPC mancante o incoerente richiede controllo manuale dell’archivio prima di chiudere la sessione. Non ripetere alla cieca una cartella parzialmente importata: l’archivio non deduplica o fonde i record già presenti. La sessione rimane in memoria durante la navigazione, non è un journal persistente e non sopravvive alla chiusura dell’app. L’importazione singola e il ripristino sono inibiti finché la sessione è aperta. Il backup preventivo rimane raccomandato. Nessun invio in rete.
+
+### Recupero manuale dopo un'importazione parziale (strumento tecnico offline)
+
+Non cancellare o modificare il manifest originale. Dopo un'interruzione o una risposta incerta, controlla manualmente **tutte** le opere e relazioni del pacchetto nell'archivio attivo. Un codice già presente non prova che l'intero pacchetto sia stato importato. Se lo stato è ambiguo, non proseguire: conserva i file e verifica il backup o riconcilia manualmente.
+
+Dopo aver accertato che interi pacchetti sono assenti (inclusi collezionisti e vendite), il verificatore può preparare una nuova cartella contenente soltanto quei pacchetti. Prima ottieni il digest del manifest originale con il normale comando di verifica; poi usa, ad esempio, per i pacchetti 2 e 4 esplicitamente confermati assenti:
+
+```sh
+node scripts/verify-archive-media-batches.mjs ORIGINAL_DIRECTORY
+node scripts/verify-archive-media-batches.mjs --prepare-remaining ORIGINAL_DIRECTORY NEW_DIRECTORY ORIGINAL_MANIFEST_SHA256 --confirmed-absent 2,4
+node --test tests/verify-archive-media-batches.test.mjs
+```
+
+I numeri sono quelli originali, a partire da 1, in ordine crescente, senza duplicati; occorre un sottoinsieme proprio. L'intero export originale viene verificato, anche i pacchetti esclusi. I byte e gli hash dei pacchetti selezionati restano identici, i nomi vengono rinumerati e il nuovo manifest è scritto per ultimo. La destinazione deve essere nuova, esterna all'export originale, con genitore locale protetto e supporto hard link. Non vi è accesso al database, deduplicazione automatica o prova che un pacchetto sia assente. La procedura non modifica l'originale; eventuali scritture incomplete non sono importabili. Esegui un nuovo preflight nativo della cartella risultante e conferma singolarmente ogni pacchetto; i conflitti nell'archivio bloccano l'importazione. Non usare cartelle in modifica concorrente. Il recupero non è una transazione globale né un journal persistente.

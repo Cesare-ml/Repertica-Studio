@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile, readFile, unlink, symlink } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, unlink, symlink, mkdir, readdir, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { verifyArchiveMediaBatches } from '../scripts/verify-archive-media-batches.mjs';
+import { verifyArchiveMediaBatches, prepareRemainingBatches } from '../scripts/verify-archive-media-batches.mjs';
 
 const pkg=(code,collectors=[])=>({format:'repertica-studio-archive-relations-v2',artworks:[{code}],collectors,sales:[],covers:[],gallery:[]});
 async function fixture(t,packages=[pkg('A'),pkg('B')]) {
@@ -57,4 +57,45 @@ test('rejects duplicate manifest keys and symlink packages',async t=>{
   try { await symlink(join(root,'package-0002.json'),p,'file'); }
   catch(e) { if(['EPERM','EACCES','ENOSYS'].includes(e.code)) {t.skip('Symlink creation unavailable');return;} throw e; }
   await assert.rejects(verifyArchiveMediaBatches(root),/Invalid local file/);
+});
+
+const manifestDigest=async root=>createHash('sha256').update(await readFile(join(root,'manifest.json'))).digest('hex');
+test('manual recovery renumbers explicitly absent packages without changing any payload or source file',async t=>{
+  const {root}=await fixture(t,[pkg('A'),pkg('B'),pkg('C')]);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining');
+  const before=await Promise.all((await readdir(root)).sort().map(async name=>[name,await readFile(join(root,name))]));
+  const digest=await manifestDigest(root);
+  assert.deepEqual(await prepareRemainingBatches(root,dest,digest,[2,3]),{packages:2,artworks:2,collectors:0,sales:0,photographs:0});
+  assert.deepEqual(await readFile(join(dest,'package-0001.json')),await readFile(join(root,'package-0002.json')));
+  assert.deepEqual(await readFile(join(dest,'package-0002.json')),await readFile(join(root,'package-0003.json')));
+  assert.deepEqual(await verifyArchiveMediaBatches(dest),{packages:2,artworks:2,collectors:0,sales:0,photographs:0});
+  for(const [name,bytes] of before) assert.deepEqual(await readFile(join(root,name)),bytes);
+});
+test('recovery refuses ambiguous or unpinned selections without creating output',async t=>{
+  const {root}=await fixture(t,[pkg('A'),pkg('B'),pkg('C')]);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining'),digest=await manifestDigest(root);
+  for(const indexes of [[],[1,2,3],[2,2],[3,2],[0],[4],[1.5],['2']]) {
+    await assert.rejects(prepareRemainingBatches(root,dest,digest,indexes),/subset/);
+    await assert.rejects(lstat(dest),{code:'ENOENT'});
+  }
+  await assert.rejects(prepareRemainingBatches(root,dest,'0'.repeat(64),[2]),/manifest changed/);
+  await assert.rejects(lstat(dest),{code:'ENOENT'});
+  await assert.rejects(prepareRemainingBatches(root,join(root,'nested'),digest,[2]),/outside/);
+  await assert.rejects(lstat(join(root,'nested')),{code:'ENOENT'});
+  await mkdir(dest);await writeFile(join(dest,'keep'),'existing');
+  await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),{code:'EEXIST'});
+  assert.equal(await readFile(join(dest,'keep'),'utf8'),'existing');
+});
+test('recovery refuses a damaged original even when the damaged package is not selected',async t=>{
+  const {root}=await fixture(t);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining'),digest=await manifestDigest(root);
+  await writeFile(join(root,'package-0001.json'),'tampered');
+  await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/integrity/);
+  await assert.rejects(lstat(dest),{code:'ENOENT'});
 });

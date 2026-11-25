@@ -1,5 +1,5 @@
 //! Native preflight and per-package review/commit for a local batch directory.
-//! No IPC wiring here: the desktop integration owner must register the commands.
+//! Native commands are registered by the desktop entrypoint.
 //! A directory is not a database transaction or a filesystem snapshot.
 use super::{apply_with_media, digest, ensure_new, parse, preview, Preview, MAX_BYTES, MAX_ROWS, MAX_IMAGES, RELATIONAL_FORMAT};
 use rusqlite::Connection;
@@ -207,7 +207,7 @@ pub(crate) fn commit(conn: &mut Connection, media_root: &Path, directory: &Path,
     apply_with_media(conn, Some(media_root), &source, expected_preview)
 }
 
-// IPC wrappers ready for explicit registration by the shared entrypoint owner.
+// IPC wrappers registered by the shared entrypoint.
 // Keep the archive lock through the complete native operation.
 #[tauri::command]
 pub fn preflight_archive_batches(db: tauri::State<'_, crate::db::Database>,
@@ -319,6 +319,32 @@ mod tests {
         commit(&mut conn, archive.path(), export.path(), &plan.manifest_digest, 1, &second.digest).unwrap();
         assert!(preflight(&conn, export.path()).is_err());
         assert_eq!(count(&conn), 1);
+    }
+
+    #[test]
+    fn explicit_remaining_folder_keeps_committed_rows_and_rejects_overlap() {
+        let export = tempfile::tempdir().unwrap();
+        let remaining = tempfile::tempdir().unwrap();
+        let archive = tempfile::tempdir().unwrap();
+        fixture(export.path(), &["BATCH-1", "BATCH-2", "BATCH-3"]);
+        let db = crate::db::open(archive.path().to_path_buf()).unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        let original = preflight(&conn, export.path()).unwrap();
+        let first = review(&conn, export.path(), &original.manifest_digest, 0).unwrap();
+        commit(&mut conn, archive.path(), export.path(), &original.manifest_digest, 0, &first.digest).unwrap();
+        assert!(preflight(&conn, export.path()).is_err());
+        fixture(remaining.path(), &["BATCH-2", "BATCH-3"]);
+        assert_eq!(fs::read(remaining.path().join("package-0001.json")).unwrap(),
+                   fs::read(export.path().join("package-0002.json")).unwrap());
+        let plan = preflight(&conn, remaining.path()).unwrap();
+        assert_eq!(count(&conn), 1);
+        assert_eq!(plan.artworks, 2);
+        for index in 0..2 {
+            let candidate = review(&conn, remaining.path(), &plan.manifest_digest, index).unwrap();
+            commit(&mut conn, archive.path(), remaining.path(), &plan.manifest_digest, index, &candidate.digest).unwrap();
+        }
+        assert_eq!(count(&conn), 3);
+        assert!(preflight(&conn, remaining.path()).is_err());
     }
 
     #[cfg(unix)]
