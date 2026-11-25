@@ -33,3 +33,80 @@ export function stopBatch(state: BatchProgress): BatchProgress {
   if (state.phase !== 'review' && state.phase !== 'confirm') throw Error('batch_phase');
   return {...state, phase:'stopped'};
 }
+
+// Transport is native IPC supplied by the desktop host; never accepts a path
+// from a manifest. Preview and commit always use the explicitly chosen folder.
+export interface BatchTransport<P extends {digest: string; artworks: readonly unknown[]}> {
+  preflight(directory: string): Promise<BatchPlan>;
+  review(directory: string, expectedManifest: string, index: number): Promise<P>;
+  commit(directory: string, expectedManifest: string, index: number, expectedPreview: string): Promise<number>;
+}
+export class BatchImportSession<P extends {digest: string; artworks: readonly unknown[]}> {
+  private directory = '';
+  private progress: BatchProgress | null = null;
+  private candidate: P | null = null;
+  private pending = false;
+  private readonly transport: BatchTransport<P>;
+  constructor(transport: BatchTransport<P>) { this.transport = transport; }
+  get busy(): boolean { return this.pending; }
+  get state(): BatchProgress | null { return structuredClone(this.progress); }
+  get preview(): P | null { return structuredClone(this.candidate); }
+  private idle(): void { if (this.pending) throw Error('batch_busy'); }
+  async start(directory: string): Promise<void> {
+    this.idle();
+    if (this.progress || !directory) throw Error('batch_phase');
+    this.pending = true;
+    try {
+      this.progress = beginBatch(await this.transport.preflight(directory));
+      this.directory = directory;
+    } finally { this.pending = false; }
+  }
+  async reviewNext(): Promise<void> {
+    this.idle();
+    const state = this.progress;
+    if (!state || state.phase !== 'review') throw Error('batch_phase');
+    this.pending = true;
+    this.candidate = null;
+    try {
+      const preview = structuredClone(await this.transport.review(this.directory,state.manifest,state.next));
+      if (preview.artworks.length !== state.packages[state.next].artworks) throw Error('batch_changed');
+      const next = acceptBatchReview(state,state.next,preview.digest);
+      this.candidate = preview;
+      this.progress = next;
+    } finally { this.pending = false; }
+  }
+  async commitReviewed(): Promise<void> {
+    this.idle();
+    const state = this.progress;
+    if (!state || !this.candidate) throw Error('batch_phase');
+    const committing = confirmBatch(state);
+    const digest = this.candidate.digest;
+    this.pending = true;
+    this.progress = committing;
+    this.candidate = null;
+    try {
+      const count = await this.transport.commit(this.directory,state.manifest,state.next,digest);
+      this.progress = settleBatch(committing,{kind:'committed',count});
+    } catch {
+      // IPC rejection can mean a lost response after a successful write.
+      // Never infer rollback, never retry and never count unconfirmed rows.
+      this.progress = settleBatch(committing,{kind:'unknown'});
+    } finally { this.pending = false; }
+  }
+  stop(): void {
+    this.idle();
+    if (!this.progress) throw Error('batch_phase');
+    this.progress = stopBatch(this.progress);
+    this.candidate = null;
+  }
+  reset(archiveManuallyChecked = false): void {
+    this.idle();
+    const phase = this.progress?.phase;
+    if (phase && phase !== 'complete' && phase !== 'stopped' && !(phase === 'unknown' && archiveManuallyChecked)) {
+      throw Error('batch_phase');
+    }
+    this.progress = null;
+    this.candidate = null;
+    this.directory = '';
+  }
+}

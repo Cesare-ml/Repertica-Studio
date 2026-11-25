@@ -34,7 +34,7 @@ struct Manifest {
 }
 
 #[derive(Serialize, Debug)]
-pub(crate) struct BatchPlan {
+pub struct BatchPlan {
     manifest_digest: String,
     packages: Vec<Entry>,
     artworks: usize,
@@ -205,6 +205,30 @@ pub(crate) fn commit(conn: &mut Connection, media_root: &Path, directory: &Path,
     checked_package(&source, entry)?;
     same_manifest(&dir, expected_manifest)?;
     apply_with_media(conn, Some(media_root), &source, expected_preview)
+}
+
+// IPC wrappers ready for explicit registration by the shared entrypoint owner.
+// Keep the archive lock through the complete native operation.
+#[tauri::command]
+pub fn preflight_archive_batches(db: tauri::State<'_, crate::db::Database>,
+    directory: String) -> Result<BatchPlan, String> {
+    let conn = db.conn.lock().map_err(super::database_error)?;
+    preflight(&conn, Path::new(&directory))
+}
+
+#[tauri::command]
+pub fn review_archive_batch(db: tauri::State<'_, crate::db::Database>,
+    directory: String, expected_manifest: String, index: usize) -> Result<Preview, String> {
+    let conn = db.conn.lock().map_err(super::database_error)?;
+    review(&conn, Path::new(&directory), &expected_manifest, index)
+}
+
+#[tauri::command]
+pub fn commit_archive_batch(db: tauri::State<'_, crate::db::Database>,
+    directory: String, expected_manifest: String, index: usize,
+    expected_preview: String) -> Result<usize, String> {
+    let mut conn = db.conn.lock().map_err(super::database_error)?;
+    commit(&mut conn, &db.directory, Path::new(&directory), &expected_manifest, index, &expected_preview)
 }
 
 #[cfg(test)]
