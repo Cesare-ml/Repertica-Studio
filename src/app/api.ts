@@ -41,7 +41,7 @@ export const api = {
   exportBrochurePdf: (brochureId: string, destination: string) =>
     invoke<string>('export_brochure_pdf', { brochureId, destination }),
   listArtworks: () => invoke<Artwork[]>('list_artworks'),
-  saveArtwork: (input: ArtworkInput) => invoke<Artwork>('save_artwork', { input }),
+  saveArtwork: ({ expected_updated_at, ...input }: ArtworkInput) => invoke<Artwork>('save_artwork', { input, expectedUpdatedAt: expected_updated_at ?? null }),
   createArtworkFull: (input: NewArtworkInput) => invoke<Artwork>('create_artwork_full', { input }),
   /** `cascade` also deletes the certificates and the sale of the artwork: only after the user confirmed the impact. */
   deleteArtwork: (id: string, cascade = false) => invoke<void>('delete_artwork', { id, cascade }),
@@ -76,7 +76,7 @@ export const api = {
   deleteArtworkGalleryImage: (imageId: string) => invoke<void>('delete_artwork_gallery_image', { imageId }),
   auditArtworkMedia: () => invoke<MediaAudit>('audit_artwork_media'),
   listCollectors: () => invoke<Collector[]>('list_collectors'),
-  saveCollector: (input: CollectorInput) => invoke<Collector>('save_collector', { input }),
+  saveCollector: ({ expected_updated_at, ...input }: CollectorInput) => invoke<Collector>('save_collector', { input, expectedUpdatedAt: expected_updated_at ?? null }),
   createCollectorFull: (input: NewCollectorInput) => invoke<Collector>('create_collector_full', { input }),
   deleteCollector: (id: string, cascade = false) => invoke<void>('delete_collector', { id, cascade }),
   listCollectorImages: (collectorId: string) => invoke<CollectorImage[]>('list_collector_images', { collectorId }),

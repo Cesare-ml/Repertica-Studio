@@ -2,7 +2,7 @@
 //! archive (first and last name, contacts, social profiles, optional birth data, notes)
 //! and each collector can have a profile photograph and further photographs.
 use crate::{
-    commands::{canonical_date, clean, image_type, read_image_file, required, store_media},
+    commands::{canonical_date, clean, image_type, read_image_file, required, store_media, next_edit_timestamp, STALE_EDIT},
     db::Database,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -167,28 +167,42 @@ fn insert(conn: &Connection, id: &str, c: &Clean, stamp: &str) -> Result<(), Str
     ).map(|_| ()).map_err(err)
 }
 
+#[cfg(test)]
 pub(crate) fn save_collector_core(db: &Database, input: CollectorInput) -> Result<Collector, String> {
+    save_collector_versioned(db, None, input)
+}
+pub(crate) fn save_collector_versioned(db: &Database, expected: Option<&str>, input: CollectorInput) -> Result<Collector, String> {
     let c = normalize(&input)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let stamp = now();
-    match &input.id {
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let saved = match &input.id {
         Some(id) => {
-            let changed = conn.execute(
+            let stored: Option<String> = tx.query_row(
+                "SELECT updated_at FROM collectors WHERE id=?1", params![id], |r| r.get(0)
+            ).optional().map_err(err)?;
+            let stored = stored.ok_or_else(|| "Collezionista da modificare non trovato".to_string())?;
+            if expected != Some(stored.as_str()) { return Err(STALE_EDIT.into()); }
+            let stamp = next_edit_timestamp(&stored)?;
+            let changed = tx.execute(
                 "UPDATE collectors SET name=?2,first_name=?3,last_name=?4,email=?5,phone=?6,address=?7,notes=?8,
                     birth_date=?9,birth_time=?10,birth_place=?11,instagram=?12,facebook=?13,tiktok=?14,
-                    website=?15,linkedin=?16,updated_at=?17 WHERE id=?1",
+                    website=?15,linkedin=?16,updated_at=?17 WHERE id=?1 AND updated_at=?18",
                 params![id, c.name, c.first_name, c.last_name, c.email, c.phone, c.address, c.notes, c.birth_date,
-                    c.birth_time, c.birth_place, c.instagram, c.facebook, c.tiktok, c.website, c.linkedin, stamp],
+                    c.birth_time, c.birth_place, c.instagram, c.facebook, c.tiktok, c.website, c.linkedin, stamp, expected],
             ).map_err(err)?;
-            if changed == 0 { return Err("Collezionista da modificare non trovato".into()); }
-            by_id(&conn, id)
+            if changed != 1 { return Err(STALE_EDIT.into()); }
+            let saved = by_id(&tx, id)?;
+            if saved.updated_at != stamp { return Err(STALE_EDIT.into()); }
+            saved
         }
         None => {
             let id = Uuid::new_v4().to_string();
-            insert(&conn, &id, &c, &stamp)?;
-            by_id(&conn, &id)
+            insert(&tx, &id, &c, &now())?;
+            by_id(&tx, &id)?
         }
-    }
+    };
+    tx.commit().map_err(err)?;
+    Ok(saved)
 }
 
 /// Create a collector together with a profile photograph and further photographs, all or nothing.
@@ -426,8 +440,8 @@ pub fn list_collectors(db: State<'_, Database>) -> Result<Vec<Collector>, String
     Ok(items)
 }
 #[tauri::command]
-pub fn save_collector(db: State<'_, Database>, input: CollectorInput) -> Result<Collector, String> {
-    save_collector_core(&db, input)
+pub fn save_collector(db: State<'_, Database>, input: CollectorInput, expected_updated_at: Option<String>) -> Result<Collector, String> {
+    save_collector_versioned(&db, expected_updated_at.as_deref(), input)
 }
 #[tauri::command]
 pub fn create_collector_full(db: State<'_, Database>, input: NewCollectorInput) -> Result<Collector, String> {
@@ -548,8 +562,29 @@ mod tests {
         assert_eq!((saved.photo_count, saved.profile_image_id), (0, None));
         let mut edit = input("Anna Maria");
         edit.id = Some(saved.id.clone());
-        let edited = save_collector_core(&db, edit).unwrap();
+        let edited = save_collector_versioned(&db, Some(&saved.updated_at), edit).unwrap();
         assert_eq!((edited.name.as_str(), edited.last_name, edited.email, edited.birth_date), ("Anna Maria", None, None, None));
+    }
+
+    #[test]
+    fn collector_edit_rejects_stale_and_missing_tokens_and_keeps_fields() {
+        let (_dir, db) = setup();
+        let first = save_collector_core(&db, input("Anna")).unwrap();
+        let mut edit = input("Anna Maria");
+        edit.id = Some(first.id.clone());
+        edit.instagram = Some("@anna".into());
+        let current = save_collector_versioned(&db, Some(&first.updated_at), edit).unwrap();
+        assert_ne!(first.updated_at, current.updated_at);
+        for expected in [Some(first.updated_at.as_str()), None] {
+            let mut stale = input("Stale");
+            stale.id = Some(first.id.clone());
+            assert_eq!(save_collector_versioned(&db, expected, stale).unwrap_err(), STALE_EDIT);
+        }
+        let conn = db.conn.lock().unwrap();
+        let kept = by_id(&conn, &first.id).unwrap();
+        assert_eq!(kept.first_name, "Anna Maria");
+        assert_eq!(kept.instagram.as_deref(), Some("@anna"));
+        assert_eq!(kept.updated_at, current.updated_at);
     }
 
     #[test]

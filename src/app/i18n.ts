@@ -5,6 +5,7 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "This record changed after you opened it. Close and reopen the editor to see the latest data.",
   "Posta": "Mail",
   "+ Nuova brochure": "+ New brochure",
   "A tutta pagina": "Full bleed",
@@ -871,6 +872,7 @@ const EN: Record<string,string> = {
   "Altre opere dell’archivio": "Other artworks in the archive",
 };
 const ES:Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "La ficha ha cambiado desde que la abriste. Cierra y vuelve a abrir la edición para ver los datos actualizados.",
   "Posta": "Correo",
   "+ Nuova brochure": "+ Nuevo folleto",
   "A tutta pagina": "A página completa",
@@ -1579,6 +1581,7 @@ const ES:Record<string,string> = {
   "Altre opere dell’archivio": "Otras obras del archivo",
 };
 const FR:Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "La fiche a changé depuis son ouverture. Fermez et rouvrez l’éditeur pour voir les données à jour.",
   "Posta": "Courrier",
   "+ Nuova brochure": "+ Nouvelle brochure",
   "A tutta pagina": "Pleine page",
@@ -2290,6 +2293,7 @@ const FR:Record<string,string> = {
   "Altre opere dell’archivio": "Autres œuvres de l’archive",
 };
 const DE:Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "Der Datensatz wurde seit dem Öffnen geändert. Schließe und öffne die Bearbeitung erneut, um die aktuellen Daten zu sehen.",
   "Posta": "E-Mail",
   "+ Nuova brochure": "+ Neue Broschüre",
   "A tutta pagina": "Ganzseitig",
