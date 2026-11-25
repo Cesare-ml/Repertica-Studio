@@ -103,3 +103,58 @@ pub(crate) fn resolve_selected(conn: &Connection, scope: &str, work: &str, subje
     current(conn,scope,work)?;
     Ok(Some(value.binding))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    fn open() -> (tempfile::TempDir, Connection, PublishedBinding) {
+        let dir=tempfile::tempdir().unwrap();
+        let archive=repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
+        let mut conn=archive.conn.into_inner().unwrap();
+        let mut binding=super::super::settlement_ledger::binding();
+        binding.scope=conn.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",[],|r|r.get(0)).unwrap();
+        conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES(?1,'FIX-1','Synthetic','t','t')",
+            [&binding.local_work]).unwrap();
+        migrate(&mut conn).unwrap();
+        let value=PublishedBinding{binding,request_id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
+            selection_digest:"a".repeat(64),published_at:"2026-11-24T03:00:00.000Z".into()};
+        (dir,conn,value)
+    }
+    #[test]
+    fn persistent_mapping_requires_current_exact_authority_and_never_guesses() {
+        let (_dir,mut conn,v)=open();
+        let b=&v.binding;
+        assert_eq!(resolve_selected(&conn,&b.scope,&b.local_work,&b.owner,|_|panic!("no binding")),Ok(None));
+        assert_eq!(record(&mut conn,&v,"repertica:99",|_|panic!("wrong owner")),Err("settlement_binding_mismatch"));
+        let calls=Cell::new(0);
+        assert_eq!(record(&mut conn,&v,&b.owner,|_|{
+            calls.set(calls.get()+1);
+            if calls.get()==1 { Ok(()) } else { Err("settlement_access_denied") }
+        }),Err("settlement_access_denied"));
+        // The historical row survives a raced revocation, but no summary can
+        // be resolved without the live, independently verified authority.
+        assert_eq!(resolve_selected(&conn,&b.scope,&b.local_work,&b.owner,|_|Err("settlement_access_denied")),
+            Err("settlement_access_denied"));
+        record(&mut conn,&v,&b.owner,|_|Ok(())).unwrap();
+        let mut changed=v.clone();
+        changed.selection_digest="b".repeat(64);
+        assert_eq!(record(&mut conn,&changed,&b.owner,|_|Ok(())),Err("settlement_binding_conflict"));
+        assert_eq!(resolve_selected(&conn,&b.scope,&b.local_work,"repertica:99",|_|panic!("wrong owner")),Ok(None));
+        assert_eq!(resolve_selected(&conn,&b.scope,&b.local_work,&b.owner,|candidate|{
+            assert_eq!(candidate,&v);Ok(())
+        }),Ok(Some(b.clone())));
+        let mut other=v.clone();
+        other.binding.auction="second-auction".into();
+        other.binding.association="second-association".into();
+        other.request_id="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".into();
+        record(&mut conn,&other,&b.owner,|_|Ok(())).unwrap();
+        assert_eq!(resolve_selected(&conn,&b.scope,&b.local_work,&b.owner,|_|panic!("ambiguous")),
+            Err("settlement_binding_ambiguous"));
+        conn.execute("DELETE FROM artworks WHERE id=?1",[&b.local_work]).unwrap();
+        assert_eq!(resolve_selected(&conn,&b.scope,&b.local_work,&b.owner,|_|panic!("deleted work")),
+            Err("settlement_binding_mismatch"));
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM auction_published_bindings",[],|r|r.get::<_,u64>(0)).unwrap(),2);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
+    }
+}

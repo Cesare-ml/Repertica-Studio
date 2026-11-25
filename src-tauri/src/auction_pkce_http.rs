@@ -475,6 +475,10 @@ mod tests {
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW))),
             Err("settlement_binding_mismatch"));
         binding.owner = "repertica:42".into();
+        // Matching OAuth subject but no immutable binding is still denied
+        // before the first network request, even with an empty ledger.
+        assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW))),
+            Err("settlement_binding_mismatch"));
         let published = settlement_store::PublishedBinding {
             binding: binding.clone(),
             request_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),

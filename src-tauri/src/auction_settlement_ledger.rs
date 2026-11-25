@@ -91,6 +91,13 @@ fn latest(t:&Transaction<'_>,b:&Binding)->Result<u64,Error>{
     let scope:String=t.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",[],|r|r.get(0)).map_err(db)?;
     let work:bool=t.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",[&b.local_work],|r|r.get(0)).map_err(db)?;
     if scope!=b.scope||!work{return Err("settlement_binding_mismatch")}
+    // An arbitrary native Binding or a preview receipt is not sufficient,
+    // even when the ledger is empty. Require the exact historical mapping
+    // before proposing any request. Live authority is checked separately.
+    let bound:bool=t.query_row("SELECT EXISTS(SELECT 1 FROM auction_published_bindings
+        WHERE scope=?1 AND auction=?2 AND tenant=?3 AND association=?4 AND cloud_work=?5 AND local_work=?6 AND owner=?7)",
+        params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner],|r|r.get(0)).map_err(db)?;
+    if !bound{return Err("settlement_binding_mismatch")}
     let conflict:bool=t.query_row("SELECT EXISTS(SELECT 1 FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2
         AND (tenant<>?3 OR association<>?4 OR cloud_work<>?5 OR local_work<>?6 OR owner<>?7))",
         params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner],|r|r.get(0)).map_err(db)?;
@@ -245,6 +252,13 @@ mod fixtures {
             CREATE TABLE artworks(id TEXT PRIMARY KEY,status TEXT);CREATE TABLE sales(id TEXT PRIMARY KEY);").unwrap();
         c.execute("INSERT INTO auction_archive_scope VALUES(1,?1)",[SCOPE]).unwrap();
         c.execute("INSERT INTO artworks VALUES(?1,'available')",[WORK]).unwrap();
+        // Deliberately unconstrained fixture so corruption tests can alter
+        // historical rows. The real archive test uses the v20 schema.
+        c.execute_batch("CREATE TABLE auction_published_bindings(scope TEXT, auction TEXT, tenant TEXT,
+            association TEXT, cloud_work TEXT, local_work TEXT, owner TEXT);").unwrap();
+        let b=binding();
+        c.execute("INSERT INTO auction_published_bindings VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner]).unwrap();
         c.execute_batch(SCHEMA).unwrap();c
     }
     pub(crate) fn delivery(n:u64,status:&str)->Value{json!({"auction_id":"fixture-auction","result_id":"fixture-auction:1:fulfillment",
