@@ -102,8 +102,49 @@ fn latest(t:&Transaction<'_>,b:&Binding)->Result<u64,Error>{
         AND (tenant<>?3 OR association<>?4 OR cloud_work<>?5 OR local_work<>?6 OR owner<>?7))",
         params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner],|r|r.get(0)).map_err(db)?;
     if conflict{return Err("settlement_binding_mismatch")}
-    t.query_row("SELECT COALESCE(MAX(sequence),0) FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2",
-        params![b.scope,b.auction],|r|r.get(0)).map_err(db)
+    validate_history(t,b)
+}
+
+// Validate every persisted row, not only MAX(sequence) or the latest snapshot.
+// A damaged/restored ledger must never propose a remote cursor or ACK which
+// skips earlier evidence. Streaming rows avoids allocating the entire history.
+// This helper is read-only and grants no authority; the caller checks binding.
+pub(crate) fn validate_history(c:&Connection,b:&Binding)->Result<u64,Error>{
+    if !b.valid(){return Err("settlement_binding_mismatch")}
+    let mut stmt=c.prepare("SELECT sequence,snapshot,acknowledged_at FROM auction_settlement_receipts
+        WHERE scope=?1 AND auction=?2 ORDER BY sequence").map_err(db)?;
+    let mut rows=stmt.query(params![b.scope,b.auction]).map_err(db)?;
+    let mut cursor=0u64;
+    while let Some(row)=rows.next().map_err(db)?{
+        let sequence:u64=row.get(0).map_err(db)?;
+        let raw:String=row.get(1).map_err(db)?;
+        let ack:Option<String>=row.get(2).map_err(db)?;
+        if !positive(sequence)||sequence!=cursor+1{return Err("settlement_history_gap")}
+        let d:Delivery=decode(raw.as_bytes()).map_err(|_|"settlement_delivery_conflict")?;
+        if !d.valid(b)||d.delivery_sequence!=sequence||d.acknowledged_at.is_some()||
+            ack.as_deref().is_some_and(|s|!date(s))||
+            serde_json::to_string(&d).map_err(|_|"settlement_delivery_conflict")?!=raw{
+            return Err("settlement_delivery_conflict")
+        }
+        cursor=sequence;
+    }
+    Ok(cursor)
+}
+
+// Read back the exact durable evidence inside the same transaction. A trigger
+// or malformed archive may silently ignore or change a write; do not advance
+// the cursor or acknowledge a receipt that was not actually stored.
+fn verify_write(t:&Transaction<'_>,b:&Binding,n:u64,raw:&str,ack:Option<&str>)->Result<(),Error>{
+    let stored:Option<(String,Option<String>)>=t.query_row(
+        "SELECT snapshot,acknowledged_at FROM auction_settlement_receipts
+         WHERE scope=?1 AND auction=?2 AND sequence=?3 AND tenant=?4 AND association=?5
+           AND cloud_work=?6 AND local_work=?7 AND owner=?8",
+        params![b.scope,b.auction,n,b.tenant,b.association,b.cloud_work,b.local_work,b.owner],
+        |r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(db)?;
+    match stored {
+        Some((actual,stamp)) if actual==raw && stamp.as_deref()==ack => Ok(()),
+        _ => Err("settlement_storage_failed"),
+    }
 }
 // Keep immutable snapshot bytes separate from monotonic acknowledgement evidence.
 fn store(t:&Transaction<'_>,b:&Binding,mut d:Delivery,cursor:&mut u64)->Result<(),Error>{
@@ -120,14 +161,18 @@ fn store(t:&Transaction<'_>,b:&Binding,mut d:Delivery,cursor:&mut u64)->Result<(
             return Err("settlement_delivery_conflict")
         }
         if old_ack.is_none()&&ack.is_some(){
-            t.execute("UPDATE auction_settlement_receipts SET acknowledged_at=?4 WHERE scope=?1 AND auction=?2 AND sequence=?3",
+            let changed=t.execute("UPDATE auction_settlement_receipts SET acknowledged_at=?4 WHERE scope=?1 AND auction=?2 AND sequence=?3",
                 params![b.scope,b.auction,n,ack]).map_err(db)?;
+            if changed!=1{return Err("settlement_storage_failed")}
+            verify_write(t,b,n,&raw,ack.as_deref())?;
         }
     }else{
         if n!=*cursor+1{return Err("settlement_history_gap")}
-        t.execute("INSERT INTO auction_settlement_receipts(scope,auction,tenant,association,cloud_work,local_work,owner,sequence,snapshot,acknowledged_at)
+        let changed=t.execute("INSERT INTO auction_settlement_receipts(scope,auction,tenant,association,cloud_work,local_work,owner,sequence,snapshot,acknowledged_at)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner,n,raw,ack]).map_err(db)?;
+        if changed!=1{return Err("settlement_storage_failed")}
+        verify_write(t,b,n,&raw,ack.as_deref())?;
         *cursor=n;
     }
     Ok(())
@@ -219,10 +264,6 @@ pub(crate) fn summary(c:&mut Connection,b:&Binding)->Result<Option<SettlementSum
     let t=c.transaction_with_behavior(TransactionBehavior::Deferred).map_err(db)?;
     let n=latest(&t,b)?;
     if n==0 { t.commit().map_err(db)?; return Ok(None) }
-    let (count,min):(u64,u64)=t.query_row(
-        "SELECT COUNT(*),MIN(sequence) FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2",
-        params![b.scope,b.auction],|r|Ok((r.get(0)?,r.get(1)?))).map_err(db)?;
-    if !positive(n)||count!=n||min!=1{return Err("settlement_history_gap")}
     let (raw,ack):(String,Option<String>)=t.query_row(
         "SELECT snapshot,acknowledged_at FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2 AND sequence=?3",
         params![b.scope,b.auction,n],|r|Ok((r.get(0)?,r.get(1)?))).map_err(db)?;
@@ -369,6 +410,48 @@ mod fixtures {
         assert_eq!(c.query_row("SELECT status FROM artworks WHERE id=?1",[WORK],|r|r.get::<_,String>(0)).unwrap(),"available");
         c.execute("DELETE FROM auction_settlement_receipts WHERE sequence=1",[]).unwrap();
         assert_eq!(summary(&mut c,&b),Err("settlement_history_gap"));
+    }
+    #[test]
+    fn damaged_earlier_receipt_blocks_every_cursor_and_ack(){
+        for (mutation,expected) in [
+            ("DELETE FROM auction_settlement_receipts WHERE sequence=1","settlement_history_gap"),
+            ("UPDATE auction_settlement_receipts SET snapshot='{}' WHERE sequence=1","settlement_delivery_conflict"),
+            ("UPDATE auction_settlement_receipts SET acknowledged_at='invalid' WHERE sequence=1","settlement_delivery_conflict"),
+        ] {
+            let mut c=database();let b=binding();
+            history(&mut c,&b,0,&bytes(page(vec![delivery(1,"fulfilled"),delivery(2,"review_required")],2,None))).unwrap();
+            c.execute(mutation,[]).unwrap();
+            assert_eq!(cursor(&mut c,&b),Err(expected));
+            assert_eq!(ack_target(&mut c,&b),Err(expected));
+            assert_eq!(summary(&mut c,&b),Err(expected));
+            assert_eq!(poll(&mut c,&b,&bytes(reply(delivery(3,"fulfilled")))),Err(expected));
+        }
+    }
+    #[test]
+    fn ignored_or_altered_insert_and_ack_are_not_success(){
+        for trigger in [
+            "CREATE TRIGGER broken BEFORE INSERT ON auction_settlement_receipts BEGIN SELECT RAISE(IGNORE); END",
+            "CREATE TRIGGER broken AFTER INSERT ON auction_settlement_receipts BEGIN UPDATE auction_settlement_receipts SET snapshot='{}' WHERE sequence=NEW.sequence; END",
+        ] {
+            let mut c=database();let b=binding();
+            c.execute_batch(trigger).unwrap();
+            assert_eq!(poll(&mut c,&b,&bytes(reply(delivery(1,"fulfilled")))),Err("settlement_storage_failed"));
+            assert_eq!(count(&c),0);
+            assert_eq!(ack_target(&mut c,&b),Err("settlement_not_ingested"));
+        }
+        for trigger in [
+            "CREATE TRIGGER broken BEFORE UPDATE ON auction_settlement_receipts BEGIN SELECT RAISE(IGNORE); END",
+            "CREATE TRIGGER broken AFTER UPDATE ON auction_settlement_receipts WHEN NEW.acknowledged_at IS NOT NULL AND NEW.acknowledged_at<>'2026-11-25T05:00:00.000Z' BEGIN UPDATE auction_settlement_receipts SET acknowledged_at='2026-11-25T05:00:00.000Z' WHERE sequence=NEW.sequence; END",
+        ] {
+            let mut c=database();let b=binding();
+            poll(&mut c,&b,&bytes(reply(delivery(1,"fulfilled")))).unwrap();
+            let target=ack_target(&mut c,&b).unwrap();
+            c.execute_batch(trigger).unwrap();
+            let mut d=delivery(1,"fulfilled");d["acknowledged_at"]=json!("2026-11-25T04:02:00.000Z");
+            let mut response=reply(d);response["replayed"]=json!(false);
+            assert_eq!(ack(&mut c,&b,&target,&bytes(response)),Err("settlement_storage_failed"));
+            assert_eq!(summary(&mut c,&b).unwrap().unwrap().acknowledged_at,None);
+        }
     }
     #[test]
     fn summary_rejects_corrupt_ack_and_archive_switch(){
