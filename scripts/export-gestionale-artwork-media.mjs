@@ -9,6 +9,7 @@ import { readRegular, hasImageHeader, PACKAGE_LIMIT, COVER_LIMIT } from './add-l
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { publishLocalPackage } from './publish-local-package.mjs';
 import { publishArchiveMediaBatches } from './archive-media-batches.mjs';
+import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 
 const KINDS=new Map([['DETTAGLIO','DETAIL'],['FIRMA','SIGNATURE'],['DETAIL','DETAIL'],['SIGNATURE','SIGNATURE'],
   ['DIGITAL_MOCKUP','DIGITAL_MOCKUP'],['IN_SITU','IN_SITU'],['FRAMED','FRAMED'],['WORK_IN_PROGRESS','WORK_IN_PROGRESS'],['OTHER','OTHER']]);
@@ -65,10 +66,12 @@ export async function attachLocalMedia(pkg,rows,mediaRoot) {
       plan.push({code:row.code,photo});
     }
   }
+  let pixels=0;
   for(const {code,photo} of plan) {
     const bytes=await readRegular(await selectedFile(root,photo.path),COVER_LIMIT);
     if(bytes.length!==Number(photo.size)||!hasImageHeader(bytes)||createHash('sha256').update(bytes).digest('hex')!==photo.sha256)
       throw Error('Local blob does not match registered bytes');
+    pixels=addArchiveImagePixels(pixels,bytes);
     const entry={artwork_code:code,sha256:photo.sha256,data_base64:bytes.toString('base64')};
     if(photo.position===0) covers.push(entry);
     else gallery.push({...entry,position:photo.position,kind:KINDS.get(photo.kind),caption:photo.caption});

@@ -8,7 +8,11 @@ import { attachLocalMedia } from '../scripts/export-gestionale-artwork-media.mjs
 import { publishArchiveMediaBatches } from '../scripts/archive-media-batches.mjs';
 const pkg={format:'repertica-studio-archive-relations-v2',artworks:[{code:'TEST-1'},{code:'TEST-2'}],collectors:[],sales:[]};
 // Header-only fixture; full image decoding is the native preview's responsibility.
-const bytes=Buffer.from([137,80,78,71,13,10,26,10,1,2,3]);
+function pngHeader(w,h) {
+  const b=Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(b);
+  b.writeUInt32BE(13,8); b.write('IHDR',12); b.writeUInt32BE(w,16); b.writeUInt32BE(h,20); return b;
+}
+const bytes=pngHeader(16,16);
 const sha256=createHash('sha256').update(bytes).digest('hex');
 const cover={position:0,kind:null,caption:null,path:'blobs/a.png',sha256,size:String(bytes.length)};
 const gallery={...cover,position:1,kind:'DETTAGLIO',caption:'Detail'};
@@ -68,4 +72,18 @@ test('batch mode uses real local media association and keeps files in independen
     imported.push(...p.artworks.map(a=>a.code));
   }
   assert.deepEqual(imported,artworks.map(a=>a.code));
+});
+
+test('rejects oversized headers and indivisible groups beyond the native pixel budget',async t=>{
+  const root=await fixture(t),output=join(root,'batch');
+  const big=pngHeader(4001,4000);
+  await writeFile(join(root,'blobs','a.png'),big);
+  const info=b=>({...cover,sha256:createHash('sha256').update(b).digest('hex'),size:String(b.length)});
+  await assert.rejects(attachLocalMedia(pkg,rows([info(big)]),root),/dimensions/);
+  const max=pngHeader(4000,4000);
+  await writeFile(join(root,'blobs','a.png'),max);
+  const photos=[info(max),...Array.from({length:8},(_,i)=>({...info(max),position:i+1,kind:'DETAIL'}))];
+  await assert.rejects(attachLocalMedia(pkg,rows(photos),root),/pixel bounds/);
+  await assert.rejects(publishArchiveMediaBatches(output,pkg,rows(photos),(p,r)=>attachLocalMedia(p,r,root)),/pixel bounds/);
+  await assert.rejects(readFile(join(output,'manifest.json')), {code:'ENOENT'});
 });
