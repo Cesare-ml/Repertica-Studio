@@ -30,6 +30,14 @@ impl Request {
     }
 }
 
+/// Mounted boundary independent of archive, transport and identity provider.
+/// Enabling a provider requires a separate reviewed change. This handler
+/// cannot open a browser, read secrets or send a network request.
+#[tauri::command]
+pub fn auction_preview_command(request: Request) -> Result<Value, String> {
+    request.disabled()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,11 +54,11 @@ mod tests {
             json!({"action":"confirmReconcile","confirmationId":"c"}),
         ] {
             let cmd: Request = serde_json::from_value(request).unwrap();
-            assert_eq!(cmd.disabled().unwrap_err(), "oauth_provider_disabled");
+            assert_eq!(auction_preview_command(cmd).unwrap_err(), "oauth_provider_disabled");
         }
         for action in ["status","disconnect"] {
             let cmd: Request = serde_json::from_value(json!({"action":action})).unwrap();
-            assert_eq!(cmd.disabled().unwrap(), json!({"status":"disabled"}));
+            assert_eq!(auction_preview_command(cmd).unwrap(), json!({"status":"disabled"}));
         }
     }
 
