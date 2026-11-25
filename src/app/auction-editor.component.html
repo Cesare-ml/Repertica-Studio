@@ -1,0 +1,130 @@
+<dialog #dialog class="auction-dialog" aria-labelledby="auction-editor-title" (cancel)="cancel($event)">
+  <header>
+    <div><h2 id="auction-editor-title">{{ listMode ? managementLabel('manage') : tr('Bozza asta offline') }}</h2>
+      <p>{{ tr('Nessun account richiesto. Nessuna pubblicazione o offerta online.') }}</p></div>
+    <button type="button" (click)="close()" [disabled]="busy || dirty" [attr.aria-label]="tr('Chiudi')">×</button>
+  </header>
+  <p *ngIf="busy && !form" role="status">{{ tr('Caricamento bozza…') }}</p>
+  <p *ngIf="error" class="error" role="alert">{{ tr(error) }}</p>
+  <p *ngIf="notice" role="status">{{ tr(notice) }}</p>
+  <section class="pending" aria-live="polite">
+    <p>{{ onlineLabel(online.state) }}</p>
+    <button type="button" [disabled]="busy || !!online.review" (click)="checkConnection()">{{ onlineLabel('check') }}</button>
+    <ng-container *ngIf="online.state === 'connected'">
+      <button type="button" [disabled]="busy || !!online.review" (click)="loadOrganizations()">{{ onlineLabel('organizations') }}</button>
+      <button type="button" [disabled]="busy" (click)="disconnectOnline()">{{ onlineLabel('disconnect') }}</button>
+      <div class="draft-list">
+        <button type="button" *ngFor="let org of online.organizations" [disabled]="busy || !!online.review || org.status !== 'active'"
+          [attr.aria-pressed]="online.selected?.tenantId === org.tenantId" (click)="chooseOrganization(org.tenantId)">
+          <strong>{{ org.artistName || org.tenantId }}</strong><span>{{ org.role }} · {{ org.publishedThisMonth }}/3</span>
+        </button>
+      </div>
+      <ng-container *ngIf="online.selected as selected">
+        <p><strong>{{ selected.artistName || selected.tenantId }}</strong> <span *ngIf="!selected.publicationEligible">· {{ onlineLabel('readOnly') }}</span></p>
+        <div *ngFor="let preview of online.previews">
+          {{ preview.title }} · {{ preview.status }} · {{ preview.startsAt }} – {{ preview.endsAt }}
+        </div>
+      </ng-container>
+    </ng-container>
+  </section>
+  <ng-container *ngIf="listMode">
+    <p *ngIf="page && !page.rows.length" role="status">{{ managementLabel('empty') }}</p>
+    <div class="draft-list" *ngIf="page as current">
+      <button *ngFor="let row of current.rows" type="button" [disabled]="busy" (click)="openListed(row)">
+        <strong>{{ row.title || row.artworkId }}</strong>
+        <span>{{ managementLabel(row.state) }}<ng-container *ngIf="row.artworkStatus === null"> · {{ managementLabel('missing') }}</ng-container></span>
+      </button>
+    </div>
+    <div class="draft-list-actions">
+      <button type="button" [disabled]="busy" (click)="loadPage(false)">{{ managementLabel('refresh') }}</button>
+      <button type="button" *ngIf="page?.nextAfter" [disabled]="busy" (click)="loadPage(true)">{{ managementLabel('next') }}</button>
+    </div>
+  </ng-container>
+  <ng-container *ngIf="form as fields">
+    <p class="work"><strong>{{ tr('Opera selezionata') }}:</strong> {{ view?.artwork?.title }}</p>
+    <p *ngIf="view?.pending && !view?.receipt" class="pending" role="status">{{ tr('Richiesta precedente da verificare. Il contenuto e la chiave originali restano invariati; nessun reinvio automatico.') }}</p>
+    <p *ngIf="view?.receipt as receipt" class="pending" role="status">
+      {{ receiptLabel }}: <strong>{{ receipt.slug }}</strong> ({{ receipt.auctionId }})
+    </p>
+    <section *ngIf="online.state === 'connected' && view?.saved" class="pending" aria-live="polite">
+      <button type="button" [disabled]="busy || dirty || !!online.review" (click)="readSettlement()">{{ settlementLabel('read') }}</button>
+      <ng-container [ngSwitch]="settlementState.kind">
+        <p *ngSwitchCase="'loading'" role="status">{{ settlementLabel('loading') }}</p>
+        <p *ngSwitchCase="'empty'" role="status">{{ settlementLabel('empty') }}</p>
+        <p *ngSwitchCase="'unavailable'" role="status">{{ settlementLabel('unavailable') }}</p>
+      </ng-container>
+      <ng-container *ngIf="settlementDetails as result">
+        <p><strong>{{ result.status }}</strong> · {{ result.amount }}</p>
+        <p>{{ result.receipt }}</p>
+        <p>{{ result.fulfilledAt }}<ng-container *ngIf="result.acknowledgedAt"> · {{ result.acknowledgedAt }}</ng-container></p>
+        <p>{{ result.notice }}</p>
+      </ng-container>
+    </section>
+    <details *ngIf="pendingDetails as original" class="pending">
+      <summary>{{ managementLabel('original') }}</summary>
+      <dl class="request-details">
+        <dt>{{ managementLabel('tenant') }}</dt><dd>{{ original.tenantId }}</dd>
+        <dt>{{ tr('Titolo pubblico') }}</dt><dd>{{ original.title }}</dd>
+        <dt>{{ tr('Descrizione pubblica') }}</dt><dd>{{ original.description || '—' }}</dd>
+        <dt>{{ tr('Identificativo URL') }}</dt><dd>{{ original.slug }}</dd>
+        <dt>{{ tr('Inizio (UTC)') }}</dt><dd>{{ original.startsAt }}</dd>
+        <dt>{{ tr('Fine (UTC)') }}</dt><dd>{{ original.endsAt }}</dd>
+        <dt>{{ tr('Base d’asta (€)') }}</dt><dd>{{ original.startingAmount / 100 | number:'1.2-2' }}</dd>
+        <dt>{{ tr('Rilancio minimo (€)') }}</dt><dd>{{ original.minimumIncrementAmount / 100 | number:'1.2-2' }}</dd>
+      </dl>
+    </details>
+    <fieldset [disabled]="busy || !!online.review">
+      <legend>{{ tr('Dati dell’anteprima non vincolante') }}</legend>
+      <label class="wide">{{ tr('Titolo pubblico') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.title" maxlength="160"></label>
+      <label class="wide">{{ tr('Descrizione pubblica') }}<textarea rows="4"  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.description" maxlength="1500"></textarea></label>
+      <label class="wide">{{ tr('Identificativo URL') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.slug" maxlength="60" placeholder="paesaggio-01"></label>
+      <label>{{ tr('Inizio (UTC)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.startsAt" maxlength="64" placeholder="2027-03-04T10:00"></label>
+      <label>{{ tr('Fine (UTC)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.endsAt" maxlength="64" placeholder="2027-03-06T10:00"></label>
+      <label>{{ tr('Base d’asta (€)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.startingEuros" inputmode="decimal" maxlength="12"></label>
+      <label>{{ tr('Rilancio minimo (€)') }}<input  (ngModelChange)="invalidateReview()" [(ngModel)]="fields.incrementEuros" inputmode="decimal" maxlength="12"></label>
+    </fieldset>
+    <p class="hint">{{ tr('Gli orari sono UTC (AAAA-MM-GGThh:mm). Puoi salvare una bozza incompleta e completarla in seguito.') }}</p>
+    <p class="hint">{{ tr('Nessuna foto, nota privata o informazione sui collezionisti viene copiata nella bozza.') }}</p>
+    <p *ngIf="dirty" role="status">{{ tr('Modifiche non salvate') }}</p>
+    <button type="button" *ngIf="view?.saved && !view?.pending" [disabled]="!canReview" (click)="reviewPublicDetails()">{{ reviewLabel('review') }}</button>
+    <p *ngIf="reviewError && canReview" role="alert">{{ reviewLabel('invalid') }}</p>
+    <button type="button" *ngIf="online.state === 'connected' && view?.saved && !view?.receipt"
+      [disabled]="!canReviewOnline" (click)="reviewOnline()">{{ onlineLabel('review') }}</button>
+    <section *ngIf="onlineReviewDetails as reviewed" class="pending">
+      <h3>{{ onlineLabel(online.review?.action === 'prepare' ? 'prepare' : 'reconcile') }}</h3>
+      <dl class="request-details">
+        <dt>{{ managementLabel('tenant') }}</dt><dd>{{ reviewed.tenantId }}</dd>
+        <dt>{{ tr('Titolo pubblico') }}</dt><dd>{{ reviewed.title }}</dd>
+        <dt>{{ tr('Descrizione pubblica') }}</dt><dd>{{ reviewed.description || '—' }}</dd>
+        <dt>{{ tr('Identificativo URL') }}</dt><dd>{{ reviewed.slug }}</dd>
+        <dt>{{ tr('Inizio (UTC)') }}</dt><dd>{{ reviewed.startsAt }}</dd>
+        <dt>{{ tr('Fine (UTC)') }}</dt><dd>{{ reviewed.endsAt }}</dd>
+        <dt>{{ tr('Base d’asta (€)') }}</dt><dd>{{ reviewed.startingAmount / 100 | number:'1.2-2' }}</dd>
+        <dt>{{ tr('Rilancio minimo (€)') }}</dt><dd>{{ reviewed.minimumIncrementAmount / 100 | number:'1.2-2' }}</dd>
+      </dl>
+      <button type="button" [disabled]="busy" (click)="cancelOnlineReview()">{{ onlineLabel('cancel') }}</button>
+      <button type="button" class="primary" [disabled]="busy || dirty" (click)="confirmOnline()">
+        {{ onlineLabel(online.review?.action === 'prepare' ? 'prepare' : 'reconcile') }}
+      </button>
+    </section>
+    <section *ngIf="reviewedDetails as reviewed" class="pending" aria-live="polite">
+      <h3>{{ reviewLabel('review') }}</h3>
+      <p>{{ reviewLabel('localOnly') }}</p>
+      <dl class="request-details">
+        <dt>{{ tr('Titolo pubblico') }}</dt><dd>{{ reviewed.title }}</dd>
+        <dt>{{ tr('Descrizione pubblica') }}</dt><dd>{{ reviewed.description || '—' }}</dd>
+        <dt>{{ tr('Identificativo URL') }}</dt><dd>{{ reviewed.slug }}</dd>
+        <dt>{{ tr('Inizio (UTC)') }}</dt><dd>{{ reviewed.startsAt }}</dd>
+        <dt>{{ tr('Fine (UTC)') }}</dt><dd>{{ reviewed.endsAt }}</dd>
+        <dt>{{ tr('Base d’asta (€)') }}</dt><dd>{{ reviewed.startingAmount / 100 | number:'1.2-2' }}</dd>
+        <dt>{{ tr('Rilancio minimo (€)') }}</dt><dd>{{ reviewed.minimumIncrementAmount / 100 | number:'1.2-2' }}</dd>
+      </dl>
+    </section>
+  </ng-container>
+  <footer>
+    <button type="button" *ngIf="view?.saved" [disabled]="busy || !!online.review" (click)="reloadDraft(dirty)">{{ reloadLabel(dirty) }}</button>
+    <button type="button" *ngIf="dirty" [disabled]="busy" (click)="close(true)">{{ tr('Scarta modifiche non salvate e chiudi') }}</button>
+    <button type="button" [disabled]="busy || dirty" (click)="close()">{{ tr('Chiudi') }}</button>
+    <button type="button" class="primary" *ngIf="form" [disabled]="busy || !!online.review" (click)="saveDraft()">{{ tr('Salva bozza locale') }}</button>
+  </footer>
+</dialog>

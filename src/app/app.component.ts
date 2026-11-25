@@ -14,6 +14,7 @@ import { MediaEditorComponent } from './media-editor.component';
 import { BrochuresComponent } from './brochures.component';
 import { BusinessMailComponent } from './business-mail.component';
 import { ArtworkViewerComponent } from './artwork-viewer.component';
+import { AuctionEditorComponent } from './auction-editor.component';
 import { CertificateSheetComponent } from './certificate-sheet.component';
 import { emptyPayment, installmentRows, paymentToInput, toCents, type PaymentDraft } from './payments';
 import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-filters';
@@ -55,7 +56,7 @@ const statusLabels: Record<ArtworkStatus, string> = {
 @Component({
   selector: 'rp-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent, BusinessMailComponent, ArtworkViewerComponent, CertificateSheetComponent],
+  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent, BusinessMailComponent, ArtworkViewerComponent, CertificateSheetComponent, AuctionEditorComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
