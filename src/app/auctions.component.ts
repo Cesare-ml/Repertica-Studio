@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { invoke } from '@tauri-apps/api/core';
 import { previewLegacyDraft } from './auction-legacy-import';
 import { AuctionConnection } from './auction-connection';
-import { SettlementReader, settlementPresentation } from './auction-settlement-summary';
+import { SettlementReader, settlementPresentation, type SettlementReadAction } from './auction-settlement-summary';
 import { assertSameSnapshot, assertPreviewReadback } from './auction-online-readback';
 import { AUCTION_API_CONNECTED, AUCTION_CONTRACT_VERSION } from './auction-contract';
 import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, slugify,
@@ -186,7 +186,11 @@ const ERRORS: Record<string, string> = {
           <button type="button" (click)="confirmOnline()" [disabled]="busy || !canConfirmOnline">{{ onlineLabel(nativeReview.action === 'prepare' ? 'prepare' : 'reconcile') }}</button>
         </div>
       </div>
-      <button type="button" (click)="readSettlement()" [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('read') }}</button>
+      <div class="auctions-row">
+        <button type="button" (click)="readSettlement()" [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('read') }}</button>
+        <button type="button" (click)="readSettlement('pollSettlement')" [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('poll') }}</button>
+        <button type="button" (click)="readSettlement('historySettlement')" [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('history') }}</button>
+      </div>
       <p role="status" *ngIf="settlementState.kind === 'loading'">{{ settlementLabel('loading') }}</p>
       <p role="status" *ngIf="!busy && settlementState.kind === 'empty'">{{ settlementLabel('empty') }}</p>
       <p role="alert" *ngIf="!busy && settlementState.kind === 'unavailable'">{{ settlementLabel('unavailable') }}</p>
@@ -195,6 +199,8 @@ const ERRORS: Record<string, string> = {
         <p>{{ result.receipt }} · {{ result.fulfilledAt }}</p>
         <p *ngIf="result.acknowledgedAt">{{ result.acknowledgedAt }}</p>
         <p class="auctions-muted">{{ result.notice }}</p>
+        <button type="button" *ngIf="!result.acknowledgedAt" (click)="acknowledgeSettlement()"
+          [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('ack') }} #{{ result.sequence }}</button>
       </div>
     </div>
   </section>
@@ -458,13 +464,13 @@ export class AuctionsComponent implements OnInit, OnChanges {
     return labels[this.language][key];
   }
 
-  settlementLabel(key: 'read' | 'empty' | 'unavailable' | 'loading'): string {
+  settlementLabel(key: 'read' | 'poll' | 'history' | 'ack' | 'empty' | 'unavailable' | 'loading'): string {
     return ({
-      it: {read:'Leggi esito locale dell’asta',empty:'Nessun esito ricevuto per l’associazione verificata.',unavailable:'Esito non disponibile o accesso non autorizzato. Nessuna richiesta inviata.',loading:'Lettura esito locale…'},
-      en: {read:'Read local auction result',empty:'No result received for the verified association.',unavailable:'Result unavailable or access not authorized. No request sent.',loading:'Reading local result…'},
-      es: {read:'Leer resultado local de la subasta',empty:'No hay resultado para la asociación verificada.',unavailable:'Resultado no disponible o acceso no autorizado. No se ha enviado ninguna solicitud.',loading:'Leyendo resultado local…'},
-      fr: {read:'Lire le résultat local de l’enchère',empty:'Aucun résultat reçu pour l’association vérifiée.',unavailable:'Résultat indisponible ou accès non autorisé. Aucune requête envoyée.',loading:'Lecture du résultat local…'},
-      de: {read:'Lokales Auktionsergebnis lesen',empty:'Kein Ergebnis für die verifizierte Zuordnung erhalten.',unavailable:'Ergebnis nicht verfügbar oder Zugriff nicht autorisiert. Keine Anfrage gesendet.',loading:'Lokales Ergebnis wird gelesen…'}
+      it: {read:'Leggi esito locale dell’asta',poll:'Aggiorna esito',history:'Recupera prossima pagina dello storico',ack:'Conferma solo ricezione esito',empty:'Nessun esito ricevuto per l’associazione verificata.',unavailable:'Operazione non confermata. Controlla l’esito locale prima di riprovare.',loading:'Operazione sull’esito…'},
+      en: {read:'Read local auction result',poll:'Refresh result',history:'Recover next history page',ack:'Confirm receipt only',empty:'No result received for the verified association.',unavailable:'Operation not confirmed. Check the local result before retrying.',loading:'Processing result…'},
+      es: {read:'Leer resultado local de la subasta',poll:'Actualizar resultado',history:'Recuperar siguiente página del historial',ack:'Confirmar solo recepción',empty:'No hay resultado para la asociación verificada.',unavailable:'Operación no confirmada. Comprueba el resultado local antes de reintentar.',loading:'Procesando resultado…'},
+      fr: {read:'Lire le résultat local de l’enchère',poll:'Actualiser le résultat',history:'Récupérer la page suivante de l’historique',ack:'Confirmer uniquement la réception',empty:'Aucun résultat reçu pour l’association vérifiée.',unavailable:'Opération non confirmée. Vérifiez le résultat local avant de réessayer.',loading:'Traitement du résultat…'},
+      de: {read:'Lokales Auktionsergebnis lesen',poll:'Ergebnis aktualisieren',history:'Nächste Verlaufsseite abrufen',ack:'Nur Empfang bestätigen',empty:'Kein Ergebnis für die verifizierte Zuordnung erhalten.',unavailable:'Vorgang nicht bestätigt. Vor erneutem Versuch das lokale Ergebnis prüfen.',loading:'Ergebnis wird verarbeitet…'}
     })[this.language][key];
   }
 
@@ -499,13 +505,13 @@ export class AuctionsComponent implements OnInit, OnChanges {
     return this.online.review ? Object.entries(JSON.parse(this.online.review.publicBody) as Record<string,unknown>)
       .map(([field,value]) => ({field,value:String(value)})) : [];
   }
-  private async onlineAction(work: () => Promise<void>): Promise<void> {
+  private async onlineAction(work: () => Promise<void>, preserveSettlement = false): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.onlineError = ''; this.onlineNotice = '';
-    this.settlement.clear();
+    if (!preserveSettlement) this.settlement.clear();
     try { await work(); }
-    catch { this.onlineError = this.onlineLabel('failed'); }
+    catch { this.settlement.clear(); this.onlineError = this.onlineLabel('failed'); }
     finally { this.busy = false; }
   }
   checkConnection(): Promise<void> { return this.onlineAction(() => this.online.refreshStatus()); }
@@ -557,16 +563,34 @@ export class AuctionsComponent implements OnInit, OnChanges {
     const state = this.settlementState;
     return !this.busy && state.kind === 'ready' ? settlementPresentation(state.summary,this.language) : null;
   }
-  readSettlement(): Promise<void> {
+  readSettlement(action: SettlementReadAction = 'readSettlement'): Promise<void> {
+    return this.settlementAction(action);
+  }
+  acknowledgeSettlement(): Promise<void> {
+    const state = this.settlementState;
+    if (state.kind !== 'ready' || state.summary.acknowledgedAt !== null) return Promise.resolve();
+    return this.settlementAction('ackSettlement');
+  }
+  private settlementAction(action: SettlementReadAction | 'ackSettlement'): Promise<void> {
     if (this.busy || this.online.state !== 'connected' || this.online.review || !this.savedReference) return Promise.resolve();
+    const reviewed = this.settlementState;
     return this.onlineAction(async () => {
       const clean = this.cleanSaved;
       if (!clean) throw new Error('auction_draft_conflict');
       assertSameSnapshot(clean.snapshot,await nativeDrafts.read(clean.reference.artworkId));
-      await this.settlement.load(clean.reference);
+      const current = this.cleanSaved;
+      if (!current) throw new Error('auction_draft_conflict');
+      assertSameSnapshot(clean.snapshot,current.snapshot);
+      if (action === 'ackSettlement') {
+        // A cleared/changed selection cannot confirm an older result.
+        if (this.settlementState !== reviewed) throw new Error('auction_draft_conflict');
+        await this.settlement.acknowledge(clean.reference);
+      } else {
+        await this.settlement.load(clean.reference,action);
+      }
       try { assertSameSnapshot(clean.snapshot,await nativeDrafts.read(clean.reference.artworkId)); }
       catch (error) { this.settlement.clear(); throw error; }
-    });
+    }, true);
   }
 
   fieldLabel(field: string): string {

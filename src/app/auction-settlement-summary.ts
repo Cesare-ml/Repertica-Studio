@@ -56,7 +56,9 @@ export function settlementPresentation(raw: unknown, language: SettlementLanguag
 // A local selection is not an authorization. The native backend must resolve
 // the published association and independently verify the settlement grant.
 export type SettlementSelection = Readonly<{ artworkId: string; scope: string; revision: string }>;
-export type SettlementReadRequest = Readonly<{action: 'readSettlement'; artworkId: string; scope: string}>;
+export type SettlementReadAction = 'readSettlement' | 'pollSettlement' | 'historySettlement';
+export type SettlementReadRequest = Readonly<{action: SettlementReadAction; artworkId: string; scope: string}> |
+  Readonly<{action: 'ackSettlement'; artworkId: string; scope: string; expectedSequence: number}>;
 export type SettlementReadState = Readonly<
   {kind: 'idle' | 'loading' | 'empty' | 'unavailable'} |
   {kind: 'ready'; summary: SettlementSummary}
@@ -83,14 +85,30 @@ export class SettlementReader {
     return sameSelection(this.selection, selection) ? this.state : {kind:'idle'};
   }
 
-  async load(selection: SettlementSelection): Promise<void> {
+  async load(selection: SettlementSelection, action: SettlementReadAction = 'readSettlement'): Promise<void> {
+    if (this.busy) return;
+    await this.execute(selection, {action, artworkId:selection.artworkId, scope:selection.scope});
+  }
+
+  async acknowledge(selection: SettlementSelection): Promise<void> {
+    const state = this.current(selection);
+    if (this.busy || state.kind !== 'ready' || state.summary.acknowledgedAt !== null) return;
+    await this.execute(selection, {action:'ackSettlement', artworkId:selection.artworkId,
+      scope:selection.scope, expectedSequence:state.summary.sequence}, state.summary);
+  }
+
+  private async execute(selection: SettlementSelection, request: SettlementReadRequest,
+    reviewed?: SettlementSummary): Promise<void> {
     this.clear();
     const generation = this.generation;
     const {artworkId, scope, revision} = selection;
     this.selection = {artworkId, scope, revision};
     this.state = {kind:'loading'};
     try {
-      const value = parseSettlementSummary(await this.read({action:'readSettlement', artworkId, scope}));
+      const value = parseSettlementSummary(await this.read(request));
+      if (reviewed && (!value || value.sequence !== reviewed.sequence || value.acknowledgedAt === null ||
+        value.amount !== reviewed.amount || value.status !== reviewed.status || value.currency !== reviewed.currency ||
+        value.fulfilledAt !== reviewed.fulfilledAt)) throw new Error('settlement_invalid_summary');
       if (generation === this.generation) this.state = value ? {kind:'ready', summary:value} : {kind:'empty'};
     } catch {
       if (generation === this.generation) this.state = {kind:'unavailable'};
