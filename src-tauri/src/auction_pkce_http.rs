@@ -542,6 +542,10 @@ mod tests {
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW))),
             Err("settlement_binding_mismatch"));
         binding.owner = "repertica:42".into();
+        let mut wrong_archive = binding.clone();
+        wrong_archive.scope = "cccccccc-cccc-4ccc-8ccc-cccccccccccc".into();
+        assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&wrong_archive,&result,||Ok(NOW))),
+            Err("settlement_binding_mismatch"));
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&profile,||Ok(NOW))),
             Err("oauth_token_rejected"));
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW+900))),
@@ -569,7 +573,7 @@ mod tests {
                 (ack.clone(),"503 Service Unavailable",json!({"ok":false,"code":"unavailable"})),
                 (ack,"200 OK",confirmation),
                 (poll.clone(),"200 OK",ledger::reply(latest)),
-                (poll,"403 Forbidden",json!({"ok":false,"code":"denied"})),
+                (poll.clone(),"403 Forbidden",json!({"ok":false,"code":"denied"})),
             ] {
                 let mut stream = accept(&listener);
                 let body_bytes = read_resource_request(&mut stream,
@@ -577,6 +581,21 @@ mod tests {
                 assert_eq!(serde_json::from_slice::<Value>(&body_bytes).unwrap(),expected);
                 reply(&mut stream,status,&body);
             }
+            // The same fixed destination must reject ambiguous JSON without
+            // normalizing duplicate keys into a plausible receipt.
+            let mut stream = accept(&listener);
+            assert_eq!(serde_json::from_slice::<Value>(&read_resource_request(&mut stream,
+                "POST /api/studio/settlement/delivery HTTP/1.1",Some(&bearer),None)).unwrap(),poll);
+            let valid = serde_json::to_string(&ledger::reply(ledger::delivery(3,"review_required"))).unwrap();
+            let duplicate = format!("{{\"ok\":false,{}", &valid[1..]);
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",duplicate.len()).unwrap();
+            stream.write_all(duplicate.as_bytes()).unwrap();
+            drop(stream);
+            let mut stream = accept(&listener);
+            assert_eq!(serde_json::from_slice::<Value>(&read_resource_request(&mut stream,
+                "POST /api/studio/settlement/delivery HTTP/1.1",Some(&bearer),None)).unwrap(),poll);
+            // A redirect even to the same local server is forbidden.
+            write!(stream,"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{}/other\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",addr).unwrap();
             listener
         });
         tauri::async_runtime::block_on(async {
@@ -590,6 +609,8 @@ mod tests {
             assert_eq!(client.ack(&mut db,&binding,&result,||Ok(NOW)).await,Ok(()));
             assert_eq!(client.poll(&mut db,&binding,&result,||Ok(NOW)).await,Ok(3));
             assert_eq!(client.poll(&mut db,&binding,&result,||Ok(NOW)).await,Err("settlement_access_denied"));
+            assert_eq!(client.poll(&mut db,&binding,&result,||Ok(NOW)).await,Err("settlement_invalid_response"));
+            assert_eq!(client.poll(&mut db,&binding,&result,||Ok(NOW)).await,Err("settlement_http_rejected"));
         });
         let listener = worker.join().unwrap();
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
