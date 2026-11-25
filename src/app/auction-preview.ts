@@ -63,3 +63,17 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   if (new TextEncoder().encode(body).length > 8192) throw new Error('payload_too_large');
   return Object.freeze({ artworkId: draft.artworkId, idempotencyKey, body });
 }
+
+export interface ReviewRow { readonly field: string; readonly value: string }
+
+/**
+ * Validates the draft exactly as the future request would and lists the fields that would be sent.
+ * The tenant is a placeholder (assigned by the server after sign-in) and is not listed.
+ * Nothing is persisted or transmitted. Throws the validation error code of preparePreview.
+ */
+export function reviewRows(draft: AuctionDraft, now: number = Date.now()): ReviewRow[] {
+  const prepared = preparePreview(draft, 'review-offline', 'review-offline-0123456789', now);
+  const body = JSON.parse(prepared.body) as Record<string, unknown>;
+  delete body['tenantId'];
+  return Object.entries(body).map(([field, value]) => ({ field, value: String(value) }));
+}

@@ -129,6 +129,7 @@
               <span *ngIf="!salesByArtwork[a.id]">—</span></td>
             <td class="actions"><button class="small action-glyph action-glyph--edit" type="button" (click)="editArtwork(a)">{{ tr('Modifica') }}</button>
               <button class="small action-glyph action-glyph--photo" type="button" [disabled]="busy" (click)="chooseCoverPhoto(a)">{{ tr('Foto') }}</button>
+              <button class="small" type="button" *ngIf="a.status === 'available'" (click)="startAuction(a)">{{ tr('Avvia asta') }}</button>
               <button class="small action-glyph action-glyph--gallery" type="button" (click)="openGallery(a)">{{ tr('Galleria') }}</button>
               <button class="small danger-text action-glyph action-glyph--delete" type="button" (click)="deleteArtwork(a)">{{ tr('Elimina') }}</button></td>
           </tr></tbody></table>
@@ -223,6 +224,10 @@
 
     <section *ngIf="section === 'mail'" class="page mail-section">
       <rp-business-mail [language]="language" [collectors]="collectors" [sync]="mailSync" [notifications]="settings.mail_notifications" (notificationsChange)="setMailNotifications($event)"></rp-business-mail>
+    </section>
+
+    <section *ngIf="section === 'auctions'" class="page">
+      <rp-auctions [artworks]="artworks" [language]="language" [preselectedArtworkId]="auctionArtworkId" (consumed)="auctionArtworkId = null"></rp-auctions>
     </section>
 
     <section *ngIf="section === 'brochures'" class="page brochure-section">

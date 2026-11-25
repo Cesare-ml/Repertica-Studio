@@ -49,3 +49,19 @@ Prima di collegare un flusso reale, concorda con Codex un contratto versionato p
 ## Decisioni ancora aperte
 
 Il proprietario sta definendo la roadmap. Raccogli progressivamente: campi obbligatori per asta/opera, ruoli e condizioni dell'annullamento, motivazione e visibilità dell'offerta annullata, conseguenze su tempi e offerte successive, notifiche e conservazione dei dati. Non inventare regole vincolanti: dove una decisione è necessaria, prepara il lavoro indipendente e segnala il punto preciso. Telegram appartiene alla MVP 3.
+
+## Stato dell'implementazione Desktop (25 novembre 2026)
+
+Verificato nel repository Repertica-auctions (stesso giorno): non esiste un'API di produzione per identità reale, pubblicazione, elenco aste, lettura delle offerte con email o annullamento; `docs/STUDIO_API.md` descrive solo anteprime non attivate (flag spento) e l'accesso Repertica non è completato. Il Desktop quindi **non è collegato** e non finge di esserlo (`AUCTION_API_CONNECTED = false` in `src/app/auction-contract.ts`).
+
+Realizzato, senza alcuna chiamata di rete:
+
+- **Sezione Aste** (`src/app/auctions.component.ts`) e pulsante **Avvia asta** sulle opere disponibili. Avviso chiaro «Non collegato ad Auctions», bozze locali marcate come tali (una per opera, nel `localStorage` del Desktop: solo campi pubblici, non incluse nei backup dell'archivio), revisione dei soli dati che verrebbero inviati, elenco di ciò che non parte, pulsante Pubblica disattivato. Orari nel fuso dell'utente con conversione in UTC esatto; importi in euro convertiti in centesimi.
+- **Lettura delle risposte del server** (`auction-contract.ts`): parser con allowlist per aste, offerte (email riservata, con `maskEmail` per i log), pagine di storico (deduplica, ordine per tempo server) ed esito di annullamento; controllo di coerenza dell'offerta guida che segnala le discordanze senza correggerle; `awarded` non implica pagamento né vendita.
+- **Operazioni con esito incerto** (`auction-operations.ts`): risposta persa = «conferma in sospeso»; ritentativo con stessa chiave e stesso corpo; conferma solo dopo rilettura dello stato dal server; rifiuti 4xx e annullamenti non consentiti/contestati distinti.
+- Test: `tests/auction-desktop.test.mjs` (11), insieme a `auction-preview` (7). `npm run test:unit` 157/157, `npm run build` ok, `cargo test` 305/305.
+
+Non realizzato perché dipende dal progetto online: login PKCE e sessioni, caricamento immagini, pubblicazione reale, elenco aste e offerte, annullamento, notifiche, registrazione esplicita di una vendita dopo l'aggiudicazione. Decisioni aperte invariate (campi obbligatori, regole di annullamento e motivazione, anti-sniping, conservazione dati). Non verificato: l'interfaccia nella finestra Tauri (solo build e test automatici).
+
+Nota: i branch remoti `feat/auctions-offline-draft-storage-20261124` e `qa/auctions-core-combined-20261124` contengono altro lavoro Desktop non ancora in `main` (bozze in SQLite, PKCE, ledger). Non è stato incluso né sovrascritto; prima di unirlo va riconciliato con questa implementazione (in particolare `auction-preview.ts` e la migrazione v20).
+

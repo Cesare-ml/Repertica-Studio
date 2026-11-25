@@ -21,6 +21,7 @@ nav button.active{background:#dfe9e2;color:#244d42;box-shadow:inset 3px 0 #517c6
 .nav-icon--collectors{-webkit-mask-image:url('/assets/icons/collectors.svg');mask-image:url('/assets/icons/collectors.svg')}
 .nav-icon--sales{-webkit-mask-image:url('/assets/icons/sales.svg');mask-image:url('/assets/icons/sales.svg')}
 .nav-icon--certificates{-webkit-mask-image:url('/assets/icons/certificates.svg');mask-image:url('/assets/icons/certificates.svg')}
+.nav-icon--auctions{-webkit-mask-image:url('/assets/icons/auctions.svg');mask-image:url('/assets/icons/auctions.svg')}
 .nav-icon--brochures{-webkit-mask-image:url('/assets/icons/brochures.svg');mask-image:url('/assets/icons/brochures.svg')}
 .nav-icon--mail{-webkit-mask-image:url('/assets/icons/mail.svg');mask-image:url('/assets/icons/mail.svg')}
 .nav-icon--finance{-webkit-mask-image:url('/assets/icons/finance.svg');mask-image:url('/assets/icons/finance.svg')}

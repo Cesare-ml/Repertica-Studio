@@ -12,6 +12,7 @@ import { PaymentPlanComponent } from './payment-plan.component';
 import { MediaCenterComponent } from './media-center.component';
 import { MediaEditorComponent } from './media-editor.component';
 import { BrochuresComponent } from './brochures.component';
+import { AuctionsComponent } from './auctions.component';
 import { BusinessMailComponent } from './business-mail.component';
 import { ArtworkViewerComponent } from './artwork-viewer.component';
 import { CertificateSheetComponent } from './certificate-sheet.component';
@@ -52,7 +53,7 @@ export const SETTINGS_TABS: readonly SettingsTabInfo[] = [
   { id: 'ai', label: 'Assistenti IA', title: 'Assistenti IA locali', description: 'Collega un assistente IA installato sul tuo computer in sola lettura.' },
   { id: 'about', label: 'Aggiornamenti', title: 'Aggiornamenti e informazioni', description: 'Versione installata, aggiornamenti automatici e informazioni sul software.' },
 ];
-type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'brochures' | 'mail' | 'finance' | 'settings';
+type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'auctions' | 'brochures' | 'mail' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
   code: null, title: '', year: null, technique: null, support: null,
   width_cm: null, height_cm: null, depth_cm: null, description: null,
@@ -72,7 +73,7 @@ const statusLabels: Record<ArtworkStatus, string> = {
 @Component({
   selector: 'rp-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent, BusinessMailComponent, ArtworkViewerComponent, CertificateSheetComponent],
+  imports: [CommonModule, FormsModule, PaymentPlanComponent, MediaCenterComponent, MediaEditorComponent, BrochuresComponent, AuctionsComponent, BusinessMailComponent, ArtworkViewerComponent, CertificateSheetComponent],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css']
 })
@@ -98,6 +99,7 @@ export class AppComponent implements OnInit {
     { id: 'collectors', label: 'Collezionisti' },
     { id: 'sales', label: 'Vendite' },
     { id: 'certificates', label: 'Certificati' },
+    { id: 'auctions', label: 'Aste' },
     { id: 'brochures', label: 'Brochure' },
     { id: 'mail', label: 'Posta' },
     { id: 'finance', label: 'Economia' },
@@ -393,6 +395,12 @@ export class AppComponent implements OnInit {
     this.change.detectChanges();
   }
   updateText(): string { return this.update ? this.tr(updateMessage(this.update.status)) : ''; }
+  /** Artwork whose auction draft the Aste section should open (set from the artwork row). */
+  auctionArtworkId: string | null = null;
+  startAuction(artwork: Artwork): void {
+    this.auctionArtworkId = artwork.id;
+    this.navigate('auctions');
+  }
   navigate(section: Section): void {
     this.section = section;
     this.mediaOpenId = null;
