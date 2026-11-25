@@ -3,7 +3,7 @@
     <div class="brand"><div class="brand-mark">R</div><div><strong>Repertica</strong><span>STUDIO</span></div></div>
     <nav [attr.aria-label]="tr('Sezioni principali')">
       <button type="button" *ngFor="let item of sections" [class.active]="section === item.id"
-        (click)="navigate(item.id)" [attr.aria-current]="section === item.id ? 'page' : null"><span class="nav-icon" [ngClass]="'nav-icon--' + item.id" aria-hidden="true"></span>{{ tr(item.label) }}</button>
+        (click)="navigate(item.id)" [attr.aria-current]="section === item.id ? 'page' : null"><span class="nav-icon" [ngClass]="'nav-icon--' + item.id" aria-hidden="true"></span>{{ tr(item.label) }}<span class="nav-badge" *ngIf="item.id === 'mail' && mailUnread > 0" [attr.aria-label]="mailUnread + ' ' + tr('messaggi da leggere')">{{ badge(mailUnread) }}</span></button>
     </nav>
     <div class="sidebar-bottom">
       <small class="attribution">Powered by Repertica</small>
@@ -25,7 +25,7 @@
           <span *ngIf="updateInstalling">{{ updateProgress === null ? tr('Download in corso…') : updateProgress + '%' }}</span></span>
         <span class="update-actions">
           <button type="button" class="small primary" (click)="installUpdate()" [disabled]="updateInstalling || busy">{{ tr('Scarica e installa') }}</button>
-          <button type="button" class="small" (click)="navigate('settings')" [disabled]="updateInstalling">{{ tr('Dettagli') }}</button>
+          <button type="button" class="small" (click)="goToSettings('about')" [disabled]="updateInstalling">{{ tr('Dettagli') }}</button>
           <button type="button" (click)="updateBannerHidden = true" *ngIf="!updateInstalling" [attr.aria-label]="tr('Nascondi')">×</button></span>
       </div>
     </div>
@@ -67,7 +67,7 @@
           <li><div><strong>{{ tr('Certificati') }}</strong><p>{{ tr('Emetti un certificato numerato e stampalo o salvalo in PDF. Dopo l’emissione non si può modificare.') }}</p></div>
             <button type="button" class="small" (click)="navigate('certificates')">{{ tr('Vai ai certificati') }}</button></li>
           <li><div><strong>{{ tr('Backup del tuo archivio') }}</strong><p>{{ tr('In Impostazioni scegli una cartella (anche una chiavetta USB) e crea una copia verificata. I dati sono solo su questo computer: fai backup spesso.') }}</p></div>
-            <button type="button" class="small" (click)="navigate('settings')">{{ tr('Vai alle impostazioni') }}</button></li>
+            <button type="button" class="small" (click)="goToSettings('backup')">{{ tr('Vai alle impostazioni') }}</button></li>
         </ol>
         <div class="guide-foot"><button type="button" class="primary" (click)="dismissGuide()">{{ tr('Ho capito, nascondi la guida') }}</button>
           <small>{{ tr('Puoi riaprire questa guida in qualsiasi momento da Impostazioni.') }}</small></div>
@@ -111,9 +111,13 @@
         </select></label>
         <span class="filter-count" aria-live="polite">{{ visibleArtworks.length }} / {{ artworks.length }} {{ tr('Opere') }}</span>
       </div>
+      <div class="bulk-bar" *ngIf="pickedArtworks.length"><strong>{{ pickedArtworks.length }} {{ tr('selezionati') }}</strong>
+        <button type="button" class="small danger-text action-glyph action-glyph--delete" [disabled]="busy" (click)="deleteSelectedArtworks()">{{ tr('Elimina selezionati') }}</button>
+        <button type="button" class="small" (click)="selectedArtworkIds.clear()">{{ tr('Deseleziona') }}</button></div>
       <div class="panel table-scroll">
-        <table><thead><tr><th>{{ tr('Opera') }}</th><th>{{ tr('Anno / tecnica') }}</th><th>{{ tr('Misure') }}</th><th>{{ tr('Prezzo') }}</th><th>{{ tr('Stato') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+        <table><thead><tr><th class="pick"><input type="checkbox" [checked]="allPicked(visibleArtworks, selectedArtworkIds)" (change)="toggleAll(visibleArtworks, selectedArtworkIds)" [attr.aria-label]="tr('Seleziona tutti')"></th><th>{{ tr('Opera') }}</th><th>{{ tr('Anno / tecnica') }}</th><th>{{ tr('Misure') }}</th><th>{{ tr('Prezzo') }}</th><th>{{ tr('Stato') }}</th><th>{{ tr('Collezionista') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
           <tbody><tr *ngFor="let a of visibleArtworks">
+            <td class="pick"><input type="checkbox" [checked]="selectedArtworkIds.has(a.id)" (change)="toggleId(selectedArtworkIds, a.id)" [attr.aria-label]="tr('Seleziona') + ': ' + a.title"></td>
             <td><div class="work-cell"><button type="button" class="work-open" (click)="openViewer(a)" [attr.aria-label]="tr('Apri a schermo intero') + ': ' + a.title" [title]="tr('Apri a schermo intero')"><span class="work-image"><img *ngIf="thumbnails[a.id]" [src]="thumbnails[a.id]" alt=""><span *ngIf="!thumbnails[a.id]">R</span></span></button>
               <div><button type="button" class="link-button work-title" (click)="openViewer(a)">{{ a.title }}</button><span class="raw-badge" *ngIf="rawByArtwork[a.id]" [title]="rawByArtwork[a.id].original_name">RAW</span><small>{{ a.code }}</small></div></div></td>
             <td>{{ a.year || '—' }}<small class="stacked">{{ a.technique || 'Tecnica non indicata' }}</small></td>
@@ -149,10 +153,13 @@
           <button type="button" class="chip" [class.active]="collectorFilter === 'incomplete'" (click)="collectorFilter = 'incomplete'">{{ tr('Dati incompleti') }}</button>
         </div>
         <span>{{ visibleCollectors.length }} / {{ collectors.length }} {{ tr('Contatti') }}</span></div>
-      <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Nome') }}</th><th>{{ tr('Contatti') }}</th><th>{{ tr('Indirizzo') }}</th><th>{{ tr('Opere acquisite') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
+<div class="bulk-bar" *ngIf="pickedCollectors.length"><strong>{{ pickedCollectors.length }} {{ tr('selezionati') }}</strong>
+        <button type="button" class="small danger-text action-glyph action-glyph--delete" [disabled]="busy" (click)="deleteSelectedCollectors()">{{ tr('Elimina selezionati') }}</button>
+        <button type="button" class="small" (click)="selectedCollectorIds.clear()">{{ tr('Deseleziona') }}</button></div>
+      <div class="panel table-scroll"><table><thead><tr><th class="pick"><input type="checkbox" [checked]="allPicked(visibleCollectors, selectedCollectorIds)" (change)="toggleAll(visibleCollectors, selectedCollectorIds)" [attr.aria-label]="tr('Seleziona tutti')"></th><th>{{ tr('Nome') }}</th><th>{{ tr('Contatti') }}</th><th>{{ tr('Indirizzo') }}</th><th>{{ tr('Opere acquisite') }}</th><th>{{ tr('Operazioni') }}</th></tr></thead>
         <tbody>
           <ng-container *ngFor="let c of visibleCollectors">
-            <tr><td><div class="person"><span class="avatar"><img *ngIf="c.profile_image_id && collectorThumbs[c.profile_image_id]" [src]="collectorThumbs[c.profile_image_id]" alt=""><span *ngIf="!(c.profile_image_id && collectorThumbs[c.profile_image_id])">{{ initials(c) }}</span></span>
+            <tr><td class="pick"><input type="checkbox" [checked]="selectedCollectorIds.has(c.id)" (change)="toggleId(selectedCollectorIds, c.id)" [attr.aria-label]="tr('Seleziona') + ': ' + c.name"></td><td><div class="person"><span class="avatar"><img *ngIf="c.profile_image_id && collectorThumbs[c.profile_image_id]" [src]="collectorThumbs[c.profile_image_id]" alt=""><span *ngIf="!(c.profile_image_id && collectorThumbs[c.profile_image_id])">{{ initials(c) }}</span></span>
                 <div><strong>{{ c.name }}</strong><small class="stacked" *ngIf="c.photo_count">{{ c.photo_count }} {{ tr('Fotografie') }}</small></div></div></td>
               <td>{{ c.email || '—' }}<small class="stacked">{{ c.phone || '' }}</small></td>
               <td>{{ c.address || '—' }}</td>
@@ -164,7 +171,7 @@
               <td class="actions"><button class="small action-glyph action-glyph--edit" type="button" (click)="editCollector(c)">{{ tr('Modifica') }}</button>
                 <button class="small danger-text action-glyph action-glyph--delete" type="button" (click)="deleteCollector(c)">{{ tr('Elimina') }}</button></td></tr>
             <tr *ngIf="expandedCollectorId === c.id" class="collector-details" [id]="'collector-works-' + c.id">
-              <td colspan="5">
+              <td colspan="6">
                 <div class="collector-history-header"><strong>Opere acquistate da {{ c.name }}</strong>
                   <button type="button" class="small" (click)="showCollectorArtworks(c.id)">{{ tr('Vedi nell\'archivio opere') }}</button></div>
                 <ul class="collector-history">
@@ -202,16 +209,20 @@
           <button class="primary action-glyph action-glyph--certificates" type="button" (click)="newCertificate()" [disabled]="!initialized || !artworks.length">{{ tr('+ Emissione certificato') }}</button>
         </div></div>
       <div class="hint">{{ tr('I certificati sono documenti da controllare e firmare dall\'artista; non costituiscono da soli una verifica indipendente di autenticità.') }}</div>
-      <div class="panel table-scroll"><table><thead><tr><th>{{ tr('Numero') }}</th><th>{{ tr('Opera') }}</th><th>{{ tr('Artista') }}</th><th>{{ tr('Emesso il') }}</th><th>{{ tr('Documento') }}</th></tr></thead>
-        <tbody><tr *ngFor="let c of certificates"><td><strong>{{ c.serial }}</strong></td><td>{{ c.artwork_title }}</td><td>{{ c.artist_name }}</td>
+<div class="bulk-bar" *ngIf="pickedCertificates.length"><strong>{{ pickedCertificates.length }} {{ tr('selezionati') }}</strong>
+        <button type="button" class="small danger-text action-glyph action-glyph--delete" [disabled]="busy" (click)="deleteSelectedCertificates()">{{ tr('Elimina selezionati') }}</button>
+        <button type="button" class="small" (click)="selectedCertificateIds.clear()">{{ tr('Deseleziona') }}</button></div>
+      <div class="panel table-scroll"><table><thead><tr><th class="pick"><input type="checkbox" [checked]="allPicked(certificates, selectedCertificateIds)" (change)="toggleAll(certificates, selectedCertificateIds)" [attr.aria-label]="tr('Seleziona tutti')"></th><th>{{ tr('Numero') }}</th><th>{{ tr('Opera') }}</th><th>{{ tr('Artista') }}</th><th>{{ tr('Emesso il') }}</th><th>{{ tr('Documento') }}</th></tr></thead>
+        <tbody><tr *ngFor="let c of certificates"><td class="pick"><input type="checkbox" [checked]="selectedCertificateIds.has(c.id)" (change)="toggleId(selectedCertificateIds, c.id)" [attr.aria-label]="tr('Seleziona') + ': ' + c.serial"></td><td><strong>{{ c.serial }}</strong></td><td>{{ c.artwork_title }}</td><td>{{ c.artist_name }}</td>
           <td>{{ date(c.issued_at) }}</td><td class="actions"><button class="small" type="button" (click)="previewCertificate(c)">{{ tr('Anteprima') }}</button>
-            <button class="small action-glyph action-glyph--print" type="button" (click)="printCertificate(c)">{{ tr('Stampa / PDF') }}</button></td></tr></tbody></table>
+            <button class="small action-glyph action-glyph--print" type="button" (click)="printCertificate(c)">{{ tr('Stampa / PDF') }}</button>
+            <button class="small danger-text action-glyph action-glyph--delete" type="button" (click)="deleteCertificate(c)" [disabled]="busy">{{ tr('Elimina') }}</button></td></tr></tbody></table>
         <div class="empty-state" *ngIf="!certificates.length"><strong>{{ tr('Non hai ancora emesso certificati.') }}</strong><p>{{ tr('Il certificato congela i dati dell’opera al momento dell’emissione e poi non si può più modificare: controlla la scheda prima di emetterlo.') }}</p></div></div>
     </section>
 
 
     <section *ngIf="section === 'mail'" class="page mail-section">
-      <rp-business-mail [language]="language" [collectors]="collectors"></rp-business-mail>
+      <rp-business-mail [language]="language" [collectors]="collectors" [sync]="mailSync" [notifications]="settings.mail_notifications" (notificationsChange)="setMailNotifications($event)"></rp-business-mail>
     </section>
 
     <section *ngIf="section === 'brochures'" class="page brochure-section">
@@ -294,28 +305,18 @@
       </table><div class="empty-state" *ngIf="!expenses.length">{{ tr('Nessuna spesa registrata') }}</div></div>
     </section>
 
-    <section *ngIf="section === 'settings'" class="page">
-      <div class="section-tools"><div><h2>{{ tr('Archivio e preferenze') }}</h2></div></div>
-      <div class="panel settings-panel"><h3>{{ tr('Cartella dei dati') }}</h3>
-        <code class="path">{{ dataPath || 'Percorso disponibile solo nell’app Tauri' }}</code>
-
-        <div class="backup-block">
-          <h3>{{ tr('Diagnostica fotografie dell’archivio') }}</h3>
-          <p>{{ tr('Verifica in sola lettura percorsi, presenza e intestazione delle immagini JPEG, PNG e WebP. Non modifica file e non confronta hash storici.') }}</p>
-          <button type="button" class="secondary action-glyph action-glyph--shield" (click)="verifyArtworkMedia()" [disabled]="busy || !initialized">{{ tr('Verifica fotografie') }}</button>
-          <div *ngIf="mediaAudit as audit" class="backup-result" role="status" aria-live="polite">
-            <strong>{{ tr('Riferimenti controllati') }}: {{ audit.checked }} · {{ tr('Fotografie leggibili') }}: {{ audit.healthy }} · {{ tr('Problemi rilevati') }}: {{ audit.problems }}</strong>
-            <p *ngIf="audit.problems === 0">{{ tr('Nessun problema rilevato nel controllo locale.') }}</p>
-            <ul *ngIf="audit.issues.length">
-              <li *ngFor="let issue of audit.issues">
-                <strong>{{ mediaArtworkLabel(issue.artworkId) }}</strong> · {{ tr(issue.role === 'primary' ? 'Copertina' : issue.role === 'certificate' ? 'Fotografia del certificato' : issue.role === 'collector' ? 'Collezionisti' : issue.role === 'media' ? 'Libreria immagini' : 'Galleria') }}
-                <span *ngIf="issue.role === 'certificate' && issue.imageId"> · ID: <code>{{ issue.imageId }}</code></span> ·
-                <code>{{ issue.path }}</code> — {{ mediaProblemLabel(issue.problem) }}
-              </li>
-            </ul>
-            <p *ngIf="audit.truncated">{{ tr('Sono visualizzati soltanto i primi 100 problemi.') }}</p>
-          </div>
-        </div>
+    <section *ngIf="section === 'settings'" class="page settings-page">
+      <div class="settings-layout">
+        <nav class="settings-nav" role="tablist" [attr.aria-label]="tr('Categorie delle impostazioni')">
+          <button type="button" role="tab" *ngFor="let item of settingsTabs" [id]="'settings-tab-' + item.id" [class.active]="settingsTab === item.id"
+            [attr.aria-selected]="settingsTab === item.id" (click)="settingsTab = item.id">
+            <span>{{ tr(item.label) }}</span>
+            <span class="settings-dot" *ngIf="item.id === 'about' && update?.status === 'available'" [attr.aria-label]="tr('Aggiornamento disponibile')"></span>
+          </button>
+        </nav>
+        <div class="settings-content">
+      <div class="settings-tab" *ngIf="settingsTab === 'profile'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-profile'">
+        <header class="settings-head"><h3>{{ tr(settingsTabInfo('profile').title) }}</h3><p>{{ tr(settingsTabInfo('profile').description) }}</p></header>
         <div class="backup-block artist-block">
           <h3>{{ tr('Artista e certificati') }}</h3>
           <p>{{ tr('Il nome e cognome firma la dichiarazione dei certificati; il nome d’artista, se c’è, compare al suo posto come autore sui certificati e nelle brochure.') }}</p>
@@ -327,100 +328,6 @@
             <button type="button" class="primary" (click)="saveArtistProfile(settingsDraft.artist_name ?? '', settingsDraft.artist_alias ?? '')" [disabled]="busy || !(settingsDraft.artist_name ?? '').trim()">{{ tr('Salva') }}</button>
           </div>
         </div>
-        <div class="backup-block export-block">
-          <h3>{{ tr('Esportazioni') }}</h3>
-          <p>{{ tr('Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.') }}</p>
-          <div class="export-groups">
-            <div class="export-group"><h4>{{ tr('Archivio opere') }}</h4>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('raw_files')" [disabled]="busy || !initialized">{{ tr('Esporta metadati RAW CSV') }}</button>
-            </div>
-            <div class="export-group"><h4>{{ tr('Collezionisti') }}</h4>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('collectors')" [disabled]="busy || !initialized">{{ tr('Esporta collezionisti CSV') }}</button>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('collector_photos')" [disabled]="busy || !initialized">{{ tr('Esporta fotografie collezionisti CSV') }}</button>
-            </div>
-            <div class="export-group"><h4>{{ tr('Vendite e incassi') }}</h4>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('receipts')" [disabled]="busy || !initialized">{{ tr('Esporta incassi CSV') }}</button>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('balances')" [disabled]="busy || !initialized">{{ tr('Esporta saldi vendite CSV') }}</button>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('installments')" [disabled]="busy || !initialized">{{ tr('Esporta piani rateali CSV') }}</button>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('allocations')" [disabled]="busy || !initialized">{{ tr('Esporta ripartizioni CSV') }}</button>
-            </div>
-            <div class="export-group"><h4>{{ tr('Certificati') }}</h4>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('certificates')" [disabled]="busy || !initialized">{{ tr('Esporta certificati CSV') }}</button>
-            </div>
-            <div class="export-group"><h4>{{ tr('Spese') }}</h4>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
-            </div>
-          </div>
-        </div>
-        <div class="backup-block update-block">
-          <h3>{{ tr('Aggiornamenti') }}</h3>
-          <p>{{ tr('Versione installata:') }} <strong>v{{ appVersion }}</strong></p>
-          <label class="inline-check"><input type="checkbox" [ngModel]="autoUpdate" (ngModelChange)="setAutoUpdate($event)"> {{ tr('Cerca automaticamente gli aggiornamenti') }}</label>
-          <p class="hint">{{ tr('Gli aggiornamenti arrivano dalle release ufficiali su GitHub, sono firmati e vengono installati solo dopo la tua conferma. Prima dell’installazione viene eseguito un backup se il backup automatico è attivo.') }}</p>
-          <div class="update-actions">
-            <button type="button" class="secondary" (click)="checkUpdates(true)" [disabled]="updateChecking || updateInstalling">{{ updateChecking ? tr('Controllo in corso…') : tr('Cerca aggiornamenti') }}</button>
-            <button type="button" class="primary" *ngIf="update?.status === 'available'" (click)="installUpdate()" [disabled]="updateInstalling || busy">{{ tr('Scarica e installa') }}</button>
-            <button type="button" class="secondary" *ngIf="update?.status === 'backup_failed'" (click)="installUpdate(true)" [disabled]="updateInstalling || busy">{{ tr('Installa senza backup') }}</button>
-          </div>
-          <progress *ngIf="updateInstalling" max="100" [value]="updateProgress ?? 0" [attr.aria-label]="tr('Avanzamento del download')"></progress>
-          <p *ngIf="update" role="status" aria-live="polite"><strong *ngIf="update.version">v{{ update.version }} — </strong>{{ updateText() }}</p>
-          <pre class="update-notes" *ngIf="update?.status === 'available' && update?.notes">{{ update?.notes }}</pre>
-          <p class="hint" *ngIf="update?.status === 'available'">{{ tr('Dopo l’installazione l’app si riavvia: salva il lavoro in corso prima di procedere.') }}</p>
-        </div>
-        <div class="backup-block">
-          <h3>{{ tr('Guida di primo avvio') }}</h3><p>{{ tr('Mostra di nuovo i suggerimenti di benvenuto nella Panoramica.') }}</p>
-          <button type="button" class="secondary" (click)="reopenGuide()">{{ tr('Mostra la guida') }}</button>
-        </div>
-        <div class="backup-block mcp-block">
-          <h3>{{ tr('Assistenti IA locali (MCP)') }}</h3>
-          <p>{{ tr('Permette a un assistente IA installato sul tuo computer di consultare l’archivio in sola lettura, per esempio per cercare opere o riassumere le vendite. Non può modificare nulla; email, telefoni, indirizzi, note private e fotografie non vengono condivisi.') }}</p>
-          <p class="hint">{{ tr('Attenzione: ciò che l’assistente legge può essere inviato al suo fornitore. Usa solo assistenti di cui ti fidi.') }}</p>
-          <div class="mcp-clients" role="status" aria-live="polite">
-            <div class="mcp-client" *ngFor="let client of mcpClients">
-              <strong>{{ client.name }}</strong>
-              <span class="status-pill" [class.ok]="client.configured && client.upToDate && !client.error" [class.warn]="(client.configured && !client.upToDate) || client.error">{{ clientStatusLabel(client) }}</span>
-              <div class="mcp-actions">
-                <button type="button" class="primary small" *ngIf="client.appFound && !client.error && (!client.configured || !client.upToDate)" (click)="connectClient(client)" [disabled]="busy">
-                  {{ client.configured ? tr('Aggiorna il collegamento') : tr('Collega') }}</button>
-                <button type="button" class="secondary small" *ngIf="client.configured && !client.error" (click)="disconnectClient(client)" [disabled]="busy">{{ tr('Scollega') }}</button>
-              </div>
-              <small *ngIf="client.error">{{ client.error }}</small>
-            </div>
-          </div>
-          <p class="mcp-note">{{ tr('Dopo ogni modifica riavvia l’assistente.') }}</p>
-          <p class="mcp-note">{{ tr('ChatGPT (app e sito) si collega solo a server online e non può usare un server locale: per i prodotti OpenAI usa Codex.') }}</p>
-          <details class="mcp-manual">
-            <summary>{{ tr('Configurazione manuale per altri assistenti') }}</summary>
-            <ng-container *ngIf="mcpSetup">
-              <p>{{ tr('Formato JSON (Claude, Cursor, Windsurf, Gemini CLI…)') }}</p>
-              <pre class="mcp-config" tabindex="0">{{ mcpConfigJson }}</pre>
-              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpConfigJson)">{{ tr('Copia configurazione') }}</button>
-              <p>{{ tr('Codex (file config.toml)') }}</p>
-              <pre class="mcp-config" tabindex="0">{{ mcpTomlSnippet }}</pre>
-              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpTomlSnippet)">{{ tr('Copia configurazione') }}</button>
-              <p>{{ tr('Da riga di comando') }}</p>
-              <pre class="mcp-config" tabindex="0">{{ mcpCommands }}</pre>
-              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpCommands)">{{ tr('Copia configurazione') }}</button>
-            </ng-container>
-          </details>
-        </div>
-        <div class="backup-block code-settings">
-          <h3>{{ tr('Codice archivio') }}</h3>
-          <p>{{ tr('Il codice delle nuove opere è assegnato automaticamente. I codici già assegnati non cambiano.') }}</p>
-          <div class="settings-grid">
-            <label class="settings-input"><span>{{ tr('Prefisso') }}</span><input maxlength="12" [(ngModel)]="codePolicy.prefix" (ngModelChange)="codePolicy.prefix = ($event || '').toUpperCase()"></label>
-            <label class="settings-input"><span>{{ tr('Numerazione') }}</span><select [(ngModel)]="codePolicy.scope">
-              <option value="GLOBAL">{{ tr('Progressiva') }}</option><option value="YEARLY">{{ tr('Ricomincia ogni anno') }}</option></select></label>
-            <label class="settings-input"><span>{{ tr('Cifre del numero') }}</span><input type="number" min="2" max="8" [(ngModel)]="codePolicy.padding"></label>
-            <label class="settings-input"><span>{{ tr('Separatore') }}</span><select [(ngModel)]="codePolicy.separator">
-              <option value="-">-</option><option value=".">.</option><option value="_">_</option></select></label>
-          </div>
-          <p class="code-example">{{ tr('Esempio') }}: <strong>{{ codeExample }}</strong></p>
-          <button type="button" class="secondary action-glyph action-glyph--confirm" (click)="saveCodePolicy()" [disabled]="busy">{{ tr('Salva codice archivio') }}</button>
-        </div>
         <div class="backup-block economy-settings">
           <h3>{{ tr('Lingua dell’app') }}</h3><p>{{ tr('La lingua iniziale segue quella del sistema operativo. Se non disponibile, Repertica usa l\'inglese.') }}</p>
           <label class="settings-input"><span>{{ tr('Lingua dell’app') }}</span>
@@ -430,6 +337,13 @@
           </label>
           <p class="backup-note">{{ tr('Le modifiche alla lingua vengono applicate immediatamente.') }}</p>
         </div>
+        <div class="backup-block">
+          <h3>{{ tr('Guida di primo avvio') }}</h3><p>{{ tr('Mostra di nuovo i suggerimenti di benvenuto nella Panoramica.') }}</p>
+          <button type="button" class="secondary" (click)="reopenGuide()">{{ tr('Mostra la guida') }}</button>
+        </div>
+      </div>
+      <div class="settings-tab" *ngIf="settingsTab === 'pricing'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-pricing'">
+        <header class="settings-head"><h3>{{ tr(settingsTabInfo('pricing').title) }}</h3><p>{{ tr(settingsTabInfo('pricing').description) }}</p></header>
         <div class="backup-block economy-settings">
           <h3>{{ tr('Prezzi delle opere') }}</h3>
           <p>{{ tr('Il coefficiente artista è il moltiplicatore del metodo superficie già usato nel Gestionale Opere.') }}</p>
@@ -473,6 +387,48 @@
           </div>
           <button type="button" class="primary action-glyph action-glyph--confirm" (click)="saveEconomySettings()" [disabled]="busy">{{ tr('Salva impostazioni') }}</button>
         </div>
+      </div>
+      <div class="settings-tab" *ngIf="settingsTab === 'archive'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-archive'">
+        <header class="settings-head"><h3>{{ tr(settingsTabInfo('archive').title) }}</h3><p>{{ tr(settingsTabInfo('archive').description) }}</p></header>
+        <div class="backup-block">
+          <h3>{{ tr('Cartella dei dati') }}</h3>
+          <p>{{ tr('Qui sono salvati archivio, fotografie e copie di lavoro. Tutto resta su questo computer.') }}</p>
+          <code class="path">{{ dataPath || 'Percorso disponibile solo nell’app Tauri' }}</code>
+        </div>
+        <div class="backup-block code-settings">
+          <h3>{{ tr('Codice archivio') }}</h3>
+          <p>{{ tr('Il codice delle nuove opere è assegnato automaticamente. I codici già assegnati non cambiano.') }}</p>
+          <div class="settings-grid">
+            <label class="settings-input"><span>{{ tr('Prefisso') }}</span><input maxlength="12" [(ngModel)]="codePolicy.prefix" (ngModelChange)="codePolicy.prefix = ($event || '').toUpperCase()"></label>
+            <label class="settings-input"><span>{{ tr('Numerazione') }}</span><select [(ngModel)]="codePolicy.scope">
+              <option value="GLOBAL">{{ tr('Progressiva') }}</option><option value="YEARLY">{{ tr('Ricomincia ogni anno') }}</option></select></label>
+            <label class="settings-input"><span>{{ tr('Cifre del numero') }}</span><input type="number" min="2" max="8" [(ngModel)]="codePolicy.padding"></label>
+            <label class="settings-input"><span>{{ tr('Separatore') }}</span><select [(ngModel)]="codePolicy.separator">
+              <option value="-">-</option><option value=".">.</option><option value="_">_</option></select></label>
+          </div>
+          <p class="code-example">{{ tr('Esempio') }}: <strong>{{ codeExample }}</strong></p>
+          <button type="button" class="secondary action-glyph action-glyph--confirm" (click)="saveCodePolicy()" [disabled]="busy">{{ tr('Salva codice archivio') }}</button>
+        </div>
+        <div class="backup-block">
+          <h3>{{ tr('Diagnostica fotografie dell’archivio') }}</h3>
+          <p>{{ tr('Verifica in sola lettura percorsi, presenza e intestazione delle immagini JPEG, PNG e WebP. Non modifica file e non confronta hash storici.') }}</p>
+          <button type="button" class="secondary action-glyph action-glyph--shield" (click)="verifyArtworkMedia()" [disabled]="busy || !initialized">{{ tr('Verifica fotografie') }}</button>
+          <div *ngIf="mediaAudit as audit" class="backup-result" role="status" aria-live="polite">
+            <strong>{{ tr('Riferimenti controllati') }}: {{ audit.checked }} · {{ tr('Fotografie leggibili') }}: {{ audit.healthy }} · {{ tr('Problemi rilevati') }}: {{ audit.problems }}</strong>
+            <p *ngIf="audit.problems === 0">{{ tr('Nessun problema rilevato nel controllo locale.') }}</p>
+            <ul *ngIf="audit.issues.length">
+              <li *ngFor="let issue of audit.issues">
+                <strong>{{ mediaArtworkLabel(issue.artworkId) }}</strong> · {{ tr(issue.role === 'primary' ? 'Copertina' : issue.role === 'certificate' ? 'Fotografia del certificato' : issue.role === 'collector' ? 'Collezionisti' : issue.role === 'media' ? 'Libreria immagini' : 'Galleria') }}
+                <span *ngIf="issue.role === 'certificate' && issue.imageId"> · ID: <code>{{ issue.imageId }}</code></span> ·
+                <code>{{ issue.path }}</code> — {{ mediaProblemLabel(issue.problem) }}
+              </li>
+            </ul>
+            <p *ngIf="audit.truncated">{{ tr('Sono visualizzati soltanto i primi 100 problemi.') }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="settings-tab" *ngIf="settingsTab === 'backup'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-backup'">
+        <header class="settings-head"><h3>{{ tr(settingsTabInfo('backup').title) }}</h3><p>{{ tr(settingsTabInfo('backup').description) }}</p></header>
         <div class="backup-block auto-backup">
           <h3>{{ tr('Backup automatico') }}</h3>
           <p>{{ tr('Crea copie verificate dell’archivio nel giorno e all’ora scelti mentre l’app è aperta. Se il computer era spento, la copia mancata viene eseguita alla prima occasione.') }}</p>
@@ -532,10 +488,100 @@
           </div>
           <p class="backup-note">{{ tr('Prima di eliminare una vecchia copia, verifica di riuscire ad aprire e utilizzare l\'archivio ripristinato.') }}</p>
         </div>
+      </div>
+      <div class="settings-tab" *ngIf="settingsTab === 'export'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-export'">
+        <header class="settings-head"><h3>{{ tr(settingsTabInfo('export').title) }}</h3><p>{{ tr(settingsTabInfo('export').description) }}</p></header>
+        <div class="backup-block export-block">
+          <h3>{{ tr('Esportazioni') }}</h3>
+          <p>{{ tr('Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.') }}</p>
+          <div class="export-groups">
+            <div class="export-group"><h4>{{ tr('Archivio opere') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('raw_files')" [disabled]="busy || !initialized">{{ tr('Esporta metadati RAW CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Collezionisti') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('collectors')" [disabled]="busy || !initialized">{{ tr('Esporta collezionisti CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('collector_photos')" [disabled]="busy || !initialized">{{ tr('Esporta fotografie collezionisti CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Vendite e incassi') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('sales')" [disabled]="busy || !initialized">{{ tr('Esporta vendite CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('receipts')" [disabled]="busy || !initialized">{{ tr('Esporta incassi CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('balances')" [disabled]="busy || !initialized">{{ tr('Esporta saldi vendite CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('installments')" [disabled]="busy || !initialized">{{ tr('Esporta piani rateali CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('allocations')" [disabled]="busy || !initialized">{{ tr('Esporta ripartizioni CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Certificati') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('certificates')" [disabled]="busy || !initialized">{{ tr('Esporta certificati CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Spese') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="settings-tab" *ngIf="settingsTab === 'ai'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-ai'">
+        <header class="settings-head"><h3>{{ tr(settingsTabInfo('ai').title) }}</h3><p>{{ tr(settingsTabInfo('ai').description) }}</p></header>
+        <div class="backup-block mcp-block">
+          <h3>{{ tr('Assistenti IA locali (MCP)') }}</h3>
+          <p>{{ tr('Permette a un assistente IA installato sul tuo computer di consultare l’archivio in sola lettura, per esempio per cercare opere o riassumere le vendite. Non può modificare nulla; email, telefoni, indirizzi, note private e fotografie non vengono condivisi.') }}</p>
+          <p class="hint">{{ tr('Attenzione: ciò che l’assistente legge può essere inviato al suo fornitore. Usa solo assistenti di cui ti fidi.') }}</p>
+          <div class="mcp-clients" role="status" aria-live="polite">
+            <div class="mcp-client" *ngFor="let client of mcpClients">
+              <strong>{{ client.name }}</strong>
+              <span class="status-pill" [class.ok]="client.configured && client.upToDate && !client.error" [class.warn]="(client.configured && !client.upToDate) || client.error">{{ clientStatusLabel(client) }}</span>
+              <div class="mcp-actions">
+                <button type="button" class="primary small" *ngIf="client.appFound && !client.error && (!client.configured || !client.upToDate)" (click)="connectClient(client)" [disabled]="busy">
+                  {{ client.configured ? tr('Aggiorna il collegamento') : tr('Collega') }}</button>
+                <button type="button" class="secondary small" *ngIf="client.configured && !client.error" (click)="disconnectClient(client)" [disabled]="busy">{{ tr('Scollega') }}</button>
+              </div>
+              <small *ngIf="client.error">{{ client.error }}</small>
+            </div>
+          </div>
+          <p class="mcp-note">{{ tr('Dopo ogni modifica riavvia l’assistente.') }}</p>
+          <p class="mcp-note">{{ tr('ChatGPT (app e sito) si collega solo a server online e non può usare un server locale: per i prodotti OpenAI usa Codex.') }}</p>
+          <details class="mcp-manual">
+            <summary>{{ tr('Configurazione manuale per altri assistenti') }}</summary>
+            <ng-container *ngIf="mcpSetup">
+              <p>{{ tr('Formato JSON (Claude, Cursor, Windsurf, Gemini CLI…)') }}</p>
+              <pre class="mcp-config" tabindex="0">{{ mcpConfigJson }}</pre>
+              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpConfigJson)">{{ tr('Copia configurazione') }}</button>
+              <p>{{ tr('Codex (file config.toml)') }}</p>
+              <pre class="mcp-config" tabindex="0">{{ mcpTomlSnippet }}</pre>
+              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpTomlSnippet)">{{ tr('Copia configurazione') }}</button>
+              <p>{{ tr('Da riga di comando') }}</p>
+              <pre class="mcp-config" tabindex="0">{{ mcpCommands }}</pre>
+              <button type="button" class="secondary action-glyph action-glyph--copy" (click)="copyText(mcpCommands)">{{ tr('Copia configurazione') }}</button>
+            </ng-container>
+          </details>
+        </div>
+      </div>
+      <div class="settings-tab" *ngIf="settingsTab === 'about'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-about'">
+        <header class="settings-head"><h3>{{ tr(settingsTabInfo('about').title) }}</h3><p>{{ tr(settingsTabInfo('about').description) }}</p></header>
+        <div class="backup-block update-block">
+          <h3>{{ tr('Aggiornamenti') }}</h3>
+          <p>{{ tr('Versione installata:') }} <strong>v{{ appVersion }}</strong></p>
+          <label class="inline-check"><input type="checkbox" [ngModel]="autoUpdate" (ngModelChange)="setAutoUpdate($event)"> {{ tr('Cerca automaticamente gli aggiornamenti') }}</label>
+          <p class="hint">{{ tr('Gli aggiornamenti arrivano dalle release ufficiali su GitHub, sono firmati e vengono installati solo dopo la tua conferma. Prima dell’installazione viene eseguito un backup se il backup automatico è attivo.') }}</p>
+          <div class="update-actions">
+            <button type="button" class="secondary" (click)="checkUpdates(true)" [disabled]="updateChecking || updateInstalling">{{ updateChecking ? tr('Controllo in corso…') : tr('Cerca aggiornamenti') }}</button>
+            <button type="button" class="primary" *ngIf="update?.status === 'available'" (click)="installUpdate()" [disabled]="updateInstalling || busy">{{ tr('Scarica e installa') }}</button>
+            <button type="button" class="secondary" *ngIf="update?.status === 'backup_failed'" (click)="installUpdate(true)" [disabled]="updateInstalling || busy">{{ tr('Installa senza backup') }}</button>
+          </div>
+          <progress *ngIf="updateInstalling" max="100" [value]="updateProgress ?? 0" [attr.aria-label]="tr('Avanzamento del download')"></progress>
+          <p *ngIf="update" role="status" aria-live="polite"><strong *ngIf="update.version">v{{ update.version }} — </strong>{{ updateText() }}</p>
+          <pre class="update-notes" *ngIf="update?.status === 'available' && update?.notes">{{ update?.notes }}</pre>
+          <p class="hint" *ngIf="update?.status === 'available'">{{ tr('Dopo l’installazione l’app si riavvia: salva il lavoro in corso prima di procedere.') }}</p>
+        </div>
+        <div class="backup-block">
+          <h3>{{ tr('Informazioni') }}</h3>
         <div class="setting-row"><span>{{ tr('Accesso Internet obbligatorio') }}</span><strong>No</strong></div>
         <div class="setting-row"><span>{{ tr('Account Repertica') }}</span><strong>{{ tr('Non richiesto') }}</strong></div>
         <div class="setting-row"><span>{{ tr('Licenza') }}</span><strong>CPAL-1.0</strong></div>
         <div class="setting-row"><span>{{ tr('Versione') }}</span><strong>{{ appVersion }}</strong></div>
+        </div>
+      </div>
+        </div>
       </div>
     </section>
   </main>
@@ -947,7 +993,7 @@
       <div class="full code-field"><span>{{ tr('Artista che emette') }}</span>
         <strong *ngIf="artistName; else noArtist">{{ displayArtistName }}</strong>
         <ng-template #noArtist><span class="warn-text">{{ tr('Non ancora impostato') }}</span>
-          <button type="button" class="small" (click)="certificateDialog = false; navigate('settings')">{{ tr('Imposta nelle Impostazioni') }}</button></ng-template></div>
+          <button type="button" class="small" (click)="certificateDialog = false; goToSettings('profile')">{{ tr('Imposta nelle Impostazioni') }}</button></ng-template></div>
       <label><span>{{ tr('Lingua del certificato') }}</span><select [(ngModel)]="certificateDraft.language">
         <option value="it">{{ tr('Italiano') }}</option><option value="en">{{ tr('Inglese') }}</option><option value="bilingual">{{ tr('Italiano e inglese') }}</option></select></label>
       <label><span>{{ tr('Luogo di emissione') }}</span><input [(ngModel)]="certificateDraft.place" maxlength="240" [placeholder]="tr('Per esempio: Verona')"></label>

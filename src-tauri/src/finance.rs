@@ -38,7 +38,10 @@ pub struct StudioSettings {
     #[serde(default)] pub artist_name: Option<String>,
     /// Stage name: shown on certificates and brochures instead of the full name.
     #[serde(default)] pub artist_alias: Option<String>,
+    /// Show a system notification when new mail arrives.
+    #[serde(default = "notifications_on")] pub mail_notifications: bool,
 }
+fn notifications_on() -> bool { true }
 fn valid_settings(s: &StudioSettings) -> Result<(),String> {
     if !s.artist_coefficient.is_finite() || s.artist_coefficient <= 0.0 || s.artist_coefficient > 100000.0 {
         return Err("Artist coefficient must be positive".into());
@@ -59,10 +62,10 @@ fn valid_settings(s: &StudioSettings) -> Result<(),String> {
     Ok(())
 }
 fn settings_tx(c: &rusqlite::Connection) -> Result<StudioSettings,String> {
-    c.query_row("SELECT artist_coefficient,base_price_cm2_cents,personal_bp,activity_bp,savings_bp,treasury_start_date,default_tax_bp,ui_language,artist_name,artist_alias FROM studio_settings WHERE singleton=1",
+    c.query_row("SELECT artist_coefficient,base_price_cm2_cents,personal_bp,activity_bp,savings_bp,treasury_start_date,default_tax_bp,ui_language,artist_name,artist_alias,mail_notifications FROM studio_settings WHERE singleton=1",
         [], |r|Ok(StudioSettings{
             artist_coefficient:r.get(0)?,base_price_cm2_cents:r.get(1)?,personal_bp:r.get(2)?,
-            activity_bp:r.get(3)?,savings_bp:r.get(4)?,treasury_start_date:r.get(5)?,default_tax_bp:r.get(6)?,ui_language:r.get(7)?,artist_name:r.get(8)?,artist_alias:r.get(9)?
+            activity_bp:r.get(3)?,savings_bp:r.get(4)?,treasury_start_date:r.get(5)?,default_tax_bp:r.get(6)?,ui_language:r.get(7)?,artist_name:r.get(8)?,artist_alias:r.get(9)?,mail_notifications:r.get(10)?
         })).map_err(error)
 }
 #[tauri::command]
@@ -76,8 +79,8 @@ pub fn save_studio_settings(db:State<'_,Database>,mut input:StudioSettings)->Res
     input.artist_name=crate::commands::clean(input.artist_name,240)?;
     input.artist_alias=crate::commands::clean(input.artist_alias,240)?;
     let c=db.conn.lock().map_err(error)?;
-    c.execute("UPDATE studio_settings SET artist_coefficient=?1,base_price_cm2_cents=?2,personal_bp=?3,activity_bp=?4,savings_bp=?5,treasury_start_date=?6,default_tax_bp=?7,ui_language=?8,artist_name=?9,artist_alias=?10 WHERE singleton=1",
-    params![input.artist_coefficient,input.base_price_cm2_cents,input.personal_bp,input.activity_bp,input.savings_bp,input.treasury_start_date,input.default_tax_bp,input.ui_language,input.artist_name,input.artist_alias]).map_err(error)?;
+    c.execute("UPDATE studio_settings SET artist_coefficient=?1,base_price_cm2_cents=?2,personal_bp=?3,activity_bp=?4,savings_bp=?5,treasury_start_date=?6,default_tax_bp=?7,ui_language=?8,artist_name=?9,artist_alias=?10,mail_notifications=?11 WHERE singleton=1",
+    params![input.artist_coefficient,input.base_price_cm2_cents,input.personal_bp,input.activity_bp,input.savings_bp,input.treasury_start_date,input.default_tax_bp,input.ui_language,input.artist_name,input.artist_alias,input.mail_notifications]).map_err(error)?;
     settings_tx(&c)
 }
 
@@ -331,7 +334,7 @@ mod tests{
     #[test]
     fn settings_validate_exact_percentages(){
         let good=StudioSettings{artist_coefficient:1.0,base_price_cm2_cents:16,personal_bp:3334,activity_bp:3333,savings_bp:3333,
-            treasury_start_date:None,default_tax_bp:0,ui_language:None,artist_name:None,artist_alias:None};
+            treasury_start_date:None,default_tax_bp:0,ui_language:None,artist_name:None,artist_alias:None,mail_notifications:true};
         assert!(valid_settings(&good).is_ok());
         let mut bad=good.clone();bad.savings_bp=3332;
         assert!(valid_settings(&bad).is_err());

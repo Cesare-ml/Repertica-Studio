@@ -33,6 +33,7 @@ keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sy
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-os = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-notification = "2"
 
 [dev-dependencies]
 tempfile = "3"

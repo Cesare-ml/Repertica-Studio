@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::Mutex};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 18;
+pub const SCHEMA_VERSION: i64 = 19;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -562,12 +562,22 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
         script.push_str("PRAGMA user_version=18; COMMIT;");
         conn.execute_batch(&script)?;
     }
-    // Certificates are append-only even when accessed through a raw SQLite client.
+    if version < 19 {
+        // System notification when new mail arrives (on by default).
+        let has_column: i64 = conn.query_row("SELECT count(*) FROM pragma_table_info('studio_settings') WHERE name='mail_notifications'", [], |r| r.get(0))?;
+        let mut script = String::from("BEGIN IMMEDIATE;");
+        if has_column == 0 {
+            script.push_str("ALTER TABLE studio_settings ADD COLUMN mail_notifications INTEGER NOT NULL DEFAULT 1 CHECK(mail_notifications IN (0,1));");
+        }
+        script.push_str("PRAGMA user_version=19; COMMIT;");
+        conn.execute_batch(&script)?;
+    }
+    // An issued certificate can never be edited, even through a raw SQLite client, but it can be deleted
+    // (on its own, or with its artwork). Databases created before that rule carry a delete trigger: drop it.
     // Idempotent creation also upgrades early version-1 development databases.
     conn.execute_batch("CREATE TRIGGER IF NOT EXISTS certificates_no_update
         BEFORE UPDATE ON certificates BEGIN SELECT RAISE(ABORT, 'certificate_immutable'); END;
-        CREATE TRIGGER IF NOT EXISTS certificates_no_delete
-        BEFORE DELETE ON certificates BEGIN SELECT RAISE(ABORT, 'certificate_immutable'); END;")?;
+        DROP TRIGGER IF EXISTS certificates_no_delete;")?;
     Ok(Database { conn: Mutex::new(conn), directory })
 }
 
@@ -615,6 +625,24 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
     }
     #[test]
+    fn v19_migration_turns_mail_notifications_on_for_existing_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = open(dir.path().into()).unwrap();
+        {
+            let c = db.conn.lock().unwrap();
+            c.execute_batch("ALTER TABLE studio_settings DROP COLUMN mail_notifications;").unwrap();
+            c.pragma_update(None, "user_version", 18).unwrap();
+        }
+        drop(db);
+        let db = open(dir.path().into()).unwrap();
+        let c = db.conn.lock().unwrap();
+        let on: bool = c.query_row("SELECT mail_notifications FROM studio_settings WHERE singleton=1", [], |r| r.get(0)).unwrap();
+        assert!(on, "notifications are on by default");
+        assert!(c.execute("UPDATE studio_settings SET mail_notifications=2", []).is_err());
+        let version: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+    #[test]
     fn foreign_keys_restrict_orphaned_sales() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
@@ -622,15 +650,17 @@ mod tests {
         assert!(c.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s','a','c',100,'2026-11-21','now')",[]).is_err());
     }
     #[test]
-    fn certificates_cannot_be_edited_or_deleted() {
+    fn certificates_cannot_be_edited_but_can_be_deleted() {
         let dir = tempfile::tempdir().unwrap();
         let db = open(dir.path().into()).unwrap();
         let c = db.conn.lock().unwrap();
         c.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES('a','OP-01','Test','available','now','now')",[]).unwrap();
         c.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at) VALUES('cert','a','RS-01','2026-11-21','Artista','{}','now')",[]).unwrap();
         assert!(c.execute("UPDATE certificates SET serial='altered' WHERE id='cert'",[]).is_err());
-        assert!(c.execute("DELETE FROM certificates WHERE id='cert'",[]).is_err());
+        // The artwork is protected by its certificate until the certificate is gone.
         assert!(c.execute("DELETE FROM artworks WHERE id='a'",[]).is_err());
+        c.execute("DELETE FROM certificates WHERE id='cert'",[]).unwrap();
+        c.execute("DELETE FROM artworks WHERE id='a'",[]).unwrap();
     }
     #[test]
     fn sale_is_unique_and_prevents_orphaned_contacts() {

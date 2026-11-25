@@ -1,7 +1,8 @@
+import type { DeletionImpact } from './deletion-impact';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import type {
   Artwork, ArtworkInput, Brochure, Collector, CollectorInput, Sale, SaleInput,
-  MailAccount, MailAccountInput, MailFolder, MailList, MailDetail, MailDraft,
+  MailAccount, MailAccountInput, MailFolder, MailList, MailDetail, MailDraft, MailSyncState, MailOverview,
   MailDraftInput, MailSendInput, MailSendResult,
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
@@ -21,9 +22,14 @@ export const api = {
   mailRemoveAccount: (accountId: string) => invoke<void>('mail_remove_account', {accountId}),
   mailTestAccount: (accountId: string) => invoke<{ok: boolean; folders: number}>('mail_test_account', {accountId}),
   mailListFolders: (accountId: string) => invoke<MailFolder[]>('mail_list_folders', {accountId}),
+  mailOverview: (accountId: string, folder: string | null) => invoke<MailOverview>('mail_overview',{accountId,folder}),
   mailListMessages: (accountId: string, folder: string) => invoke<MailList>('mail_list_messages',{accountId,folder}),
   mailReadMessage: (accountId: string, folder: string, uid: number, uidValidity: number) =>
     invoke<MailDetail>('mail_read_message',{accountId,folder,uid,uidValidity}),
+  mailSetSeen: (accountId: string, folder: string, uid: number, uidValidity: number, seen: boolean) =>
+    invoke<void>('mail_set_seen',{accountId,folder,uid,uidValidity,seen}),
+  mailSyncState: () => invoke<MailSyncState>('mail_sync_state'),
+  mailSyncNow: () => invoke<MailSyncState>('mail_sync_now'),
   mailListDrafts: (accountId: string) => invoke<MailDraft[]>('mail_list_drafts', {accountId}),
   mailSaveDraft: (input: MailDraftInput) => invoke<MailDraft>('mail_save_draft', {input}),
   mailRemoveDraft: (accountId: string, draftId: string, revision: number) =>
@@ -37,7 +43,11 @@ export const api = {
   listArtworks: () => invoke<Artwork[]>('list_artworks'),
   saveArtwork: (input: ArtworkInput) => invoke<Artwork>('save_artwork', { input }),
   createArtworkFull: (input: NewArtworkInput) => invoke<Artwork>('create_artwork_full', { input }),
-  deleteArtwork: (id: string) => invoke<void>('delete_artwork', { id }),
+  /** `cascade` also deletes the certificates and the sale of the artwork: only after the user confirmed the impact. */
+  deleteArtwork: (id: string, cascade = false) => invoke<void>('delete_artwork', { id, cascade }),
+  artworkDeletionImpact: (id: string) => invoke<DeletionImpact>('artwork_deletion_impact', { id }),
+  collectorDeletionImpact: (id: string) => invoke<DeletionImpact>('collector_deletion_impact', { id }),
+  deleteCertificate: (id: string) => invoke<void>('delete_certificate', { id }),
   getArchiveCodePolicy: () => invoke<CodePolicy>('get_archive_code_policy'),
   saveArchiveCodePolicy: (input: CodePolicy) => invoke<CodePolicy>('save_archive_code_policy', { input }),
   nextArchiveCode: (year: string | null) => invoke<string>('next_archive_code', { year }),
@@ -68,7 +78,7 @@ export const api = {
   listCollectors: () => invoke<Collector[]>('list_collectors'),
   saveCollector: (input: CollectorInput) => invoke<Collector>('save_collector', { input }),
   createCollectorFull: (input: NewCollectorInput) => invoke<Collector>('create_collector_full', { input }),
-  deleteCollector: (id: string) => invoke<void>('delete_collector', { id }),
+  deleteCollector: (id: string, cascade = false) => invoke<void>('delete_collector', { id, cascade }),
   listCollectorImages: (collectorId: string) => invoke<CollectorImage[]>('list_collector_images', { collectorId }),
   addCollectorImageFromPath: (collectorId: string, sourcePath: string, kind: 'PROFILE' | 'PHOTO') =>
     invoke<CollectorImage>('add_collector_image_from_path', { collectorId, sourcePath, kind }),

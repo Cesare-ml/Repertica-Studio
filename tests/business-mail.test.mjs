@@ -20,7 +20,8 @@ test('mailbox remains independent from newsletter platform and server-side crede
   }
   assert.match(rust, /KEYRING_SERVICE/);
   assert.match(rust, /keyring::/);
-  assert.match(rust, /imap::connect/);
+  assert.match(rust, /imap::Client::new\(secured\)/, 'IMAP over TLS, connected with timeouts');
+  assert.match(rust, /connect_timeout/);
   assert.match(rust, /SmtpTransport::starttls_relay/);
   assert.match(rust, /SmtpTransport::relay/);
   assert.match(rust, /BODY.PEEK/);

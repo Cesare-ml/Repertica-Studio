@@ -1,207 +1,274 @@
-<div class="mail-shell">
-  <header class="mail-titlebar">
-    <div>
-      <h2>{{t('Mail')}}</h2>
-      <p>{{t('Professional correspondence directly from your desktop. Independent of Repertica Online.')}}</p>
-    </div>
-    <button type="button" class="mail-primary" *ngIf="selectedId" (click)="startCompose()" [disabled]="busy">
-      + {{t('Compose')}}
-    </button>
+<div class="mail">
+  <header class="mail-bar" *ngIf="accounts.length && view!=='settings'">
+    <label class="mail-search">
+      <rp-mi name="search"></rp-mi>
+      <input type="search" [(ngModel)]="query" [placeholder]="t('Search in the loaded messages')" [attr.aria-label]="t('Search in the loaded messages')"
+        maxlength="160" autocomplete="off" [disabled]="!listing || view!=='mail'">
+      <button type="button" class="icon-button" *ngIf="query" (click)="query=''" [attr.aria-label]="t('Clear search')"><rp-mi name="close"></rp-mi></button>
+    </label>
+    <span class="account-chip" *ngIf="selected" [title]="selected.email"><rp-mi name="mail"></rp-mi>{{selected.email}}</span>
+    <button type="button" class="icon-button settings-toggle" (click)="toggleSettings()"
+      [attr.aria-label]="t('Mail settings')" [title]="t('Mail settings')"><rp-mi name="settings"></rp-mi></button>
   </header>
-  <div *ngIf="error" class="mail-alert mail-error" role="alert">{{error}}</div>
-  <div *ngIf="notice" class="mail-alert mail-success" role="status">{{notice}}</div>
+
+  <div *ngIf="error" class="notice error" role="alert">{{error}}</div>
+  <div *ngIf="notice" class="notice success" role="status">{{notice}}</div>
 
   <div *ngIf="!accounts.length && !accountForm" class="mail-welcome">
-    <span class="mail-envelopes" aria-hidden="true">✉</span>
-    <h3>{{t('Connect your professional mailbox')}}</h3>
+    <span class="welcome-icon" aria-hidden="true"><rp-mi name="mail"></rp-mi></span>
+    <h2>{{t('Connect your professional mailbox')}}</h2>
     <p>{{t('Use your IMAP and SMTP settings. Passwords are stored in the system keychain, not in the archive or backup.')}}</p>
-    <button type="button" class="mail-primary" (click)="editAccount()" [disabled]="busy">{{t('Add email account')}}</button>
+    <button type="button" class="primary" (click)="editAccount()" [disabled]="busy">{{t('Add email account')}}</button>
   </div>
 
-  <div class="mail-columns" *ngIf="accounts.length || accountForm">
-    <aside class="mail-sidebar">
-      <label class="mail-small-label" for="mail-account-select">{{t('Mailbox')}}</label>
-      <select id="mail-account-select" class="mail-account-select" [ngModel]="selectedId"
-        (ngModelChange)="selectAccount($event)" [disabled]="busy || !accounts.length">
-        <option *ngFor="let account of accounts" [value]="account.id">{{account.email}}</option>
-      </select>
-      <div class="mail-nav">
-        <button type="button" [class.active]="view==='inbox'" (click)="showInbox()" [disabled]="busy || !selectedId">
-          <span aria-hidden="true">▤</span> {{t('Messages')}}
-        </button>
-        <button type="button" [class.active]="view==='drafts'" (click)="showDrafts()" [disabled]="busy || !selectedId">
-          <span aria-hidden="true">▣</span> {{t('Local drafts')}} <span class="mail-count">{{drafts.length}}</span>
-        </button>
-        <button type="button" [class.active]="view==='accounts'" (click)="showAccounts()" [disabled]="busy">
-          <span aria-hidden="true">⚙</span> {{t('Accounts and settings')}}
-        </button>
-      </div>
-      <div class="mail-folders" *ngIf="folders.length && selectedId">
-        <h4>{{t('IMAP folders')}}</h4>
-        <button type="button" *ngFor="let folder of folders" [class.active]="view==='inbox' && selectedFolder===folder.name"
-          (click)="loadMessages(folder.name)" [disabled]="busy" [title]="folder.name">
-          {{folder.name}}
-        </button>
-      </div>
-      <button type="button" class="mail-connect" *ngIf="selectedId" (click)="connect()" [disabled]="busy">
-        {{busy ? t('Loading…') : t('Connect / refresh IMAP')}}
+  <!-- Mail: folders, messages, reader -->
+  <div class="workspace" *ngIf="accounts.length && view!=='settings'">
+    <nav class="folders" [attr.aria-label]="t('Mail folders')">
+      <button type="button" class="compose-launch" (click)="startCompose()" [disabled]="busy">
+        <rp-mi name="edit"></rp-mi> {{t('Compose')}}
       </button>
-      <p class="mail-sidebar-note">{{t('Messages are read without marking them as seen. Refresh is manual.')}}</p>
-    </aside>
+      <ng-template #folderButton let-folder>
+        <button type="button" class="folder" [attr.aria-current]="view==='mail' && selectedFolder===folder.name ? 'true' : null"
+          (click)="openFolder(folder.name)" [title]="folder.name">
+          <rp-mi [name]="icon(folder)"></rp-mi><span>{{label(folder)}}</span>
+          <span class="count" *ngIf="folder.unread" [attr.aria-label]="folder.unread+' '+t('unread')">{{folder.unread}}</span>
+        </button>
+      </ng-template>
+      <ng-container *ngFor="let folder of folderGroups.main">
+        <ng-container *ngTemplateOutlet="folderButton; context:{$implicit: folder}"></ng-container>
+        <button type="button" class="folder" *ngIf="folder.role==='inbox'" [attr.aria-current]="view==='drafts' ? 'true' : null" (click)="showDrafts()">
+          <rp-mi name="drafts"></rp-mi><span>{{t('Local drafts')}}</span>
+          <span class="count quiet" *ngIf="drafts.length">{{drafts.length}}</span>
+        </button>
+      </ng-container>
+      <button type="button" class="folder" *ngIf="!folderGroups.main.length" [attr.aria-current]="view==='drafts' ? 'true' : null" (click)="showDrafts()">
+        <rp-mi name="drafts"></rp-mi><span>{{t('Local drafts')}}</span>
+        <span class="count quiet" *ngIf="drafts.length">{{drafts.length}}</span>
+      </button>
+      <details class="other-folders" *ngIf="folderGroups.other.length" [open]="otherFoldersOpen" (toggle)="otherFoldersOpen=$any($event.target).open">
+        <summary><rp-mi name="expand_more"></rp-mi> {{t('Other folders')}}</summary>
+        <ng-container *ngFor="let folder of folderGroups.other">
+          <ng-container *ngTemplateOutlet="folderButton; context:{$implicit: folder}"></ng-container>
+        </ng-container>
+      </details>
+      <p class="live" [class.delayed]="syncFailed" role="status">
+        <span class="live-dot" aria-hidden="true"></span>{{syncLabel}}
+        <small *ngIf="lastSyncAt && !syncFailed">· {{lastSyncAt | date:'HH:mm'}}</small>
+      </p>
+    </nav>
 
-    <main class="mail-main">
-      <ng-container *ngIf="view==='inbox'">
-        <div class="mail-panel-heading">
-          <h3>{{selectedFolder || t('Inbox')}}</h3>
-          <button type="button" (click)="loadMessages()" [disabled]="busy || !selectedId">{{t('Refresh')}}</button>
+    <section class="messages" [attr.aria-busy]="loading">
+      <!-- Local drafts -->
+      <ng-container *ngIf="view==='drafts'">
+        <div class="toolbar">
+          <div><h2>{{t('Local drafts')}}</h2><p>{{t('Drafts are stored in the local archive, not synchronized with the provider.')}}</p></div>
+          <button type="button" class="primary" (click)="startCompose()" [disabled]="busy">{{t('New message')}}</button>
         </div>
-        <div class="mail-reader-layout">
-          <section class="mail-list">
-            <div class="mail-list-top" *ngIf="listing">{{listing.items.length}} / {{listing.exists}} {{t('messages')}}</div>
-            <button type="button" *ngFor="let row of listing?.items" class="mail-message-item"
-              [class.selected]="message?.header?.uid===row.uid" [class.unread]="!row.seen"
-              (click)="read(row)" [disabled]="busy">
-              <div class="mail-item-top"><strong>{{row.from || t('Unknown sender')}}</strong><small>{{row.date}}</small></div>
-              <span class="mail-subject">{{row.subject || t('(No subject)')}}</span>
-              <span class="mail-flag" *ngIf="row.flagged" [attr.aria-label]="t('Starred')">★</span>
+        <ul class="message-list">
+          <li *ngFor="let draft of drafts" class="draft-row">
+            <button type="button" class="draft-open" (click)="openDraft(draft)">
+              <strong>{{draft.subject || t('(No subject)')}}</strong>
+              <span>{{draft.to || t('No recipient')}}</span>
+              <time>{{draft.updated_at | date:'d MMM, HH:mm'}}</time>
             </button>
-            <div *ngIf="!listing" class="mail-empty">{{t('Connect to an IMAP server to see your messages.')}}</div>
-            <div *ngIf="listing && !listing.items.length" class="mail-empty">{{t('This folder has no messages.')}}</div>
-          </section>
-          <section class="mail-reader" *ngIf="message as msg; else noSelectedMessage">
-            <div class="mail-reader-actions">
-              <button type="button" (click)="reply()" [disabled]="busy">{{t('Reply')}}</button>
-              <button type="button" (click)="reply(true)" [disabled]="busy">{{t('Forward')}}</button>
-            </div>
-            <h3>{{msg.header.subject || t('(No subject)')}}</h3>
-            <div class="mail-message-meta">
-              <strong>{{msg.header.from}}</strong>
-              <span>{{msg.header.date}}</span>
-            </div>
-            <div class="mail-safe-message" *ngIf="msg.body">{{msg.body}}</div>
-            <div class="mail-safe-message mail-html-warning" *ngIf="msg.html_only">
-              {{t('This message contained HTML. It has been converted to safe plain text; remote images are not loaded.')}}
-            </div>
-            <p class="mail-hint" *ngIf="msg.attachment_count">
-              {{msg.attachment_count}} {{t('attachments detected. Download support is planned for a later release.')}}
-            </p>
-          </section>
-          <ng-template #noSelectedMessage>
-            <div class="mail-empty-reader">{{t('Select an email to read it securely as plain text.')}}</div>
-          </ng-template>
-        </div>
+            <button type="button" class="icon-button" (click)="removeDraft(draft)" [disabled]="busy" [attr.aria-label]="t('Delete')" [title]="t('Delete')"><rp-mi name="trash"></rp-mi></button>
+          </li>
+          <li class="empty" *ngIf="!drafts.length">{{t('No local drafts yet.')}}</li>
+        </ul>
       </ng-container>
 
-      <ng-container *ngIf="view==='drafts'">
-        <div class="mail-panel-heading">
-          <h3>{{t('Local drafts')}}</h3>
-          <div class="mail-inline-actions">
-            <button type="button" (click)="loadDrafts()" [disabled]="busy">{{t('Refresh')}}</button>
-            <button type="button" class="mail-primary" (click)="startCompose()" [disabled]="busy">{{t('New message')}}</button>
+      <ng-container *ngIf="view==='mail'">
+        <!-- Reader -->
+        <article class="reader" *ngIf="message as msg; else listView">
+          <div class="reader-actions">
+            <button type="button" class="text-button" (click)="closeMessage()"><rp-mi name="back"></rp-mi> {{t('Back to the list')}}</button>
+            <button type="button" class="text-button" (click)="reply()" [disabled]="busy"><rp-mi name="reply"></rp-mi> {{t('Reply')}}</button>
+            <button type="button" class="text-button" (click)="reply(true)" [disabled]="busy"><rp-mi name="forward"></rp-mi> {{t('Forward')}}</button>
+            <button type="button" class="text-button" (click)="toggleSeen()"><rp-mi name="mail"></rp-mi> {{msg.header.seen ? t('Mark as unread') : t('Mark as read')}}</button>
           </div>
-        </div>
-        <p class="mail-hint">{{t('Drafts are stored in the local archive, not synchronized with the provider.')}}</p>
-        <article *ngFor="let draft of drafts" class="mail-draft-entry">
-          <div><strong>{{draft.subject || t('(No subject)')}}</strong>
-            <p>{{draft.to || t('No recipient')}} · {{draft.updated_at | date:'short'}}</p></div>
-          <div class="mail-inline-actions">
-            <button type="button" (click)="openDraft(draft)" [disabled]="busy">{{t('Edit')}}</button>
-            <button type="button" class="mail-danger" (click)="removeDraft(draft)" [disabled]="busy">{{t('Delete')}}</button>
+          <h2>{{msg.header.subject || t('(No subject)')}}</h2>
+          <div class="opened-message">
+            <div class="message-identity">
+              <span class="avatar" aria-hidden="true">{{initial(msg.header)}}</span>
+              <div class="message-identity-text"><strong>{{sender(msg.header)}}</strong><span class="origin">{{msg.header.from}}</span></div>
+              <time *ngIf="when(msg.header) as d; else rawDate">{{d | date:'d MMM yyyy, HH:mm'}}</time>
+              <ng-template #rawDate><time>{{msg.header.date}}</time></ng-template>
+            </div>
+            <div class="message-content">
+              <div class="reader-body loading-body" *ngIf="messageLoading">{{t('Loading…')}}</div>
+              <div class="reader-body" *ngIf="msg.body">{{msg.body}}</div>
+              <div class="reader-body html-warning" *ngIf="msg.html_only">
+                {{t('This message contained HTML. It has been converted to safe plain text; remote images are not loaded.')}}
+              </div>
+              <p class="hint" *ngIf="msg.attachment_count">
+                {{msg.attachment_count}} {{t('attachments detected. Download support is planned for a later release.')}}
+              </p>
+            </div>
           </div>
         </article>
-        <div class="mail-empty" *ngIf="!drafts.length">{{t('No local drafts yet.')}}</div>
-      </ng-container>
 
-      <ng-container *ngIf="view==='compose'">
-        <div class="mail-panel-heading">
-          <h3>{{composer.id ? t('Edit draft') : t('New message')}}</h3>
-          <button type="button" (click)="showDrafts()" [disabled]="busy">{{t('Close editor')}}</button>
-        </div>
-        <div class="mail-compose">
-          <p class="mail-hint">{{t('Sending requires confirmation. If SMTP returns an uncertain result, check Sent before retrying.')}}</p>
-          <datalist id="mail-known-contacts"><option *ngFor="let collector of fromCollectors" [value]="collector.email">{{collector.name}}</option></datalist>
-          <label>{{t('To')}}
-            <input [(ngModel)]="composer.to" list="mail-known-contacts" [disabled]="busy" maxlength="1024"
-              [placeholder]="t('email@example.com (separate addresses with commas)')" autocomplete="off">
-          </label>
-          <div class="mail-double">
-            <label>{{t('Cc')}}<input [(ngModel)]="composer.cc" [disabled]="busy" maxlength="1024" autocomplete="off"></label>
-            <label>{{t('Bcc')}}<input [(ngModel)]="composer.bcc" [disabled]="busy" maxlength="1024" autocomplete="off"></label>
-          </div>
-          <label>{{t('Subject')}}<input [(ngModel)]="composer.subject" maxlength="255" [disabled]="busy" autocomplete="off"></label>
-          <label>{{t('Message')}}
-            <textarea rows="14" [(ngModel)]="composer.body" maxlength="100000" [disabled]="busy"></textarea>
-          </label>
-          <div class="mail-attachments-editor">
-            <div class="mail-inline-actions">
-              <button type="button" (click)="addAttachments()" [disabled]="busy">{{t('Attach files')}}</button>
-              <small>{{t('Max 5 files, 5 MiB each, 15 MiB total. Files stay on your computer until sent.')}}</small>
-            </div>
-            <div *ngFor="let path of composer.attachments" class="mail-file-row">
-              <span>{{attachmentName(path)}}</span>
-              <button type="button" [attr.aria-label]="t('Remove attachment')" (click)="removeAttachment(path)" [disabled]="busy">×</button>
+        <!-- List -->
+        <ng-template #listView>
+          <div class="toolbar">
+            <div>
+              <h2>{{folderTitle}}</h2>
+              <p *ngIf="listing">{{visibleItems.length}} / {{listing.exists}} {{t('messages')}}</p>
             </div>
           </div>
-          <div class="mail-compose-actions">
-            <button type="button" (click)="saveDraft()" [disabled]="busy">{{t('Save local draft')}}</button>
-            <button type="button" class="mail-primary" (click)="send()" [disabled]="busy">{{t('Send with SMTP')}}</button>
-          </div>
-        </div>
-      </ng-container>
+          <div class="empty" *ngIf="!listing && loading">{{t('Loading…')}}</div>
+          <div class="empty" *ngIf="!listing && !loading">{{t('Connect to an IMAP server to see your messages.')}}</div>
 
-      <ng-container *ngIf="view==='accounts'">
-        <div class="mail-panel-heading">
-          <h3>{{t('Mail account settings')}}</h3>
-          <button type="button" class="mail-primary" (click)="editAccount()" *ngIf="!accountForm" [disabled]="busy">+ {{t('Add account')}}</button>
-        </div>
-        <p class="mail-hint">{{t('Only encrypted IMAP TLS and authenticated SMTP TLS/STARTTLS are supported. OAuth is not yet supported.')}}</p>
-        <div *ngIf="!accountForm" class="mail-account-grid">
-          <article *ngFor="let account of accounts" class="mail-account-card">
-            <div><strong>{{account.email}}</strong><p>{{account.imap_host}}:{{account.imap_port}} · {{account.smtp_host}}:{{account.smtp_port}}</p></div>
-            <div class="mail-inline-actions">
-              <button type="button" (click)="selectAccount(account.id); editAccount(account)" [disabled]="busy">{{t('Edit settings')}}</button>
-              <button type="button" (click)="selectedId=account.id; testAccount()" [disabled]="busy">{{t('Test IMAP')}}</button>
-              <button type="button" class="mail-danger" (click)="removeAccount(account)" [disabled]="busy">{{t('Remove')}}</button>
-            </div>
-          </article>
-        </div>
-        <form *ngIf="accountForm as form" class="mail-account-form" (ngSubmit)="saveAccount()">
-          <div class="mail-double">
-            <label>{{t('Email address')}}<input [(ngModel)]="form.email" name="email" type="email" required maxlength="254" [disabled]="busy"></label>
-            <label>{{t('Display name')}}<input [(ngModel)]="form.display_name" name="display_name" maxlength="120" [disabled]="busy"></label>
-          </div>
-          <h4>{{t('Incoming mail (IMAP)')}}</h4>
-          <div class="mail-triple">
-            <label>{{t('Server')}}<input [(ngModel)]="form.imap_host" name="imap_host" required maxlength="253" placeholder="imap.example.com" [disabled]="busy"></label>
-            <label>{{t('Port')}}<input [value]="993" disabled type="number"></label>
-            <label>{{t('Username')}}<input [(ngModel)]="form.imap_username" name="imap_username" required maxlength="254" [disabled]="busy"></label>
-          </div>
-          <label>{{t('IMAP password / app password')}}<input [(ngModel)]="form.imap_password" name="imap_password"
-            type="password" autocomplete="new-password" maxlength="2048" [disabled]="busy"
-            [placeholder]="form.id ? t('Leave blank to keep saved password') : t('Required to connect')"></label>
-          <h4>{{t('Outgoing mail (SMTP)')}}</h4>
-          <div class="mail-triple">
-            <label>{{t('Server')}}<input [(ngModel)]="form.smtp_host" name="smtp_host" required maxlength="253" placeholder="smtp.example.com" [disabled]="busy"></label>
-            <label>{{t('Port and security')}}
-              <select [(ngModel)]="form.smtp_port" name="smtp_port" [disabled]="busy">
-                <option [ngValue]="465">465 · TLS</option>
-                <option [ngValue]="587">587 · STARTTLS</option>
-              </select>
-            </label>
-            <label>{{t('Username')}}<input [(ngModel)]="form.smtp_username" name="smtp_username" required maxlength="254" [disabled]="busy"></label>
-          </div>
-          <label>{{t('SMTP password (optional if same as IMAP)')}}<input [(ngModel)]="form.smtp_password" name="smtp_password"
-            type="password" autocomplete="new-password" maxlength="2048" [disabled]="busy"></label>
-          <label>{{t('Sent folder (optional)')}}<input [(ngModel)]="form.sent_folder" name="sent_folder" maxlength="240"
-            placeholder="Sent" [disabled]="busy"></label>
-          <label>{{t('Plain-text signature')}}<textarea [(ngModel)]="form.signature" name="signature" rows="4" maxlength="3000" [disabled]="busy"></textarea></label>
-          <p class="mail-hint">{{t('Stored credentials stay in Windows Credential Manager, macOS Keychain or Linux Secret Service. No passwords are exported with backups.')}}</p>
-          <div class="mail-inline-actions">
-            <button type="button" (click)="cancelAccount()" [disabled]="busy">{{t('Cancel')}}</button>
-            <button type="submit" class="mail-primary" [disabled]="busy">{{t('Save account')}}</button>
-          </div>
-        </form>
+          <ng-container *ngIf="listing">
+            <!-- Inbox: still to read / everything else -->
+            <ng-container *ngIf="isInbox; else flatList">
+              <ng-container *ngFor="let kind of ['unread','rest']">
+                <section class="inbox-section" *ngIf="$any(sections)[kind] as rows">
+                  <header class="inbox-section-heading">
+                    <button type="button" class="section-title" [attr.aria-expanded]="!$any(collapsed)[kind]" (click)="toggleSection($any(kind))">
+                      <rp-mi [name]="$any(collapsed)[kind] ? 'expand_more' : 'expand_less'"></rp-mi>{{kind==='unread' ? t('To read') : t('Everything else')}}
+                    </button>
+                    <span class="section-count">{{rows.length}}</span>
+                  </header>
+                  <ul class="message-list" *ngIf="!$any(collapsed)[kind]">
+                    <li *ngFor="let row of rows" class="inbox-row" [class.unread]="!row.seen" [class.selected]="message?.header?.uid===row.uid">
+                      <span class="star" [class.starred]="row.flagged" aria-hidden="true"><rp-mi [name]="row.flagged ? 'star' : 'star_outline'"></rp-mi></span>
+                      <button type="button" class="message" (click)="read(row)">
+                        <span class="sender">{{sender(row)}}</span>
+                        <span class="subject">{{row.subject || t('(No subject)')}}</span>
+                        <time *ngIf="when(row) as d; else rawRowDate">{{d | date:'d MMM, HH:mm'}}</time>
+                        <ng-template #rawRowDate><time>{{row.date}}</time></ng-template>
+                      </button>
+                    </li>
+                    <li class="section-empty" *ngIf="!rows.length">{{kind==='unread' ? t('There are no messages to read.') : t('There are no other messages.')}}</li>
+                  </ul>
+                </section>
+              </ng-container>
+            </ng-container>
+            <ng-template #flatList>
+              <ul class="message-list">
+                <li *ngFor="let row of visibleItems" class="inbox-row" [class.unread]="!row.seen">
+                  <span class="star" [class.starred]="row.flagged" aria-hidden="true"><rp-mi [name]="row.flagged ? 'star' : 'star_outline'"></rp-mi></span>
+                  <button type="button" class="message" (click)="read(row)">
+                    <span class="sender">{{sender(row)}}</span>
+                    <span class="subject">{{row.subject || t('(No subject)')}}</span>
+                    <time *ngIf="when(row) as d; else rawFlatDate">{{d | date:'d MMM, HH:mm'}}</time>
+                    <ng-template #rawFlatDate><time>{{row.date}}</time></ng-template>
+                  </button>
+                </li>
+                <li class="empty" *ngIf="!visibleItems.length">{{t('This folder has no messages.')}}</li>
+              </ul>
+            </ng-template>
+            <p class="empty" *ngIf="query && !visibleItems.length">{{t('No matches among the loaded messages.')}}</p>
+          </ng-container>
+        </ng-template>
       </ng-container>
-    </main>
+    </section>
   </div>
+
+  <!-- Settings -->
+  <div class="settings-view" *ngIf="view==='settings'">
+    <header class="settings-intro">
+      <span class="brand-icon"><rp-mi name="settings"></rp-mi></span>
+      <div><h2>{{t('Mail settings')}}</h2><p>{{t('Manage your mailboxes and the way new mail is announced.')}}</p></div>
+      <button type="button" class="text-button back" *ngIf="accounts.length" (click)="showMail()"><rp-mi name="back"></rp-mi> {{t('Back to the list')}}</button>
+    </header>
+
+    <section class="settings-card" *ngIf="accounts.length && !accountForm">
+      <h3>{{t('New mail')}}</h3>
+      <label class="check-line"><input type="checkbox" [ngModel]="notifications" (ngModelChange)="setNotifications($event)">
+        {{t('Show a system notification when new mail arrives')}}</label>
+      <p class="hint">{{t('The inbox is checked automatically every minute while Repertica Studio is open. The number next to Mail in the menu shows the messages still to read.')}}</p>
+    </section>
+
+    <section class="settings-card">
+      <header class="card-heading"><h3>{{t('Mail account settings')}}</h3>
+        <button type="button" class="primary small" (click)="editAccount()" *ngIf="!accountForm && !accounts.length" [disabled]="busy">+ {{t('Add account')}}</button></header>
+      <p class="hint">{{t('Only encrypted IMAP TLS and authenticated SMTP TLS/STARTTLS are supported. OAuth is not yet supported.')}}</p>
+      <p class="hint" *ngIf="accounts.length && !accountForm">{{t('Only one mailbox can be connected. Remove it to use a different one.')}}</p>
+      <div *ngIf="!accountForm" class="account-grid">
+        <article *ngFor="let account of accounts" class="account-card">
+          <div><strong>{{account.email}}</strong><p>{{account.imap_host}}:{{account.imap_port}} · {{account.smtp_host}}:{{account.smtp_port}}</p></div>
+          <div class="inline-actions">
+            <button type="button" (click)="editAccount(account)" [disabled]="busy">{{t('Edit settings')}}</button>
+            <button type="button" (click)="testAccount(account)" [disabled]="busy">{{t('Test IMAP')}}</button>
+            <button type="button" class="danger" (click)="removeAccount(account)" [disabled]="busy">{{t('Remove')}}</button>
+          </div>
+        </article>
+      </div>
+      <form *ngIf="accountForm as form" class="account-form" (ngSubmit)="saveAccount()">
+        <div class="double">
+          <label>{{t('Email address')}}<input [(ngModel)]="form.email" name="email" type="email" required maxlength="254" [disabled]="busy"></label>
+          <label>{{t('Display name')}}<input [(ngModel)]="form.display_name" name="display_name" maxlength="120" [disabled]="busy"></label>
+        </div>
+        <h4>{{t('Incoming mail (IMAP)')}}</h4>
+        <div class="triple">
+          <label>{{t('Server')}}<input [(ngModel)]="form.imap_host" name="imap_host" required maxlength="253" placeholder="imap.example.com" [disabled]="busy"></label>
+          <label>{{t('Port')}}<input [value]="993" disabled type="number"></label>
+          <label>{{t('Username')}}<input [(ngModel)]="form.imap_username" name="imap_username" required maxlength="254" [disabled]="busy"></label>
+        </div>
+        <label>{{t('IMAP password / app password')}}<input [(ngModel)]="form.imap_password" name="imap_password"
+          type="password" autocomplete="new-password" maxlength="2048" [disabled]="busy"
+          [placeholder]="form.id ? t('Leave blank to keep saved password') : t('Required to connect')"></label>
+        <h4>{{t('Outgoing mail (SMTP)')}}</h4>
+        <div class="triple">
+          <label>{{t('Server')}}<input [(ngModel)]="form.smtp_host" name="smtp_host" required maxlength="253" placeholder="smtp.example.com" [disabled]="busy"></label>
+          <label>{{t('Port and security')}}
+            <select [(ngModel)]="form.smtp_port" name="smtp_port" [disabled]="busy">
+              <option [ngValue]="465">465 · TLS</option>
+              <option [ngValue]="587">587 · STARTTLS</option>
+            </select>
+          </label>
+          <label>{{t('Username')}}<input [(ngModel)]="form.smtp_username" name="smtp_username" required maxlength="254" [disabled]="busy"></label>
+        </div>
+        <label>{{t('SMTP password (optional if same as IMAP)')}}<input [(ngModel)]="form.smtp_password" name="smtp_password"
+          type="password" autocomplete="new-password" maxlength="2048" [disabled]="busy"></label>
+        <label>{{t('Sent folder (optional)')}}<input [(ngModel)]="form.sent_folder" name="sent_folder" maxlength="240"
+          placeholder="Sent" [disabled]="busy"></label>
+        <label>{{t('Plain-text signature')}}<textarea [(ngModel)]="form.signature" name="signature" rows="4" maxlength="3000" [disabled]="busy"></textarea></label>
+        <p class="hint">{{t('Stored credentials stay in Windows Credential Manager, macOS Keychain or Linux Secret Service. No passwords are exported with backups.')}}</p>
+        <div class="inline-actions">
+          <button type="button" (click)="cancelAccount()" [disabled]="busy">{{t('Cancel')}}</button>
+          <button type="submit" class="primary" [disabled]="busy">{{t('Save account')}}</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <!-- Floating compose window -->
+  <div class="compose-scrim" *ngIf="composeOpen && composeMode==='expanded'" aria-hidden="true"></div>
+  <section class="compose-window" *ngIf="composeOpen" [class.compose-expanded]="composeMode==='expanded'" [class.compose-minimized]="composeMode==='minimized'"
+    role="dialog" aria-labelledby="mail-compose-title" [attr.aria-modal]="composeMode==='expanded' ? 'true' : null">
+    <header class="compose-titlebar">
+      <h2 id="mail-compose-title">{{composer.subject || (composer.id ? t('Edit draft') : t('New message'))}}</h2>
+      <button type="button" class="compose-icon" (click)="minimizeCompose()" [attr.aria-label]="composeMode==='minimized' ? t('Restore window') : t('Minimize')"><rp-mi [name]="composeMode==='minimized' ? 'expand_less' : 'minimize'"></rp-mi></button>
+      <button type="button" class="compose-icon" (click)="expandCompose()" [attr.aria-label]="composeMode==='expanded' ? t('Back to a window') : t('Full screen')"><rp-mi [name]="composeMode==='expanded' ? 'collapse' : 'expand'"></rp-mi></button>
+      <button type="button" class="compose-icon" (click)="closeCompose()" [attr.aria-label]="t('Close editor')"><rp-mi name="close"></rp-mi></button>
+    </header>
+    <form class="compose-form" [hidden]="composeMode==='minimized'" (ngSubmit)="saveDraft()">
+      <p class="compose-from"><span>{{t('From')}}</span> {{selected?.email}}</p>
+      <datalist id="mail-known-contacts"><option *ngFor="let collector of fromCollectors" [value]="collector.email">{{collector.name}}</option></datalist>
+      <div class="compose-field">
+        <label for="compose-to">{{t('To')}}</label>
+        <input id="compose-to" name="to" [(ngModel)]="composer.to" list="mail-known-contacts" [disabled]="busy" maxlength="1024"
+          [placeholder]="t('email@example.com (separate addresses with commas)')" autocomplete="off">
+        <button type="button" class="recipient-option" *ngIf="!showCc" (click)="showCc=true">{{t('Cc')}}</button>
+        <button type="button" class="recipient-option" *ngIf="!showBcc" (click)="showBcc=true">{{t('Bcc')}}</button>
+      </div>
+      <div class="compose-field" *ngIf="showCc"><label for="compose-cc">{{t('Cc')}}</label><input id="compose-cc" name="cc" [(ngModel)]="composer.cc" [disabled]="busy" maxlength="1024" autocomplete="off"></div>
+      <div class="compose-field" *ngIf="showBcc"><label for="compose-bcc">{{t('Bcc')}}</label><input id="compose-bcc" name="bcc" [(ngModel)]="composer.bcc" [disabled]="busy" maxlength="1024" autocomplete="off"></div>
+      <div class="compose-field compose-subject"><input name="subject" [(ngModel)]="composer.subject" [attr.aria-label]="t('Subject')" [placeholder]="t('Subject')" maxlength="255" [disabled]="busy" autocomplete="off"></div>
+      <textarea class="compose-body" name="body" [(ngModel)]="composer.body" [attr.aria-label]="t('Message')" maxlength="100000" [disabled]="busy"></textarea>
+      <ul class="compose-files" *ngIf="composer.attachments.length">
+        <li *ngFor="let path of composer.attachments"><rp-mi name="attach"></rp-mi><span>{{attachmentName(path)}}</span>
+          <button type="button" class="compose-icon" [attr.aria-label]="t('Remove attachment')" (click)="removeAttachment(path)" [disabled]="busy"><rp-mi name="close"></rp-mi></button></li>
+      </ul>
+      <p class="compose-hint">{{t('Sending requires confirmation. If SMTP returns an uncertain result, check Sent before retrying.')}} {{t('Max 5 files, 5 MiB each, 15 MiB total. Files stay on your computer until sent.')}}</p>
+      <footer class="compose-actions">
+        <button type="button" class="compose-send" (click)="send()" [disabled]="busy">{{t('Send with SMTP')}}</button>
+        <button type="button" class="compose-icon" (click)="addAttachments()" [disabled]="busy" [attr.aria-label]="t('Attach files')" [title]="t('Attach files')"><rp-mi name="attach"></rp-mi></button>
+        <button type="submit" class="compose-icon" [disabled]="busy" [attr.aria-label]="t('Save local draft')" [title]="t('Save local draft')"><rp-mi name="save"></rp-mi></button>
+        <button type="button" class="compose-icon compose-trash" (click)="discardCompose()" [disabled]="busy" [attr.aria-label]="t('Discard message')" [title]="t('Discard message')"><rp-mi name="trash"></rp-mi></button>
+      </footer>
+    </form>
+  </section>
 </div>

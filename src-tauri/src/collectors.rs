@@ -338,9 +338,11 @@ fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
+/// With `cascade` the sales made to the collector (receipts and attached documents included) are deleted with
+/// them, and the artworks of those sales become available again; without it a collector with sales is refused.
+pub(crate) fn delete_collector_core(db: &Database, id: &str, cascade: bool) -> Result<(), String> {
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
+    let mut conn = db.conn.lock().map_err(err)?;
     // Report the sales restriction only when a real sale exists. A disk error,
     // database lock or an import-specific SQLite trigger must not be mislabeled
     // as a sale relationship. This also protects imported archives where FK
@@ -349,7 +351,7 @@ fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
         "SELECT EXISTS(SELECT 1 FROM sales WHERE collector_id=?1)",
         params![id], |row| row.get(0),
     ).map_err(err)?;
-    if has_sales {
+    if has_sales && !cascade {
         return Err("Non puoi eliminare un collezionista collegato a una vendita".into());
     }
     let paths: Vec<String> = {
@@ -357,9 +359,13 @@ fn delete_collector_core(db: &Database, id: &str) -> Result<(), String> {
         let paths = statement.query_map(params![id], |r| r.get(0)).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
         paths
     };
-    let affected = conn.execute("DELETE FROM collectors WHERE id=?1", params![id]).map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let leftovers = crate::cascade::remove_sales(&tx, "collector_id", id)?;
+    let affected = tx.execute("DELETE FROM collectors WHERE id=?1", params![id]).map_err(err)?;
     if affected == 0 { return Err("Collezionista non trovato".into()); }
+    tx.commit().map_err(err)?;
     for path in paths { remove_media_file(&conn, db, &path); }
+    crate::cascade::clean_files(&conn, db, &leftovers);
     Ok(())
 }
 
@@ -379,8 +385,8 @@ pub fn create_collector_full(db: State<'_, Database>, input: NewCollectorInput) 
     create_collector_full_core(&db, input)
 }
 #[tauri::command]
-pub fn delete_collector(db: State<'_, Database>, id: String) -> Result<(), String> {
-    delete_collector_core(&db, &id)
+pub fn delete_collector(db: State<'_, Database>, id: String, cascade: Option<bool>) -> Result<(), String> {
+    delete_collector_core(&db, &id, cascade.unwrap_or(false))
 }
 // Distinguish a genuinely empty gallery from a stale/deleted collector. Otherwise
 // a UI opening an old link misleadingly reports "no photographs" for a missing owner.
@@ -585,7 +591,7 @@ mod tests {
         assert_eq!(gallery.len(), 1);
         assert_eq!(gallery[0].id, photo.id);
         assert!(list_collector_images_core(&db, &bruno.id).unwrap().is_empty());
-        delete_collector_core(&db, &anna.id).unwrap();
+        delete_collector_core(&db, &anna.id, false).unwrap();
         assert!(list_collector_images_core(&db, &anna.id).unwrap_err().contains("non trovato"));
         assert!(list_collector_images_core(&db, "unknown").unwrap_err().contains("non trovato"));
         assert!(list_collector_images_core(&db, &bruno.id).unwrap().is_empty());
@@ -639,10 +645,10 @@ mod tests {
             conn.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES('a','A-1','T','sold','t','t')", []).unwrap();
             conn.execute("INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at) VALUES('s','a',?1,100,'2026-11-21','t')", params![collector.id]).unwrap();
         }
-        assert!(delete_collector_core(&db, &collector.id).unwrap_err().contains("vendita"));
+        assert!(delete_collector_core(&db, &collector.id, false).unwrap_err().contains("vendita"));
         assert_eq!(media_count(&db), MAX_PHOTOS as usize);
         db.conn.lock().unwrap().execute("DELETE FROM sales", []).unwrap();
-        delete_collector_core(&db, &collector.id).unwrap();
+        delete_collector_core(&db, &collector.id, false).unwrap();
         assert_eq!(media_count(&db), 0);
         let rows: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collector_images", [], |r| r.get(0)).unwrap();
         assert_eq!(rows, 0);
@@ -660,12 +666,12 @@ mod tests {
             "CREATE TRIGGER block_collector_delete BEFORE DELETE ON collectors
              BEGIN SELECT RAISE(ABORT, 'external_archive_rejects_delete'); END;",
         ).unwrap();
-        let failure = delete_collector_core(&db, &collector.id).unwrap_err();
+        let failure = delete_collector_core(&db, &collector.id, false).unwrap_err();
         assert!(failure.contains("external_archive_rejects_delete"), "{failure}");
         assert!(db.directory.join(&photo.image_path).is_file());
         assert_eq!(by_id(&db.conn.lock().unwrap(), &collector.id).unwrap().photo_count, 1);
         db.conn.lock().unwrap().execute_batch("DROP TRIGGER block_collector_delete").unwrap();
-        delete_collector_core(&db, &collector.id).unwrap();
+        delete_collector_core(&db, &collector.id, false).unwrap();
         assert_eq!(media_count(&db), 0);
     }
 
@@ -776,7 +782,7 @@ mod tests {
         assert!(collector_image_data_core(&db, &image.id).is_err());
         assert!(add_image_core(&db, &collector.id, &source, "PHOTO").is_err());
         assert!(delete_image_core(&db, &image.id).is_err());
-        assert!(delete_collector_core(&db, &collector.id).is_err());
+        assert!(delete_collector_core(&db, &collector.id, false).is_err());
         assert!(outside.join("secret.jpg").is_file());
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
         let conn = db.conn.lock().unwrap();

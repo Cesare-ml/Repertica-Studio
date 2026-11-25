@@ -22,6 +22,11 @@ import { PHOTO_KINDS } from './models';
 import { MenuState, SUPPORTS, TECHNIQUES, menuStateFor, valueFor } from './artwork-options';
 import { EXAMPLE_SIZES, examplePriceCents, priceFieldsFor, priceModeOf, priceOf } from './pricing';
 import type { PriceMode } from './pricing';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
+import { badgeText, notificationContent } from './mail-sync';
+import { mailText } from './mail-i18n';
+import { artworkDeletionMessage, bulkDeletionMessage, collectorDeletionMessage, hasDependents, mergeImpacts } from './deletion-impact';
+import type { DeletionImpact } from './deletion-impact';
 import { FIRST_UPDATE_CHECK_DELAY_MS, UPDATE_CHECK_INTERVAL_MS, isQuietStatus, progressPercent, updateMessage } from './updates';
 import { getVersion } from '@tauri-apps/api/app';
 import type {
@@ -29,12 +34,24 @@ import type {
   Certificate, CertificateInput, Overview, BackupSummary, RestoreSummary,
   StudioSettings, Expense, ExpenseInput, FinanceOverview, GalleryImage,
   SaleReceipt, SaleReceiptInput, SaleReceiptMethod, SaleBalance, ReceiptYearOverview,
-  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, PhotoKind, UpdateReply, CollectorImage, AllocationPlan, AllocationPart, BackupScheduleStatus, Installment,
+  MediaAudit, MediaIssue, ReceiptAttachment, McpSetup, McpClientStatus, CodePolicy, NewArtworkInput, PhotoKind, UpdateReply, MailSyncState, CollectorImage, AllocationPlan, AllocationPart, BackupScheduleStatus, Installment,
   EditOperation, PhotoSource, RawFile, MediaItem, PreviewData
 } from './models';
 
 /** A picture chosen for a new artwork, possibly edited before it is stored. */
 interface PendingPhoto { mediaId: string; label: string; thumb: string; kind: PhotoKind; }
+type SettingsTab = 'profile' | 'pricing' | 'archive' | 'backup' | 'export' | 'ai' | 'about';
+interface SettingsTabInfo { id: SettingsTab; label: string; title: string; description: string; }
+/** Categories of the Settings page, in the order they are listed. Texts are Italian interface strings. */
+export const SETTINGS_TABS: readonly SettingsTabInfo[] = [
+  { id: 'profile', label: 'Profilo', title: 'Profilo e preferenze', description: 'Il tuo nome sui certificati, la lingua dell’app e la guida di benvenuto.' },
+  { id: 'pricing', label: 'Prezzi e vendite', title: 'Prezzi, vendite e tasse', description: 'Come si calcola il prezzo delle opere e come si ripartiscono gli incassi.' },
+  { id: 'archive', label: 'Archivio', title: 'Archivio', description: 'Dove sono i dati, come si numerano le opere e il controllo delle fotografie.' },
+  { id: 'backup', label: 'Backup', title: 'Backup e ripristino', description: 'Copie di sicurezza automatiche e manuali, e ripristino di un archivio.' },
+  { id: 'export', label: 'Esportazioni', title: 'Esportazioni', description: 'Copie dei registri in formato CSV per Excel o LibreOffice.' },
+  { id: 'ai', label: 'Assistenti IA', title: 'Assistenti IA locali', description: 'Collega un assistente IA installato sul tuo computer in sola lettura.' },
+  { id: 'about', label: 'Aggiornamenti', title: 'Aggiornamenti e informazioni', description: 'Versione installata, aggiornamenti automatici e informazioni sul software.' },
+];
 type Section = 'overview' | 'artworks' | 'media' | 'collectors' | 'sales' | 'certificates' | 'brochures' | 'mail' | 'finance' | 'settings';
 const freshArtwork = (): ArtworkInput => ({
   code: null, title: '', year: null, technique: null, support: null,
@@ -61,6 +78,11 @@ const statusLabels: Record<ArtworkStatus, string> = {
 })
 export class AppComponent implements OnInit {
   appVersion = '0.1.0';
+  readonly settingsTabs = SETTINGS_TABS;
+  settingsTab: SettingsTab = 'profile';
+  /** Figures from the background mail check; the badge in the menu shows the unread total. */
+  mailSync: MailSyncState | null = null;
+  mailUnread = 0;
   update: UpdateReply | null = null;
   updateChecking = false;
   updateInstalling = false;
@@ -104,6 +126,10 @@ export class AppComponent implements OnInit {
   artworkCollectorFilter = 'all';
   artworkOrder: ArtworkOrder = 'recent';
   expandedCollectorId: string | null = null;
+  /** Records ticked for deleting several at once (only the ones currently listed count). */
+  selectedArtworkIds = new Set<string>();
+  selectedCollectorIds = new Set<string>();
+  selectedCertificateIds = new Set<string>();
   salesByCollector: Record<string, Sale[]> = {};
   salesByArtwork: Record<string, Sale> = {};
   artworks: Artwork[] = [];
@@ -128,7 +154,7 @@ export class AppComponent implements OnInit {
   financeYears = Array.from({length: 8}, (_,i)=>new Date().getFullYear()-i);
   settings: StudioSettings = {
     artist_coefficient:1,base_price_cm2_cents:16,personal_bp:3334,activity_bp:3333,
-    savings_bp:3333,treasury_start_date:null,default_tax_bp:0,ui_language:null,artist_name:null,artist_alias:null
+    savings_bp:3333,treasury_start_date:null,default_tax_bp:0,ui_language:null,artist_name:null,artist_alias:null,mail_notifications:true
   };
   settingsDraft: StudioSettings = {...this.settings};
   rateEuro = .16;
@@ -268,12 +294,49 @@ export class AppComponent implements OnInit {
         if (event.payload.last_status === 'ERROR') this.errorMessage = event.payload.last_message ?? '';
         this.change.detectChanges();
       }).catch(() => undefined);
+      // Mail: the native side checks the inboxes every minute; each check arrives here as an event.
+      void listen<MailSyncState>('mail-status', event => this.onMailStatus(event.payload)).catch(() => undefined);
+      void api.mailSyncState().then(state => this.onMailStatus({ ...state, fresh: [] })).catch(() => undefined);
       await this.refresh();
       void this.startUpdates();
     } catch (error) {
       this.errorMessage = this.error(error);
       this.loading = false;
     }
+  }
+  settingsTabInfo(id: SettingsTab): SettingsTabInfo { return SETTINGS_TABS.find(t => t.id === id) ?? SETTINGS_TABS[0]; }
+  /** Open the Settings page on a given category. */
+  goToSettings(tab: SettingsTab): void {
+    this.settingsTab = tab;
+    this.navigate('settings');
+  }
+  // ---------------------------------------------------------------- mail
+  badge(count: number): string { return badgeText(count); }
+  private onMailStatus(state: MailSyncState): void {
+    this.mailSync = state;
+    this.mailUnread = state.unread_total;
+    void this.notifyMail(state);
+    this.change.detectChanges();
+  }
+  /** System notification for mail that arrived since the previous check (if the user left it on). */
+  private async notifyMail(state: MailSyncState): Promise<void> {
+    if (!this.settings.mail_notifications || !state.fresh.length) return;
+    const content = notificationContent(state.fresh, key => mailText(this.language, key));
+    if (!content) return;
+    try {
+      let allowed = await isPermissionGranted();
+      if (!allowed) allowed = (await requestPermission()) === 'granted';
+      if (allowed) sendNotification(content);
+    } catch { /* notifications are a convenience: the badge still shows the new mail */ }
+  }
+  async setMailNotifications(on: boolean): Promise<void> {
+    try {
+      this.settings = await api.saveSettings({ ...this.settings, mail_notifications: on });
+      this.settingsDraft = { ...this.settingsDraft, mail_notifications: this.settings.mail_notifications };
+      // Ask the system for permission right away, so the first notification is not lost.
+      if (on && !(await isPermissionGranted())) await requestPermission();
+    } catch (error) { this.errorMessage = this.error(error); }
+    this.change.detectChanges();
   }
   // ---------------------------------------------------------------- updates
   private async startUpdates(): Promise<void> {
@@ -426,6 +489,15 @@ export class AppComponent implements OnInit {
       collectorId: this.artworkCollectorFilter,
       order: this.artworkOrder
     }, { byCollector: this.salesByCollector, byArtwork: this.salesByArtwork });
+  }
+  get pickedArtworks(): Artwork[] { return this.visibleArtworks.filter(a => this.selectedArtworkIds.has(a.id)); }
+  get pickedCollectors(): Collector[] { return this.visibleCollectors.filter(c => this.selectedCollectorIds.has(c.id)); }
+  get pickedCertificates(): Certificate[] { return this.certificates.filter(c => this.selectedCertificateIds.has(c.id)); }
+  toggleId(picked: Set<string>, id: string): void { if (!picked.delete(id)) picked.add(id); }
+  allPicked(items: { id: string }[], picked: Set<string>): boolean { return items.length > 0 && items.every(item => picked.has(item.id)); }
+  toggleAll(items: { id: string }[], picked: Set<string>): void {
+    if (this.allPicked(items, picked)) items.forEach(item => picked.delete(item.id));
+    else items.forEach(item => picked.add(item.id));
   }
   get visibleCollectors(): Collector[] {
     return filterCollectors(this.collectors, this.search,
@@ -1149,9 +1221,61 @@ export class AppComponent implements OnInit {
     if (await this.run(() => api.createArtworkFull(input), this.tr('Opera salvata'))) { this.artworkDialog = false; await this.finishPhotoSession(used); }
   }
   async deleteArtwork(a: Artwork): Promise<void> {
-    if (!window.confirm(`Eliminare definitivamente l'opera "${a.title}"? Questa operazione non è reversibile.`)) return;
-    await this.run(() => api.deleteArtwork(a.id), 'Opera eliminata');
-    delete this.thumbnails[a.id];
+    // Certificates, the sale and its receipts depend on the artwork: show them and ask before deleting them too.
+    let impact;
+    try { impact = await api.artworkDeletionImpact(a.id); }
+    catch (error) { this.errorMessage = this.error(error); return; }
+    if (!window.confirm(artworkDeletionMessage(a.title, impact, this.formatters()))) return;
+    if (await this.run(() => api.deleteArtwork(a.id, hasDependents(impact)), 'Opera eliminata')) delete this.thumbnails[a.id];
+  }
+  /** One confirmation for the whole selection, then the records are deleted one after the other. */
+  private async deleteMany(steps: (() => Promise<void>)[], success: string): Promise<boolean> {
+    return this.run(async () => {
+      let done = 0;
+      try { for (const step of steps) { await step(); done++; } }
+      catch (error) {
+        await this.refresh();
+        throw new Error(`${done}/${steps.length} ${this.tr('eliminati')}: ${this.error(error)}`);
+      }
+    }, success);
+  }
+  async deleteSelectedArtworks(): Promise<void> {
+    const items = this.pickedArtworks;
+    if (!items.length) return;
+    let impacts: DeletionImpact[];
+    try { impacts = await Promise.all(items.map(a => api.artworkDeletionImpact(a.id))); }
+    catch (error) { this.errorMessage = this.error(error); return; }
+    if (!window.confirm(bulkDeletionMessage('artworks', items.map(a => a.title), mergeImpacts(impacts), this.formatters()))) return;
+    if (await this.deleteMany(items.map((a, i) => () => api.deleteArtwork(a.id, hasDependents(impacts[i]))), 'Opere eliminate')) {
+      items.forEach(a => { delete this.thumbnails[a.id]; this.selectedArtworkIds.delete(a.id); });
+    }
+  }
+  async deleteSelectedCollectors(): Promise<void> {
+    const items = this.pickedCollectors;
+    if (!items.length) return;
+    let impacts: DeletionImpact[];
+    try { impacts = await Promise.all(items.map(c => api.collectorDeletionImpact(c.id))); }
+    catch (error) { this.errorMessage = this.error(error); return; }
+    if (!window.confirm(bulkDeletionMessage('collectors', items.map(c => c.name), mergeImpacts(impacts), this.formatters()))) return;
+    if (await this.deleteMany(items.map((c, i) => () => api.deleteCollector(c.id, impacts[i].sales.length > 0)), 'Contatti eliminati')) {
+      items.forEach(c => this.selectedCollectorIds.delete(c.id));
+    }
+  }
+  async deleteSelectedCertificates(): Promise<void> {
+    const items = this.pickedCertificates;
+    if (!items.length) return;
+    const none: DeletionImpact = { certificates: [], sales: [], receipts: 0, attachments: 0 };
+    if (!window.confirm(bulkDeletionMessage('certificates', items.map(c => `${c.serial} (${c.artwork_title})`), none, this.formatters()))) return;
+    if (await this.deleteMany(items.map(c => () => api.deleteCertificate(c.id)), 'Certificati eliminati')) {
+      items.forEach(c => { this.selectedCertificateIds.delete(c.id); if (this.selectedCertificate?.id === c.id) this.selectedCertificate = null; });
+    }
+  }
+  private formatters() {
+    return { t: (key: string) => this.tr(key), money: (cents: number) => this.euros(cents), date: (value: string) => this.date(value) };
+  }
+  async deleteCertificate(c: Certificate): Promise<void> {
+    if (!window.confirm(`${this.tr('Eliminare il certificato')} ${c.serial} (${c.artwork_title})?\n\n${this.tr('L’opera e la sua vendita non vengono modificate. Questa operazione non è reversibile.')}`)) return;
+    if (await this.run(() => api.deleteCertificate(c.id), 'Certificato eliminato') && this.selectedCertificate?.id === c.id) this.selectedCertificate = null;
   }
   private async pickPhoto(title: string): Promise<string | null> {
     const selected = await open({
@@ -1400,8 +1524,11 @@ export class AppComponent implements OnInit {
     }
   }
   async deleteCollector(c: Collector): Promise<void> {
-    if (!window.confirm(`Eliminare il contatto "${c.name}"?`)) return;
-    await this.run(() => api.deleteCollector(c.id), 'Collezionista eliminato');
+    let impact;
+    try { impact = await api.collectorDeletionImpact(c.id); }
+    catch (error) { this.errorMessage = this.error(error); return; }
+    if (!window.confirm(collectorDeletionMessage(c.name, impact, this.formatters()))) return;
+    await this.run(() => api.deleteCollector(c.id, impact.sales.length > 0), 'Collezionista eliminato');
   }
   recalculateDefaultSaleTax(): void {
     const amount=this.saleDraft.amount_eur;

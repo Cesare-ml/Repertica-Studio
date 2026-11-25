@@ -9,7 +9,29 @@ export interface MailAccount {
 export type MailAccountInput = Omit<MailAccount,'created_at'|'updated_at'|'id'> & {
   id?: string | null; imap_password?: string | null; smtp_password?: string | null;
 };
-export interface MailFolder { name: string; role: 'inbox'|'sent'|'drafts'|'trash'|'junk'|'other'; }
+export interface MailFolder {
+  /** Name on the server (what the commands take). */
+  name: string;
+  role: 'inbox'|'sent'|'drafts'|'trash'|'junk'|'archive'|'other';
+  /** Readable name without prefixes or encoding. */
+  display: string;
+  /** Unread messages (only reported for the inbox and the spam folder). */
+  unread: number | null;
+}
+/** Folders and the messages of one folder, loaded together. */
+export interface MailOverview { folders: MailFolder[]; listing: MailList | null; }
+export interface MailAccountSync {
+  account_id: string; email: string; unread: number; exists: number; uid_validity: number; uid_next: number;
+  /** The last check failed (the previous figures are kept). */
+  error: boolean;
+}
+export interface FreshMail { account_id: string; account_email: string; uid: number; sender: string; subject: string; }
+/** Figures from the background mail watcher. */
+export interface MailSyncState {
+  unread_total: number; accounts: MailAccountSync[]; checked_at: string | null;
+  /** Mail that arrived since the previous check (delivered once, with the event). */
+  fresh: FreshMail[];
+}
 export interface MailHeader {
   uid: number; uid_validity: number; folder: string;
   subject: string; from: string; date: string; seen: boolean;
@@ -237,6 +259,8 @@ export interface StudioSettings {
   artist_name: string | null;
   /** Stage name: shown on certificates and brochures instead of the full name. */
   artist_alias: string | null;
+  /** Show a system notification when new mail arrives. */
+  mail_notifications: boolean;
 }
 export interface Expense {
   id:string; expense_date:string; category:string; description:string;

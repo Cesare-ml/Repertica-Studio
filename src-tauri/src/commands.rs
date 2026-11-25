@@ -265,11 +265,13 @@ pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artw
     save_artwork_core(&db, input)
 }
 #[tauri::command]
-pub fn delete_artwork(db: State<'_, Database>, id: String) -> Result<(), String> {
-    delete_artwork_core(&db, &id)
+pub fn delete_artwork(db: State<'_, Database>, id: String, cascade: Option<bool>) -> Result<(), String> {
+    delete_artwork_core(&db, &id, cascade.unwrap_or(false))
 }
-fn delete_artwork_core(db: &Database, id: &str) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(err)?;
+/// With `cascade` the certificates and the sale of the artwork (receipts and attached documents included) are
+/// deleted with it; without it an artwork that has any of them is refused.
+pub(crate) fn delete_artwork_core(db: &Database, id: &str, cascade: bool) -> Result<(), String> {
+    let mut conn = db.conn.lock().map_err(err)?;
     let id = id.to_string();
     let old_image = artwork_by_id(&conn, &id)?.image_path;
     let raw_path: Option<String> = conn.query_row("SELECT media_path FROM artwork_raw_files WHERE artwork_id=?1", params![id], |r| r.get(0)).optional().map_err(err)?;
@@ -282,14 +284,23 @@ fn delete_artwork_core(db: &Database, id: &str) -> Result<(), String> {
         paths
     };
     // Do not delete DB rows if a swapped media directory could redirect cleanup.
-    if old_image.is_some() || raw_path.is_some() || !gallery_paths.is_empty() {
+    let impact = crate::cascade::artwork_impact(&conn, &id)?;
+    if !impact.is_empty() && !cascade {
+        return Err("Non puoi eliminare un'opera collegata a vendite o certificati".into());
+    }
+    if old_image.is_some() || raw_path.is_some() || !gallery_paths.is_empty() || impact.attachments > 0 || !impact.certificates.is_empty() {
         require_regular_media_dir(&db.directory)?;
     }
-    let affected = conn.execute("DELETE FROM artworks WHERE id=?1",params![id]).map_err(|_|"Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
+    let tx = conn.transaction().map_err(err)?;
+    let mut leftovers = crate::cascade::remove_sales(&tx, "artwork_id", &id)?;
+    leftovers.extend(crate::cascade::remove_certificates(&tx, &id)?);
+    let affected = tx.execute("DELETE FROM artworks WHERE id=?1",params![id]).map_err(|_|"Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
     if affected == 0 { return Err("Opera non trovata".into()); }
+    tx.commit().map_err(err)?;
     if let Some(path) = raw_path { crate::raw_files::remove_file(&db.directory, &path); }
     if let Some(path) = old_image { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &path); }
     for path in gallery_paths { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &path); }
+    crate::cascade::clean_files(&conn, db, &leftovers);
     Ok(())
 }
 
@@ -1059,7 +1070,7 @@ mod tests {
         failing.artwork.status = "sold".into();
         assert!(create_artwork_full_core(&db, failing).is_err());
         assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 1);
-        delete_artwork_core(&db, &saved.id).unwrap();
+        delete_artwork_core(&db, &saved.id, false).unwrap();
         assert!(!db.directory.join(&path).exists(), "the RAW file is removed with its artwork");
     }
     #[test]

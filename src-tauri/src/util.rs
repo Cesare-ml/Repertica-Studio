@@ -15,7 +15,7 @@ pub fn friendly(error: impl std::fmt::Display) -> String {
     } else if has("UNIQUE constraint failed: artwork_images.image_path") || has("UNIQUE constraint failed: collector_images.image_path") {
         "Questa immagine è già usata in una galleria"
     } else if has("certificate_immutable") {
-        "I certificati emessi non possono essere modificati o eliminati"
+        "I certificati emessi non possono essere modificati"
     } else if has("receipt_exceeds_sale") {
         "L'incasso supera l'importo ancora da incassare per questa vendita"
     } else if has("sale_below_receipts") {

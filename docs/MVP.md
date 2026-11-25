@@ -33,7 +33,7 @@ Nessun Repertica Sites, account online, servizi SaaS, telemetria, pagamento, sin
 3. Creazione/modifica collezionista; email facoltativa.
 4. Registrazione vendita collegata; operazioni duplicate o importi invalidi respinti; stato opera aggiornato.
 5. Emissione certificato con seriale unico e dati congelati; stampa locale.
-6. Resistenza agli errori: niente eliminazione di opere o clienti già legati a vendite/certificati.
+6. Resistenza agli errori: opere e clienti già legati a vendite/certificati si eliminano solo dopo una conferma che elenca cosa verrà eliminato a cascata.
 7. Test Rust schema e vincoli, compilazione Angular, build Tauri per Windows/macOS/Linux.
 
 ## Prossimi lavori
@@ -145,3 +145,47 @@ Da collaudare su desktop reale: creazione di un'opera con più fotografie grandi
 - **Dove si vede:** colonna **Prezzo** nell'archivio (con «Prezzo fisso» o «Coefficiente x» sotto la cifra), scheda del visualizzatore a schermo intero e importo proposto quando si registra la vendita insieme a una nuova opera. Il prezzo calcolato non modifica mai le vendite già registrate. Il registro CSV `artworks` ha le colonne `artist_coefficient_override` e `fixed_price_cents`.
 - **Primo avvio:** la Panoramica chiede **nome e cognome**, **nome d'artista** (facoltativo) e **coefficiente artista**, mostrando in tempo reale quanto verrebbe un'opera **30 × 40** e una **90 × 120** con la tariffa in uso. Le stesse voci si cambiano in Impostazioni (profilo in «Artista e certificati», coefficiente e tariffa in «Prezzi delle opere», con gli stessi esempi).
 - **Nome sui documenti:** il nome d'artista, se c'è, compare come autore nei certificati (intestazione e riga «Artista») e viene proposto come artista di una nuova brochure; la dichiarazione del certificato è firmata col nome e cognome (registrato su ogni certificato come `declarant_name`; i certificati emessi prima restano invariati).
+
+## Posta: grafica del Gestionale, sincronizzazione automatica e notifiche (schema v19)
+
+- **Grafica:** la sezione Posta riprende il disegno della posta del Gestionale Opere: testata con ricerca nei messaggi caricati, cartelle a sinistra con pulsante **Scrivi**, posta in arrivo divisa in **Da leggere** e **Tutto il resto** (sezioni comprimibili, riga in grassetto per i non letti), lettore a tutta larghezza e **finestra di scrittura flottante** (riducibile, a schermo intero, con allegati, bozza locale e scarto). Le icone sono SVG incorporate.
+- **Cartelle con nomi normali:** niente più `INBOX` o `INBOX.Sent`: le cartelle sono riconosciute dai flag del server (`\Sent`, `\Trash`, `\Junk`, `\Archive`…) e poi dal nome, e mostrate come **Posta in arrivo**, **Inviata**, **Archivio**, **Spam**, **Cestino**; le altre mostrano il proprio nome senza prefissi e con la codifica IMAP decodificata (sotto-cartelle come «Clienti / Roma», sotto «Altre cartelle»). Le bozze sono le **Bozze locali** dell'archivio; l'eventuale cartella Bozze del server compare sotto «Bozze sul server».
+- **Sincronizzazione automatica, senza pulsanti:** aprendo Posta, cartelle e messaggi si caricano da soli; la cartella aperta si aggiorna ogni minuto e la posta in arrivo si aggiorna appena il controllo in background segnala novità. Sono spariti «Connetti / aggiorna IMAP» e «Aggiorna»; resta l'indicatore «Aggiornamento automatico» con l'ora dell'ultimo controllo (o «In attesa del server di posta» se il server non risponde).
+- **Letto / non letto:** aprire un messaggio lo segna come **letto** sul server (e quindi anche negli altri programmi di posta); nel lettore c'è «Segna come non letto». È l'unica modifica che l'app fa sulla casella: la lettura in sé continua a non alterare nulla.
+- **Numerino nel menu e notifiche:** mentre l'app è aperta, ogni minuto la posta in arrivo di ogni casella viene controllata in background (primo controllo pochi secondi dopo l'avvio). Il totale dei messaggi **da leggere** compare in un cerchietto rosso sopra l'icona di **Posta** nel menu a sinistra (99+ oltre i 99). Per la posta arrivata dopo l'ultimo controllo l'app mostra una **notifica di sistema** (mittente e oggetto, oppure «N nuove email» con i mittenti): è attiva per impostazione predefinita e si disattiva in Posta → Impostazioni della posta. Il primo controllo di una sessione registra solo lo stato della casella e non notifica la posta già presente.
+- **Come funziona il controllo:** una connessione TLS per casella al minuto, solo sulla posta in arrivo (`UIDNEXT` e messaggi non letti); le password restano nel portachiavi di sistema e non finiscono mai negli eventi o nelle notifiche. Se `UIDVALIDITY` cambia, la posta non viene mai notificata come nuova.
+- **Una sola casella e aspetto coerente:** si può collegare **una sola casella di posta** (il pulsante «Aggiungi account» sparisce finché ce n'è una; il salvataggio di una seconda è rifiutato anche dal backend, e per cambiarla si rimuove quella attuale). La grafica mantiene l'impianto del Gestionale ma usa colori, pannelli, tipografia e pulsanti di Repertica Studio (verde, titoli in Georgia, stessa selezione e stessi pulsanti del resto dell'app).
+
+## Impostazioni riorganizzate
+
+La pagina **Impostazioni** non è più un unico elenco: a sinistra c'è l'elenco delle categorie e a destra le schede della categoria scelta, ognuna in un riquadro.
+
+| Categoria | Contenuto |
+|---|---|
+| **Profilo** | Nome e cognome / nome d'artista, lingua dell'app, guida di primo avvio |
+| **Prezzi e vendite** | Tariffa e coefficiente (con esempi 30×40 e 90×120), ripartizione delle vendite, tasse e tesoreria |
+| **Archivio** | Cartella dei dati, codice archivio, diagnostica delle fotografie |
+| **Backup** | Backup automatico, backup manuale, ripristino |
+| **Esportazioni** | Registri CSV |
+| **Assistenti IA** | Collegamento MCP con Claude Desktop, Codex e altri |
+| **Aggiornamenti** | Aggiornamenti automatici (con un puntino rosso quando ce n'è uno disponibile) e informazioni sul software |
+
+Altre schermate aprono direttamente la categoria giusta: la guida di primo avvio apre **Backup**, la finestra dei certificati apre **Profilo**, l'avviso di aggiornamento apre **Aggiornamenti**. Le impostazioni della posta restano nella sezione **Posta** (ingranaggio). Nessuna impostazione è stata tolta o cambiata: sono solo raggruppate.
+
+## Posta più veloce
+
+Il tempo se ne andava soprattutto nel collegarsi al server: ogni operazione (cartelle, elenco, lettura, segno «letto», controllo in background) apriva una nuova connessione TLS e rifaceva il login, che con molti provider richiede alcuni secondi. Ora:
+
+- **Una connessione tenuta aperta per casella:** dopo il primo accesso la sessione IMAP resta collegata e viene riusata dai comandi successivi e dal controllo in background (che la mantiene viva ogni minuto); se il server l'ha chiusa, il comando viene ripetuto una volta su una nuova connessione. Una sessione inutilizzata da più di 4 minuti viene scartata, e quando si cambiano password o server (o si rimuove la casella) la sessione si chiude.
+- **Timeout:** 15 s per collegarsi e 30 s di silenzio al massimo su una connessione: un server che non risponde non blocca più la sezione indefinitamente.
+- **Un solo comando per cartelle e messaggi:** `mail_overview` carica cartelle, contatori e messaggi della cartella aperta con una sola connessione, al posto di due comandi in fila.
+- **Si vede subito quello che c'era:** riaprendo Posta (o una cartella già vista) l'elenco precedente compare subito, con «Aggiornamento in corso…», e viene sostituito appena arriva la risposta. Si conservano in memoria soltanto le intestazioni, mai su disco né il testo dei messaggi.
+- **Lettore immediato:** cliccando un messaggio il lettore si apre subito con mittente e oggetto, e il testo arriva dopo («Caricamento…»).
+
+## Eliminazione di certificati e a cascata
+
+- **Certificati:** ogni certificato si può eliminare dalla tabella dei certificati (conferma richiesta). L'opera e la sua vendita non cambiano; il numero non viene riutilizzato. Un certificato emesso resta non modificabile: il trigger che lo bloccava in eliminazione è rimosso all'apertura dell'archivio (nessuna migrazione dello schema), quello contro le modifiche resta.
+- **Opera:** prima di eliminarla, l'app mostra cosa dipende da lei — i certificati (con numero), la vendita con importo e data, gli incassi registrati e i documenti allegati — e chiede conferma. Con la conferma tutto viene eliminato in un'unica transazione SQLite (allegati, incassi, vendita, certificati, opera) e i file senza altri riferimenti vengono rimossi dal disco. Senza dipendenze basta la conferma semplice; senza conferma sulle dipendenze il comando backend rifiuta l'eliminazione.
+- **Collezionista:** se ha vendite, la conferma avvisa che «verranno eliminate anche le vendite annesse» (con incassi e documenti). Le opere di quelle vendite tornano **disponibili**, i certificati già emessi restano. La stessa transazione elimina vendite, incassi, allegati e collezionista.
+- Comandi: `artwork_deletion_impact`, `collector_deletion_impact`, `delete_certificate`; `delete_artwork` e `delete_collector` accettano `cascade` (di default no).
+- **Eliminazione multipla:** nelle tabelle di opere, collezionisti e certificati ogni riga ha una casella e l'intestazione seleziona tutte le righe visibili. Con una selezione compare la barra «Elimina selezionati»: una sola conferma riepiloga quanti e quali record (i primi otto, poi «e altri N») e, sommati, certificati, vendite, incassi e documenti che verranno eliminati a cascata. Contano solo le righe visibili con i filtri attivi, così non si eliminano per errore record nascosti. L'eliminazione procede record per record; se uno fallisce l'app si ferma, ricarica l'elenco e indica quanti sono stati eliminati.

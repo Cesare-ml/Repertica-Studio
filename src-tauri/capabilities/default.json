@@ -8,6 +8,7 @@
     "core:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "os:allow-locale"
+    "os:allow-locale",
+    "notification:default"
   ]
 }

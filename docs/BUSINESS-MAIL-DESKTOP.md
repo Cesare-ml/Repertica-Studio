@@ -67,3 +67,7 @@ Le connessioni IMAP/SMTP sono autenticazioni reali e quindi richiedono una conne
 3. Caching locale opzionale cifrato di messaggi e allegati, con sincronizzazione UIDVALIDITY/QRESYNC e gestione conservativa dei conflitti.
 4. OAuth2 per provider compatibili; gestione invii e bozze IMAP sul server, senza sovrascritture automatiche.
 5. Editor ricco sicuro, template, firme multiple, rubrica locale e collegamenti espliciti con i collezionisti.
+
+## Aggiornamento automatico, numerino e notifiche
+
+La sezione Posta non ha più pulsanti di sincronizzazione: carica cartelle e messaggi da sola, aggiorna la cartella aperta ogni minuto e un controllo in background della posta in arrivo (ogni minuto, per ogni casella) mantiene il numero di messaggi da leggere nel menu e invia le notifiche di sistema, attive di default e disattivabili in **Impostazioni della posta**. Aprire un messaggio lo segna come letto. Le cartelle hanno nomi normali (Posta in arrivo, Inviata, Archivio, Spam, Cestino) invece dei nomi tecnici IMAP. I dettagli sono in [MVP.md](MVP.md).

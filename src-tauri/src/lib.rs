@@ -4,6 +4,7 @@ mod auto_backup;
 mod backup;
 mod brochures;
 mod business_mail;
+mod cascade;
 mod collectors;
 mod commands;
 pub mod db;
@@ -23,14 +24,17 @@ mod mcp_client;
 mod receipt_attachments;
 mod updater;
 mod reveal;
+mod mail_watch;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().pubkey(updater::PUBLIC_KEY).build())
         .manage(updater::UpdateState::default())
+        .manage(mail_watch::MailWatch::default())
         .setup(|app| {
             use tauri::Manager;
             let directory = app.path().app_local_data_dir()?;
@@ -38,6 +42,7 @@ pub fn run() {
             let database = db::open(directory)?;
             app.manage(database);
             auto_backup::start(app.handle().clone());
+            mail_watch::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -47,7 +52,11 @@ pub fn run() {
             business_mail::mail_test_account,
             business_mail::mail_list_folders,
             business_mail::mail_list_messages,
+            business_mail::mail_overview,
             business_mail::mail_read_message,
+            business_mail::mail_set_seen,
+            mail_watch::mail_sync_state,
+            mail_watch::mail_sync_now,
             business_mail::mail_list_drafts,
             business_mail::mail_save_draft,
             business_mail::mail_remove_draft,
@@ -60,6 +69,9 @@ pub fn run() {
             commands::save_artwork,
             commands::create_artwork_full,
             commands::delete_artwork,
+            cascade::artwork_deletion_impact,
+            cascade::collector_deletion_impact,
+            cascade::delete_certificate,
             collectors::list_collectors,
             collectors::save_collector,
             collectors::create_collector_full,
