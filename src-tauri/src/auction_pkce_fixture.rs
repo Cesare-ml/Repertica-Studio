@@ -186,7 +186,9 @@ impl BoundCode {
 #[test]
 fn fixture_code_binding_rejects_wrong_port_client_verifier_and_code() {
     for (client, other) in [(GrantClient::Auctions, GrantClient::StudioApi),
-                           (GrantClient::StudioApi, GrantClient::Auctions)] {
+                           (GrantClient::StudioApi, GrantClient::Auctions),
+                           (GrantClient::Auctions, GrantClient::AuctionsSettlement),
+                           (GrantClient::AuctionsSettlement, GrantClient::Auctions)] {
         let mut store = BoundCode::issue(&exchange(client), NOW, 1);
         for case in 0..5 {
             let mut grant = exchange(client);
@@ -211,7 +213,7 @@ fn fixture_code_binding_rejects_wrong_port_client_verifier_and_code() {
 
 #[test]
 fn fixture_code_binding_denies_expired_or_revoked_grants() {
-    for client in [GrantClient::Auctions, GrantClient::StudioApi] {
+    for client in [GrantClient::Auctions, GrantClient::StudioApi, GrantClient::AuctionsSettlement] {
         for (now, current_version, verified) in [
             (NOW + 90, 1, true),
             (NOW, 2, true),
@@ -230,7 +232,9 @@ fn fixture_code_binding_denies_expired_or_revoked_grants() {
 #[test]
 fn fixture_code_uses_issued_audience_not_local_expected_audience() {
     for (client, other) in [(GrantClient::Auctions, GrantClient::StudioApi),
-                           (GrantClient::StudioApi, GrantClient::Auctions)] {
+                           (GrantClient::StudioApi, GrantClient::Auctions),
+                           (GrantClient::Auctions, GrantClient::AuctionsSettlement),
+                           (GrantClient::AuctionsSettlement, GrantClient::Auctions)] {
         let mut store = BoundCode::issue(&exchange(client), NOW, 1);
         let mut grant = exchange(client);
         grant.expected_client = other;
