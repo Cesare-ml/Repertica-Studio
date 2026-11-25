@@ -560,3 +560,40 @@ pub(super) async fn dispatch_isolated(
         Request::Status {} | Request::Disconnect {} => Err("auction_invalid_request".into()),
     }
 }
+
+/// Compose the profile and separately scoped settlement grants only inside
+/// the isolated acceptance target. The renderer cannot supply a token or
+/// publication verifier. A profile change/disconnect invalidates settlement
+/// authority; a settlement grant never enables preview mutations.
+pub(super) async fn dispatch_workspace_isolated(
+    profile: &mut Option<NativePreviewSession>,
+    settlement: &mut Option<NativeAccessToken>,
+    conn: &mut Connection,
+    request: Request,
+    clock: impl Fn() -> Result<u64, Failure>,
+    verify_live: impl Fn(&super::settlement_store::PublishedBinding) -> Result<(), Failure>,
+) -> Result<Value, String> {
+    let now = clock();
+    let profile_active = profile.as_ref().is_some_and(|s|
+        now.is_ok_and(|t| s.token.bearer_for(GrantClient::Auctions, t).is_ok()));
+    if !profile_active || matches!(&request, Request::Disconnect {}) {
+        *settlement = None;
+    } else if let (Some(p), Some(s)) = (profile.as_ref(), settlement.as_ref()) {
+        if p.token.subject != s.subject ||
+            !now.is_ok_and(|t| s.bearer_for(GrantClient::AuctionsSettlement, t).is_ok()) {
+            *settlement = None;
+        }
+    }
+    if matches!(&request, Request::ReadSettlement { .. }) {
+        if !profile_active {
+            *profile = None;
+            return Err("settlement_access_denied".into());
+        }
+        return super::settlement_http::read_selected_summary(
+            conn, request, settlement.as_ref(), &clock,
+            |db, scope, work, subject| super::settlement_store::resolve_selected(
+                db, scope, work, subject, verify_live),
+        ).map_err(str::to_owned);
+    }
+    dispatch_isolated(profile, conn, request, clock).await
+}
