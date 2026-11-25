@@ -46,7 +46,7 @@ pub(super) struct TenantList {
     pub(super) tenants: Vec<Tenant>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Preview {
     pub(super) auction_id: String,
@@ -189,9 +189,16 @@ impl NativeAuctionsHttp {
     pub(super) async fn list_previews(
         &self, token: &NativeAccessToken, tenant_id: &str, clock: impl Fn() -> Result<u64, Failure>,
     ) -> Result<Vec<Preview>, Failure> {
+        self.list_previews_until(token, tenant_id, &clock, Instant::now()+DEADLINE).await
+    }
+
+    async fn list_previews_until(
+        &self, token: &NativeAccessToken, tenant_id: &str,
+        clock: &impl Fn() -> Result<u64, Failure>, deadline: Instant,
+    ) -> Result<Vec<Preview>, Failure> {
         if !valid_token(tenant_id, 3, 80) { return Err("invalid_tenant"); }
         let request = self.client.get(format!("{}?tenantId={tenant_id}", self.endpoint(PREVIEWS)?));
-        let (_, list): (_, PreviewList) = self.request(request, token, &clock, Instant::now()+DEADLINE,false).await?;
+        let (_, list): (_, PreviewList) = self.request(request, token, clock, deadline,false).await?;
         let mut seen = std::collections::HashSet::new();
         if list.auctions.len() > 100 || list.auctions.iter().any(|p| !valid_preview(p) || !seen.insert(p.auction_id.clone())) {
             return Err("auction_invalid_response");
@@ -312,6 +319,45 @@ pub(super) struct NativePreviewSession {
     api: NativeAuctionsHttp,
     token: NativeAccessToken,
     reviewed: Option<ReviewedAction>,
+    selected: Option<(String, bool)>,
+}
+
+/// Explicit allowlist for the future renderer's organization chooser. The
+/// transport response (including raw eligibility flags) is never forwarded.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PublicOrganization {
+    tenant_id: String,
+    artist_name: Option<String>,
+    role: String,
+    status: String,
+    publication_eligible: bool,
+    published_this_month: u32,
+}
+
+impl From<Tenant> for PublicOrganization {
+    fn from(t: Tenant) -> Self {
+        let publication_eligible = eligible_tenant(&t);
+        Self { tenant_id: t.tenant_id, artist_name: t.artist_name, role: t.role,
+            status: t.status, publication_eligible, published_this_month: t.published_this_month }
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PublicOrganizationPreviews {
+    organization: PublicOrganization,
+    previews: Vec<Preview>,
+}
+
+/// Receipt projection excludes the persisted idempotency key. The underlying
+/// native record retains it for exact retry/reconciliation.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PublicPreviewReceipt {
+    tenant_id: String,
+    auction_id: String,
+    slug: String,
 }
 
 #[derive(serde::Serialize)]
@@ -336,10 +382,52 @@ impl NativePreviewSession {
     pub(super) fn new(api: NativeAuctionsHttp, token: NativeAccessToken,
         now: u64) -> Result<Self, Failure> {
         token.bearer_for(GrantClient::Auctions, now)?;
-        Ok(Self { api, token, reviewed: None })
+        Ok(Self { api, token, reviewed: None, selected: None })
     }
 
     pub(super) fn cancel_review(&mut self) { self.reviewed = None; }
+
+    pub(super) fn clear_selection(&mut self) {
+        self.cancel_review();
+        self.selected = None;
+    }
+
+    /// No cached membership or automatic polling. Refresh invalidates both
+    /// selection and outstanding confirmation, even if the request fails.
+    pub(super) async fn organizations(
+        &mut self, clock: impl Fn() -> Result<u64, Failure>,
+    ) -> Result<Vec<PublicOrganization>, Failure> {
+        self.clear_selection();
+        let list = self.api.list_tenants(&self.token, clock).await?;
+        Ok(list.tenants.into_iter().map(PublicOrganization::from).collect())
+    }
+
+    /// Check fresh membership before requesting the selected tenant's list.
+    /// A viewer can read but cannot review a mutation. Both GETs share one
+    /// deadline; failed selection never leaves an earlier selection active.
+    pub(super) async fn select_organization(
+        &mut self, tenant_id: &str, clock: impl Fn() -> Result<u64, Failure>,
+    ) -> Result<PublicOrganizationPreviews, Failure> {
+        self.clear_selection();
+        if !valid_token(tenant_id, 3, 80) { return Err("invalid_tenant"); }
+        let deadline = Instant::now()+DEADLINE;
+        let list = self.api.tenants_until(&self.token, &clock, deadline).await?;
+        let tenant = list.tenants.into_iter().find(|t| t.tenant_id == tenant_id && t.status == "active")
+            .ok_or("auction_access_denied")?;
+        let organization = PublicOrganization::from(tenant);
+        let previews = self.api.list_previews_until(&self.token, tenant_id, &clock, deadline).await?;
+        self.token.bearer_for(GrantClient::Auctions, clock()?)?;
+        self.selected = Some((tenant_id.to_owned(), organization.publication_eligible));
+        Ok(PublicOrganizationPreviews { organization, previews })
+    }
+
+    fn require_selected(&self, body: &str) -> Result<(), String> {
+        let payload = parse_canonical_payload(body).map_err(str::to_owned)?;
+        if !self.selected.as_ref().is_some_and(|(id, eligible)| *eligible && id == &payload.tenant_id) {
+            return Err("auction_access_denied".into());
+        }
+        Ok(())
+    }
 
     fn stage(&mut self, artwork_id: &str, scope: &str, revision: &str,
         raw: String, body: &str, reconcile: bool) -> PublicReview {
@@ -356,6 +444,7 @@ impl NativePreviewSession {
         scope: &str, revision: &str, public_body: &str, now: u64) -> Result<PublicReview, String> {
         self.cancel_review();
         self.token.bearer_for(GrantClient::Auctions, now).map_err(str::to_owned)?;
+        self.require_selected(public_body)?;
         check_new_schedule(public_body, now)?;
         let raw = reviewable_record(conn, artwork_id, scope, revision, public_body)?;
         Ok(self.stage(artwork_id, scope, revision, raw, public_body, false))
@@ -369,6 +458,7 @@ impl NativePreviewSession {
         self.token.bearer_for(GrantClient::Auctions, now).map_err(str::to_owned)?;
         let attempt = reconciliation::load(conn, artwork_id, scope, revision)?;
         if attempt.receipt.is_some() { return Err("auction_already_confirmed".into()); }
+        self.require_selected(&attempt.pending.body)?;
         let raw: String = conn.query_row(
             "SELECT record_json FROM auction_drafts WHERE artwork_id=?1 AND revision=?2",
             params![artwork_id, revision], |r| r.get(0)).map_err(|_| "auction_draft_conflict".to_string())?;
@@ -395,7 +485,7 @@ impl NativePreviewSession {
     }
 
     pub(super) async fn confirm_reconcile(&mut self, conn: &mut Connection, id: &str,
-        clock: impl Fn() -> Result<u64, Failure>) -> Result<StoredReceipt, String> {
+        clock: impl Fn() -> Result<u64, Failure>) -> Result<PublicPreviewReceipt, String> {
         let r = self.take(id, true)?;
         self.token.bearer_for(GrantClient::Auctions, clock().map_err(str::to_owned)?)
             .map_err(str::to_owned)?;
@@ -407,7 +497,9 @@ impl NativePreviewSession {
         if raw != r.raw || attempt.pending.body != r.body || attempt.receipt.is_some() {
             return Err("auction_draft_conflict".into());
         }
-        self.api.reconcile_preview(conn, &self.token, &r.artwork_id, &r.scope,
-            &r.revision, clock).await
+        let receipt = self.api.reconcile_preview(conn, &self.token, &r.artwork_id, &r.scope,
+            &r.revision, clock).await?;
+        Ok(PublicPreviewReceipt { tenant_id: receipt.tenant_id,
+            auction_id: receipt.auction_id, slug: receipt.slug })
     }
 }

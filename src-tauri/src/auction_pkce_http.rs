@@ -690,7 +690,19 @@ mod tests {
             assert!(read_resource_request(&mut s,"GET /api/studio/tenants HTTP/1.1",Some(bearer),None).is_empty());
             reply(&mut s,"200 OK",&private);
             drop(s);
-            for role in ["viewer","owner","owner","owner"] { resource_tenants(&listener,bearer,role); }
+            for role in ["viewer","owner","owner"] { resource_tenants(&listener,bearer,role); }
+            // The chooser and selection check fresh memberships. Unknown tenant
+            // must not cause a preview request. Viewer can read only.
+            resource_tenants(&listener,bearer,"owner"); // refresh
+            resource_tenants(&listener,bearer,"owner"); // unknown tenant
+            for role in ["viewer","owner"] {
+                resource_tenants(&listener,bearer,role);
+                let mut s=accept(&listener);
+                assert!(read_resource_request(&mut s,"GET /api/studio/previews?tenantId=tenant-test HTTP/1.1",Some(bearer),None).is_empty());
+                reply(&mut s,"200 OK",&json!({"auctions":[{"auctionId":RESOURCE_ID,"slug":"artist--art","title":"Art",
+                    "status":"preview","startsAt":"2027-01-15T08:01:40.000Z","endsAt":"2027-01-16T08:01:40.000Z"}]}));
+            }
+            resource_tenants(&listener,bearer,"owner"); // confirm prepare
             // Only the key generated and persisted by native preparation is
             // accepted by the fixture; explicit reconciliation follows.
             let key = key_rx.recv_timeout(Duration::from_secs(15)).unwrap();
@@ -735,6 +747,22 @@ mod tests {
             conn.execute_batch("DROP TRIGGER ignore_preview").unwrap();
             // The orchestration owns the verified profile token and one-shot review.
             let mut session = NativePreviewSession::new(api, token, NOW).unwrap();
+            assert_eq!(session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).err().as_deref(),Some("auction_access_denied"));
+            let orgs = serde_json::to_value(session.organizations(||Ok(NOW)).await.unwrap()).unwrap();
+            assert_eq!(orgs, json!([{"tenantId":"tenant-test","artistName":"Synthetic artist","role":"owner",
+                "status":"active","publicationEligible":true,"publishedThisMonth":1}]));
+            assert_eq!(session.select_organization("tenant-test&other=1",||Ok(NOW)).await.err(),Some("invalid_tenant"));
+            assert_eq!(session.select_organization("tenant-other",||Ok(NOW)).await.err(),Some("auction_access_denied"));
+            let viewer=serde_json::to_value(session.select_organization("tenant-test",||Ok(NOW)).await.unwrap()).unwrap();
+            assert_eq!(viewer["organization"]["publicationEligible"],false);
+            assert_eq!(viewer["previews"][0]["auctionId"],RESOURCE_ID);
+            assert_eq!(session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).err().as_deref(),Some("auction_access_denied"));
+            let owner=serde_json::to_value(session.select_organization("tenant-test",||Ok(NOW)).await.unwrap()).unwrap();
+            assert_eq!(owner["organization"]["publicationEligible"],true);
+            assert_eq!(owner["previews"][0]["status"],"preview");
+            assert_eq!(owner["previews"][0].as_object().unwrap().len(),6);
+            let other=RESOURCE_BODY.replace("tenant-test","tenant-other");
+            assert_eq!(session.review_new(&conn,"a",&scope,&revision,&other,NOW).err().as_deref(),Some("auction_access_denied"));
             assert_eq!(session.confirm_prepare(&mut conn,"unreviewed",||Ok(NOW)).await.unwrap_err(),"auction_review_required");
             let review = session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).unwrap();
             assert_eq!(review.public_body, RESOURCE_BODY);
@@ -780,8 +808,11 @@ mod tests {
             assert_eq!(saved["pending"], value["pending"]);
             assert_eq!(saved["receipt"]["auctionId"], RESOURCE_ID);
             assert_eq!(session.review_pending(&conn,"a",&scope,&confirmed_revision,NOW).err().as_deref(),Some("auction_already_confirmed"));
-            assert_eq!(serde_json::to_value(&confirmed).unwrap()["auctionId"], RESOURCE_ID);
+            assert_eq!(serde_json::to_value(&confirmed).unwrap(),
+                json!({"tenantId":"tenant-test","auctionId":RESOURCE_ID,"slug":"artist--art"}));
             assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
+            session.clear_selection();
+            assert_eq!(session.review_new(&conn,"a",&scope,&confirmed_revision,RESOURCE_BODY,NOW).err().as_deref(),Some("auction_access_denied"));
         });
         let listener=worker.join().unwrap();
         assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
