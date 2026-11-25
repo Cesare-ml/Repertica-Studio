@@ -4,6 +4,21 @@
  * while migrating legacy templates; all new UI strings must be added here.
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
+
+export function chooseLanguage(input: string | null | undefined): AppLanguage {
+  // POSIX locales can include an encoding and/or modifier (e.g. de.UTF-8@euro).
+  const code = (input ?? '').trim().split(/[-_.@]/)[0].toLowerCase();
+  return ['it', 'en', 'es', 'fr', 'de'].includes(code) ? code as AppLanguage : 'en';
+}
+
+export function translateLabel(key: string, language: AppLanguage,
+  dictionaries: Record<AppLanguage, Record<string, string>>): string {
+  const selected = chooseLanguage(language);
+  if (selected === 'it') return key;
+  const own = (dictionary: Record<string, string>): string | undefined =>
+    Object.prototype.hasOwnProperty.call(dictionary, key) ? dictionary[key] : undefined;
+  return own(dictionaries[selected]) ?? own(dictionaries.en) ?? key;
+}
 const EN: Record<string,string> = {
   "Posta": "Mail",
   "+ Nuova brochure": "+ New brochure",
@@ -3001,11 +3016,6 @@ const DE:Record<string,string> = {
   "Altre opere dell’archivio": "Weitere Werke im Archiv",
 };
 const translations:Record<AppLanguage,Record<string,string>>={en:EN,it:{},es:ES,fr:FR,de:DE};
-export function chooseLanguage(input:string|null|undefined):AppLanguage {
-  const code=(input||'').split(/[-_]/)[0].toLowerCase();
-  return ['it','en','es','fr','de'].includes(code) ? code as AppLanguage : 'en';
-}
 export function translate(key:string,language:AppLanguage):string {
-  if (language==='it') return key;
-  return translations[language][key] ?? translations.en[key] ?? key;
+  return translateLabel(key, language, translations);
 }
