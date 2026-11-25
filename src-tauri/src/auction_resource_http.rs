@@ -556,7 +556,9 @@ pub(super) async fn dispatch_isolated(
         Request::ConfirmReconcile { confirmation_id } =>
             project(serde_json::to_value(s.confirm_reconcile(conn, &confirmation_id, &clock).await?)),
         // Profile grants cannot read private settlement data.
-        Request::ReadSettlement { .. } => Err("settlement_access_denied".into()),
+        Request::ReadSettlement { .. } | Request::PollSettlement { .. } |
+        Request::HistorySettlement { .. } | Request::AckSettlement { .. } =>
+            Err("settlement_access_denied".into()),
         Request::Status {} | Request::Disconnect {} => Err("auction_invalid_request".into()),
     }
 }
@@ -584,16 +586,34 @@ pub(super) async fn dispatch_workspace_isolated(
             *settlement = None;
         }
     }
-    if matches!(&request, Request::ReadSettlement { .. }) {
+    if matches!(&request, Request::ReadSettlement { .. } | Request::PollSettlement { .. } |
+        Request::HistorySettlement { .. } | Request::AckSettlement { .. }) {
         if !profile_active {
             *profile = None;
             return Err("settlement_access_denied".into());
         }
-        let outcome = super::settlement_http::read_selected_summary(
-            conn, request, settlement.as_ref(), &clock,
-            |db, scope, work, subject| super::settlement_store::resolve_selected(
-                db, scope, work, subject, verify_live),
-        );
+        let outcome = {
+            let p = profile.as_ref().ok_or("settlement_access_denied")?;
+            let guarded_clock = || {
+                let now = clock()?;
+                p.token.bearer_for(GrantClient::Auctions, now)
+                    .map_err(|_| "settlement_access_denied")?;
+                Ok(now)
+            };
+            if matches!(&request, Request::ReadSettlement { .. }) {
+                super::settlement_http::read_selected_summary(
+                    conn, request, settlement.as_ref(), &guarded_clock,
+                    |db, scope, work, subject| super::settlement_store::resolve_selected(
+                        db, scope, work, subject, &verify_live),
+                )
+            } else if p.reviewed.is_some() {
+                Err("auction_review_required")
+            } else {
+                super::settlement_http::dispatch_selected_remote(
+                    p.api.addr, conn, request, settlement.as_ref(), &guarded_clock, &verify_live,
+                ).await
+            }
+        };
         // Never project a result if either grant expires while resolving it.
         let after = clock();
         if !profile.as_ref().is_some_and(|s|

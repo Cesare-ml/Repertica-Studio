@@ -69,8 +69,14 @@ impl NativeSettlementHttp {
 
     pub(super) async fn ack(&self, c: &mut Connection, b: &Binding,
         token: &NativeAccessToken, clock: impl Fn() -> Result<u64, Failure>) -> Result<(), Failure> {
+        self.ack_reviewed(c, b, token, None, clock).await
+    }
+
+    async fn ack_reviewed(&self, c: &mut Connection, b: &Binding,
+        token: &NativeAccessToken, expected: Option<u64>, clock: impl Fn() -> Result<u64, Failure>) -> Result<(), Failure> {
         self.authorize(token, b, &clock)?;
         let target = ledger::ack_target(c, b)?;
+        if expected.is_some_and(|n| n != target.sequence) { return Err("settlement_stale_ack"); }
         let bytes = self.request(token, b, json!({"action":"ack","auctionId":b.auction,
             "tenantId":b.tenant,"resultId":target.result_id,
             "deliverySequence":target.sequence}), &clock).await?;
@@ -113,4 +119,45 @@ pub(super) fn read_selected_summary(
     let summary = ledger::summary(conn, &binding)?;
     token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
     serde_json::to_value(summary).map_err(|_| "settlement_invalid_response")
+}
+
+// One explicit operation; no automatic pagination, retries or ACK.
+pub(super) async fn dispatch_selected_remote(
+    addr: SocketAddrV4, conn: &mut Connection, request: super::resource_http::ipc::Request,
+    token: Option<&NativeAccessToken>, clock: impl Fn() -> Result<u64, Failure>,
+    verify_live: impl Fn(&super::settlement_store::PublishedBinding) -> Result<(), Failure>,
+) -> Result<Value, Failure> {
+    use super::resource_http::ipc::Request;
+    enum Operation { Poll, History, Ack(u64) }
+    let (work, scope, op) = match request {
+        Request::PollSettlement { artwork_id, scope } => (artwork_id, scope, Operation::Poll),
+        Request::HistorySettlement { artwork_id, scope } => (artwork_id, scope, Operation::History),
+        Request::AckSettlement { artwork_id, scope, expected_sequence } =>
+            (artwork_id, scope, Operation::Ack(expected_sequence)),
+        _ => return Err("settlement_invalid_request"),
+    };
+    let token = token.ok_or("settlement_access_denied")?;
+    token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
+    let uuid = |s: &str| uuid::Uuid::parse_str(s).is_ok_and(|u| u.to_string() == s);
+    if !uuid(&work) || !uuid(&scope) { return Err("settlement_binding_mismatch"); }
+    let resolve = |db: &Connection| super::settlement_store::resolve_selected(
+        db, &scope, &work, &token.subject, &verify_live
+    )?.ok_or("settlement_binding_unavailable");
+    let binding = resolve(conn)?;
+    let client = NativeSettlementHttp::new(addr)?;
+    match op {
+        Operation::Poll => { client.poll(conn, &binding, token, &clock).await?; }
+        Operation::History => { client.history(conn, &binding, token, &clock).await?; }
+        Operation::Ack(expected) => {
+            let summary = ledger::summary(conn, &binding)?.ok_or("settlement_not_ingested")?;
+            if expected != summary.sequence { return Err("settlement_stale_ack"); }
+            if summary.acknowledged_at.is_none() {
+                client.ack_reviewed(conn, &binding, token, Some(expected), &clock).await?;
+            }
+        }
+    }
+    token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
+    if resolve(conn)? != binding { return Err("settlement_binding_mismatch"); }
+    token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
+    serde_json::to_value(ledger::summary(conn, &binding)?).map_err(|_| "settlement_invalid_response")
 }

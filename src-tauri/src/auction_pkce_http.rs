@@ -604,6 +604,70 @@ mod tests {
         assert_eq!(stamp,"2026-11-25T04:02:00.000Z");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
 
+        // Exercise explicit operations on the same signed fixture and archive.
+        let poll_request = || serde_json::from_value(json!({"action":"pollSettlement",
+            "artworkId":binding.local_work,"scope":binding.scope})).unwrap();
+        let history_request = || serde_json::from_value(json!({"action":"historySettlement",
+            "artworkId":binding.local_work,"scope":binding.scope})).unwrap();
+        let ack_request = |sequence: u64| serde_json::from_value(json!({"action":"ackSettlement",
+            "artworkId":binding.local_work,"scope":binding.scope,"expectedSequence":sequence})).unwrap();
+        let listener = {
+            let mut active = Some(resource_http::NativePreviewSession::new(
+                resource_http::NativeAuctionsHttp::new(addr).unwrap(),verified_resource_token(),NOW).unwrap());
+            let claims = verified_claims(signed,&keys,GrantClient::AuctionsSettlement,NOW).unwrap();
+            let mut scoped = Some(NativeAccessToken { bearer:signed.to_owned(),
+                client:GrantClient::AuctionsSettlement, expires_at:claims.exp, subject:claims.sub });
+            use super::resource_http::dispatch_workspace_isolated as dispatch;
+            tauri::async_runtime::block_on(async {
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),
+                    |_| Err("settlement_access_denied")).await.unwrap_err(),"settlement_access_denied");
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(2),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_stale_ack");
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3),||Ok(NOW),verify)
+                    .await.unwrap(),summary);
+            });
+            assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+            let bearer = signed.to_owned();
+            let worker = thread::spawn(move || {
+                let poll = json!({"action":"poll","auctionId":"fixture-auction","tenantId":"fixture-tenant"});
+                let history = json!({"action":"history","auctionId":"fixture-auction","tenantId":"fixture-tenant","afterSequence":3});
+                let ack = json!({"action":"ack","auctionId":"fixture-auction","tenantId":"fixture-tenant",
+                    "resultId":"fixture-auction:1:fulfillment","deliverySequence":4});
+                let latest = ledger::delivery(4,"review_required");
+                let mut acknowledged = latest.clone();
+                acknowledged["acknowledged_at"] = json!("2026-11-25T04:03:00.000Z");
+                let mut confirmation = ledger::reply(acknowledged);
+                confirmation["replayed"] = json!(false);
+                for (expected,body) in [
+                    (history,ledger::page(vec![latest.clone()],4,None)),
+                    (poll,ledger::reply(latest)),
+                    (ack,confirmation),
+                ] {
+                    let mut stream = accept(&listener);
+                    let bytes = read_resource_request(&mut stream,
+                        "POST /api/studio/settlement/delivery HTTP/1.1",Some(&bearer),None);
+                    assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(),expected);
+                    reply(&mut stream,"200 OK",&body);
+                }
+                listener
+            });
+            tauri::async_runtime::block_on(async {
+                let updated = dispatch(&mut active,&mut scoped,&mut db,history_request(),||Ok(NOW),verify).await.unwrap();
+                assert_eq!(updated["sequence"],4);
+                assert!(updated["acknowledgedAt"].is_null());
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),verify)
+                    .await.unwrap(),updated);
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_stale_ack");
+                let ack = dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify).await.unwrap();
+                assert_eq!(ack["acknowledgedAt"],"2026-11-25T04:03:00.000Z");
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify)
+                    .await.unwrap(),ack);
+            });
+            worker.join().unwrap()
+        };
+        let summary = serde_json::to_value(ledger::summary(&mut db,&binding).unwrap()).unwrap();
+        assert_eq!(ledger::count(&db),4);
         // Same typed workspace dispatch as the profile UI; the settlement
         // grant is independent and the verifier is native-only.
         use super::resource_http::{dispatch_workspace_isolated, NativePreviewSession};

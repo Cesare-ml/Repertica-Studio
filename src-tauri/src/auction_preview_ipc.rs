@@ -8,6 +8,9 @@ use serde_json::{json, Value};
 pub enum Request {
     Status {},
     ReadSettlement { artwork_id: String, scope: String },
+    PollSettlement { artwork_id: String, scope: String },
+    HistorySettlement { artwork_id: String, scope: String },
+    AckSettlement { artwork_id: String, scope: String, expected_sequence: u64 },
     Disconnect {},
     Organizations {},
     SelectOrganization { tenant_id: String },
@@ -45,6 +48,9 @@ mod tests {
     fn release_dispatch_is_fail_closed_for_every_remote_operation() {
         for request in [
             json!({"action":"readSettlement","artworkId":"a","scope":"s"}),
+            json!({"action":"pollSettlement","artworkId":"a","scope":"s"}),
+            json!({"action":"historySettlement","artworkId":"a","scope":"s"}),
+            json!({"action":"ackSettlement","artworkId":"a","scope":"s","expectedSequence":1}),
             json!({"action":"organizations"}),
             json!({"action":"selectOrganization","tenantId":"tenant-test"}),
             json!({"action":"clearSelection"}), json!({"action":"cancelReview"}),
@@ -74,6 +80,10 @@ mod tests {
             json!({"action":"confirmPrepare","confirmationId":"c","idempotencyKey":"x"}),
             json!({"action":"confirmReconcile","confirmationId":"c","publicBody":"{}"}),
             json!({"action":"reviewPending","artworkId":"a","scope":"s","revision":"r","tenantId":"other"}),
+            json!({"action":"pollSettlement","artworkId":"a","scope":"s","auctionId":"other"}),
+            json!({"action":"historySettlement","artworkId":"a","scope":"s","afterSequence":99}),
+            json!({"action":"ackSettlement","artworkId":"a","scope":"s"}),
+            json!({"action":"ackSettlement","artworkId":"a","scope":"s","expectedSequence":1,"resultId":"other"}),
             json!({"action":"connect","provider":"pilot"}),
         ] {
             assert!(serde_json::from_value::<Request>(invalid).is_err());
