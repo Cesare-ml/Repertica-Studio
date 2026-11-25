@@ -127,17 +127,32 @@ fn require_regular_media_dir(directory: &std::path::Path) -> Result<(), String> 
     Ok(())
 }
 /// Write a picture into the media store (temporary file, then rename) and return its relative path.
-pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: &str) -> Result<String, String> {
+/// The injected writer makes a short/disk-full write testable without filling an actual drive.
+fn store_media_with_writer<F>(
+    directory: &std::path::Path, bytes: &[u8], extension: &str, write: F,
+) -> Result<String, String>
+where
+    F: FnOnce(&std::path::Path, &[u8]) -> std::io::Result<()>,
+{
     require_regular_media_dir(directory)?;
     let name = format!("{}.{extension}", Uuid::new_v4());
     let relative = format!("media/{name}");
     let temporary = directory.join(format!("media/{name}.tmp"));
-    fs::write(&temporary, bytes).map_err(err)?;
+    // A failing fs::write may leave a partially written .tmp file behind.
+    // Clean it even when the rename was never attempted, keeping backups tidy.
+    if let Err(e) = write(temporary.as_path(), bytes) {
+        let _ = fs::remove_file(&temporary);
+        return Err(err(e));
+    }
     if let Err(e) = fs::rename(&temporary, directory.join(&relative)) {
         let _ = fs::remove_file(&temporary);
         return Err(err(e));
     }
     Ok(relative)
+}
+
+pub(crate) fn store_media(directory: &std::path::Path, bytes: &[u8], extension: &str) -> Result<String, String> {
+    store_media_with_writer(directory, bytes, extension, |path, data| fs::write(path, data))
 }
 /// Create an artwork with an automatic archive code, its photographs and an optional sale in
 /// a single transaction. Every picture is validated before anything is written, and files
@@ -273,30 +288,42 @@ pub fn delete_artwork(db: State<'_, Database>, id: String, cascade: Option<bool>
 pub(crate) fn delete_artwork_core(db: &Database, id: &str, cascade: bool) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(err)?;
     let id = id.to_string();
-    let old_image = artwork_by_id(&conn, &id)?.image_path;
-    let raw_path: Option<String> = conn.query_row("SELECT media_path FROM artwork_raw_files WHERE artwork_id=?1", params![id], |r| r.get(0)).optional().map_err(err)?;
-    // ON DELETE CASCADE removes gallery rows; clean their local files only after SQL succeeds.
+    // Keep the media references, cascading DELETE and final-state check in one
+    // transaction. Imported archives may have SQLite triggers that ignore or
+    // undo a DELETE without reporting an SQL error.
+    let tx = conn.transaction().map_err(err)?;
+    let old_image = artwork_by_id(&tx, &id)?.image_path;
+    let raw_path: Option<String> = tx.query_row("SELECT media_path FROM artwork_raw_files WHERE artwork_id=?1", params![id], |r| r.get(0)).optional().map_err(err)?;
     let gallery_paths: Vec<String> = {
-        let mut statement = conn.prepare("SELECT image_path FROM artwork_images WHERE artwork_id=?1").map_err(err)?;
-        // Collect while the prepared statement is still alive (rusqlite Rows borrows it).
+        let mut statement = tx.prepare("SELECT image_path FROM artwork_images WHERE artwork_id=?1").map_err(err)?;
         let paths = statement.query_map(params![id], |r| r.get(0)).map_err(err)?
             .collect::<Result<Vec<_>,_>>().map_err(err)?;
         paths
     };
     // Do not delete DB rows if a swapped media directory could redirect cleanup.
-    let impact = crate::cascade::artwork_impact(&conn, &id)?;
+    let impact = crate::cascade::artwork_impact(&tx, &id)?;
     if !impact.is_empty() && !cascade {
         return Err("Non puoi eliminare un'opera collegata a vendite o certificati".into());
     }
     if old_image.is_some() || raw_path.is_some() || !gallery_paths.is_empty() || impact.attachments > 0 || !impact.certificates.is_empty() {
         require_regular_media_dir(&db.directory)?;
     }
-    let tx = conn.transaction().map_err(err)?;
     let mut leftovers = crate::cascade::remove_sales(&tx, "artwork_id", &id)?;
     leftovers.extend(crate::cascade::remove_certificates(&tx, &id)?);
-    let affected = tx.execute("DELETE FROM artworks WHERE id=?1",params![id]).map_err(|_|"Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
-    if affected == 0 { return Err("Opera non trovata".into()); }
+    let affected = tx.execute("DELETE FROM artworks WHERE id=?1", params![id])
+        .map_err(|_| "Non puoi eliminare un'opera collegata a vendite o certificati".to_string())?;
+    if affected != 1 {
+        return Err("Opera non eliminata: verifica l'archivio SQLite".into());
+    }
+    let still_exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)", params![id], |row| row.get(0),
+    ).map_err(err)?;
+    if still_exists {
+        // Also roll back the cascaded deletion of gallery and RAW references.
+        return Err("Opera non eliminata completamente: verifica l'archivio SQLite".into());
+    }
     tx.commit().map_err(err)?;
+    // Never unlink local files until the row deletion has actually committed.
     if let Some(path) = raw_path { crate::raw_files::remove_file(&db.directory, &path); }
     if let Some(path) = old_image { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &path); }
     for path in gallery_paths { crate::media::remove_file_unless_catalogued(&conn, &db.directory, &path); }
@@ -586,6 +613,77 @@ mod tests {
     fn cover_path(db: &Database) -> String {
         let conn = db.conn.lock().unwrap();
         artwork_by_id(&conn, "a").unwrap().image_path.unwrap()
+    }
+
+    #[test]
+    fn delete_artwork_is_atomic_when_imported_sqlite_triggers_ignore_or_restore_the_row() {
+        let (_temp, db) = artwork_with_cover();
+        let cover = db.directory.join(cover_path(&db));
+        let gallery = "media/deletion-gallery.jpg";
+        let raw = "media/raw-deletion-fixture.dng";
+        fs::write(db.directory.join(gallery), [0xff, 0xd8, 0xff, 0x02]).unwrap();
+        fs::write(db.directory.join(raw), b"II*\\0raw").unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO artwork_images(id,artwork_id,image_path,created_at,sort_order)
+                 VALUES('photo','a',?1,'t',1)",
+                params![gallery],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at)
+                 VALUES('a',?1,'original.dng',7,?2,'t')",
+                params![raw, "a".repeat(64)],
+            ).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER ignore_artwork_delete BEFORE DELETE ON artworks
+                 BEGIN SELECT RAISE(IGNORE); END;",
+            ).unwrap();
+        }
+
+        let error = delete_artwork_core(&db, "a", false).unwrap_err();
+        assert!(error.contains("non eliminata"), "{error}");
+        assert!(cover.exists());
+        assert!(db.directory.join(gallery).exists());
+        assert!(db.directory.join(raw).exists());
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER ignore_artwork_delete;
+                 CREATE TRIGGER restore_artwork_delete AFTER DELETE ON artworks
+                 BEGIN
+                     INSERT INTO artworks(id,code,title,status,created_at,updated_at)
+                     VALUES(OLD.id,OLD.code,OLD.title,OLD.status,OLD.created_at,OLD.updated_at);
+                 END;",
+            ).unwrap();
+        }
+
+        // DELETE reports one row, but the trigger recreates it after SQLite
+        // cascades gallery/RAW records. The rollback must restore those links.
+        let error = delete_artwork_core(&db, "a", false).unwrap_err();
+        assert!(error.contains("non eliminata completamente"), "{error}");
+        assert!(cover.exists());
+        assert!(db.directory.join(gallery).exists());
+        assert!(db.directory.join(raw).exists());
+        {
+            let conn = db.conn.lock().unwrap();
+            assert!(artwork_by_id(&conn, "a").is_ok());
+            for (table, column) in [
+                ("artwork_images", "artwork_id"),
+                ("artwork_raw_files", "artwork_id"),
+            ] {
+                let sql = format!("SELECT count(*) FROM {table} WHERE {column}='a'");
+                let count: i64 = conn.query_row(&sql, [], |row| row.get(0)).unwrap();
+                assert_eq!(count, 1, "{table} must be restored by rollback");
+            }
+            conn.execute_batch("DROP TRIGGER restore_artwork_delete;").unwrap();
+        }
+
+        delete_artwork_core(&db, "a", false).unwrap();
+        assert!(!cover.exists());
+        assert!(!db.directory.join(gallery).exists());
+        assert!(!db.directory.join(raw).exists());
+        assert!(artwork_by_id(&db.conn.lock().unwrap(), "a").is_err());
     }
 
     #[test]
@@ -1191,6 +1289,29 @@ mod tests {
         let counter: i64 = db.conn.lock().unwrap()
             .query_row("SELECT last_number FROM certificate_counter", [], |r| r.get(0)).unwrap();
         assert_eq!(counter, 2, "a rejected certificate must not consume a number");
+    }
+
+    #[test]
+    fn partial_media_write_failure_cleans_temp_and_preserves_existing_photos() {
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path().join("media");
+        fs::create_dir(&media).unwrap();
+        fs::write(media.join("existing.png"), b"untouched").unwrap();
+
+        // Simulate a disk that fills after part of the photo has been written.
+        // The helper must not leak a .tmp file into future archive backups.
+        let failure = store_media_with_writer(dir.path(), b"abcdefgh", "png", |temp, bytes| {
+            fs::write(temp, &bytes[..4])?;
+            Err(std::io::Error::from_raw_os_error(if cfg!(windows) { 112 } else { 28 }))
+        }).unwrap_err();
+        assert!(failure.contains("Spazio su disco"), "{failure}");
+        let remaining = fs::read_dir(&media).unwrap()
+            .map(|item| item.unwrap().file_name()).collect::<Vec<_>>();
+        assert_eq!(remaining, vec![std::ffi::OsString::from("existing.png")]);
+        assert_eq!(fs::read(media.join("existing.png")).unwrap(), b"untouched");
+
+        let relative = store_media(dir.path(), b"valid-image-bytes", "png").unwrap();
+        assert_eq!(fs::read(dir.path().join(relative)).unwrap(), b"valid-image-bytes");
     }
 
     #[test]

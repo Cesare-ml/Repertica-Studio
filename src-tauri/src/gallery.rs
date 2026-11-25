@@ -378,17 +378,29 @@ fn gallery_media_has_other_references(
 
 pub(crate) fn delete_gallery_image_core(db: &Database, image_id: &str) -> Result<(), String> {
     require_regular_media_dir(db)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let relative: String = conn.query_row(
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let relative: String = tx.query_row(
         "SELECT image_path FROM artwork_images WHERE id=?1",
         params![image_id], |r| r.get(0),
     ).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
     if !relative_media_path(&relative) { return Err("Percorso media non valido".into()); }
     // Preserve bytes also referenced elsewhere; do not scope this to one artwork.
-    let preserve = gallery_media_has_other_references(&conn, image_id, &relative)?;
-    conn.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+    let preserve = gallery_media_has_other_references(&tx, image_id, &relative)?;
+    // RAISE(IGNORE) may suppress a delete; an AFTER DELETE trigger in an
+    // imported database can even reinsert the row while reporting one deletion.
+    // Check the final state *inside* the transaction before touching media.
+    let deleted = tx.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+    if deleted != 1 { return Err("Eliminazione fotografia non riuscita: il collegamento non è stato rimosso".into()); }
+    let remains: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artwork_images WHERE id=?1)",
+        params![image_id], |r| r.get(0),
+    ).map_err(err)?;
+    if remains { return Err("Eliminazione fotografia non riuscita: il collegamento è ancora presente".into()); }
+    tx.commit().map_err(err)?;
     if !preserve {
         // A failed unlink leaves an unreferenced file, never a broken DB link.
+        // This also rechecks references created with a different image ID.
         crate::media::remove_file_unless_catalogued(&conn, &db.directory, &relative);
     }
     Ok(())
@@ -624,6 +636,82 @@ mod tests {
         assert!(!db.directory.join(relative).exists());
     }
 
+
+    #[test]
+    fn gallery_deletion_rejected_by_imported_trigger_preserves_photo_and_reference() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        let relative = "media/blocked.jpg";
+        let file = db.directory.join(relative);
+        let jpeg = [0xff, 0xd8, 0xff, 0x01];
+        fs::write(&file, jpeg).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','ART','Artwork','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('photo','art',?1,'t')", params![relative]).unwrap();
+            // Some externally edited SQLite archives suppress a deletion
+            // without producing an SQL error.
+            conn.execute_batch("CREATE TRIGGER block_gallery_photo
+                BEFORE DELETE ON artwork_images WHEN OLD.id='photo'
+                BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+
+        let error = delete_gallery_image_core(&db, "photo").unwrap_err();
+        assert!(error.contains("non riuscita"));
+        assert_eq!(fs::read(&file).unwrap(), jpeg);
+        assert_eq!(list_core(&db, "art").unwrap().len(), 1);
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("DROP TRIGGER block_gallery_photo").unwrap();
+        }
+        delete_gallery_image_core(&db, "photo").unwrap();
+        assert!(!file.exists());
+        assert!(list_core(&db, "art").unwrap().is_empty());
+    }
+
+    #[test]
+    fn gallery_deletion_rolls_back_if_an_imported_trigger_recreates_the_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(tmp.path().join("app")).unwrap();
+        let relative = "media/restored.jpg";
+        let path = db.directory.join(relative);
+        let jpeg = [0xff, 0xd8, 0xff, 0x07];
+        fs::write(&path, jpeg).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','ART','Artwork','t','t');").unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,kind)
+                VALUES('photo','art',?1,'Original caption','t',4,'DETAIL')", params![relative]).unwrap();
+            // A DELETE reports one affected row, but this trigger restores it.
+            // Without a transactional final-state check, the file may be unlinked.
+            conn.execute_batch("CREATE TRIGGER restore_gallery_photo
+                AFTER DELETE ON artwork_images WHEN OLD.id='photo'
+                BEGIN
+                    INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,kind)
+                    VALUES(OLD.id,OLD.artwork_id,OLD.image_path,OLD.caption,OLD.created_at,OLD.sort_order,OLD.kind);
+                END;").unwrap();
+        }
+        let error = delete_gallery_image_core(&db, "photo").unwrap_err();
+        assert!(error.contains("non riuscita"), "{error}");
+        assert_eq!(fs::read(&path).unwrap(), jpeg);
+        let images = list_core(&db, "art").unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].id, "photo");
+        assert_eq!(images[0].caption.as_deref(), Some("Original caption"));
+        assert_eq!(images[0].kind, "DETAIL");
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("DROP TRIGGER restore_gallery_photo").unwrap();
+        }
+        delete_gallery_image_core(&db, "photo").unwrap();
+        assert!(!path.exists());
+        assert!(list_core(&db, "art").unwrap().is_empty());
+    }
 
     #[test]
     fn gallery_deletion_keeps_shared_covers_and_other_artworks_historical_photos() {

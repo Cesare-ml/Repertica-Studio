@@ -25,9 +25,20 @@ export function buildSaleIndexes(sales: Sale[]): SaleIndexes {
   return { byCollector, byArtwork };
 }
 
+const LATIN_EQUIVALENTS: Readonly<Record<string, string>> = {
+  'æ': 'ae', 'œ': 'oe', 'ß': 'ss', 'þ': 'th', 'ð': 'd',
+  'đ': 'd', 'ł': 'l', 'ø': 'o', 'ı': 'i', 'ħ': 'h'
+};
+
 /** Normalize Latin diacritics, case and whitespace for local search. */
 function foldSearch(value: string): string {
-  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+  // NFKC maps imported fullwidth archive codes (ＡＲＴ－００４２), digits and
+  // ideographic spaces to their searchable equivalents. The original fields
+  // and codes in SQLite are never rewritten.
+  return value.normalize('NFKC').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    // Ligatures and Latin letters without a base+accent decomposition need
+    // explicit equivalents. Apply identically to saved fields and search terms.
+    .replace(/[æœßþðđłøıħ]/gu, letter => LATIN_EQUIVALENTS[letter] ?? letter)
     // Names and artwork titles often arrive from phones with typographic quotes/dashes.
     // Normalize their punctuation consistently in queries and stored fields.
     .replace(/[\u2018\u2019\u02bc]/gu, "'")
@@ -120,7 +131,7 @@ export function filterArtworks(
     (filters.status === 'all' || a.status === filters.status) &&
     (acquiredIds === null || acquiredIds.has(a.id)) &&
     matchesTerms(terms, [a.title, a.code, a.year, a.technique, a.support,
-      a.description, indexes.byArtwork[a.id]?.collector_name,
+      a.description, a.location, indexes.byArtwork[a.id]?.collector_name,
       ...artworkDimensionFields(a)]));
 
   if (filters.order === 'title') {
@@ -146,15 +157,26 @@ export function filterCollectors(
   collectors: Collector[],
   query: string,
   indexes: SaleIndexes,
-  filter: CollectorFilter = 'all'
+  filter: CollectorFilter = 'all',
+  artworks: Artwork[] = []
 ): Collector[] {
   const base = filter === 'all' ? collectors : collectors.filter(c => filter === 'buyers'
     ? (indexes.byCollector[c.id]?.length ?? 0) > 0
     : !c.email?.trim() && !c.phone?.trim());
   const terms = searchTerms(query);
   if (terms.length === 0) return base;
+  // Search the current metadata of works actually acquired by this collector.
+  // Index by UUID: identical titles must not leak details from another buyer's
+  // work, and unsold works must never affect this collector's search results.
+  const detailsByArtwork = new Map(artworks.map(a => [a.id, [
+    a.code, a.title, a.year, a.technique, a.support, a.description, a.location,
+    ...artworkDimensionFields(a)
+  ]] as const));
   return base.filter(c =>
     matchesTerms(terms, [c.name, c.email, c.phone, c.address, c.notes, c.birth_place,
       c.instagram, c.facebook, c.tiktok, c.website, c.linkedin,
-      ...(indexes.byCollector[c.id] ?? []).map(s => s.artwork_title)], c.phone));
+      ...(indexes.byCollector[c.id] ?? []).flatMap(s =>
+        // Preserve the recorded sale title even when the artwork list has not
+        // been loaded; otherwise use current linked artwork metadata as well.
+        [s.artwork_title, ...(detailsByArtwork.get(s.artwork_id) ?? [])])], c.phone));
 }

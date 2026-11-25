@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, Input, OnChanges, SimpleChanges, ViewEncapsulation, inject } from '@angular/core';
 import { translate } from './i18n';
-import { certificateTexts, dimensionsText, formatIssueDate, localizedValue, sha256Hex } from './certificate-text';
+import { certificateFingerprint, certificateTexts, dimensionsText, formatIssueDate, localizedValue } from './certificate-text';
 import type { CertificateTexts } from './certificate-text';
 import type { Artwork, Certificate } from './models';
 
@@ -91,7 +91,7 @@ export class CertificateSheetComponent implements OnChanges {
       this.dimensions = dimensionsText(this.snapshot);
       this.hash = '';
       const token = c.id;
-      void sha256Hex(`${c.serial}\n${c.snapshot_json}`).then(hex => { if (this.certificate?.id === token) { this.hash = hex.slice(0, 32); this.change.detectChanges(); } });
+      void certificateFingerprint(c.serial, c.snapshot_json).then(hex => { if (this.certificate?.id === token) { this.hash = hex; this.change.detectChanges(); } });
     }
   }
 

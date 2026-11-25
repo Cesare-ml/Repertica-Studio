@@ -2,7 +2,7 @@
 //! CSV exports are for inspection/analysis, NOT a restore format or verified cash receipts.
 //! All money is exported as integer cents to avoid rounding or locale ambiguity.
 use crate::db::Database;
-use rusqlite::{types::ValueRef, Connection};
+use rusqlite::{types::ValueRef, Connection, OptionalExtension};
 use std::{fs::{self, OpenOptions}, io::Write, path::Path};
 use tauri::State;
 
@@ -21,6 +21,117 @@ fn append_text_cell(output: &mut String, value: &str) {
         output.push(ch);
     }
     output.push('"');
+}
+
+// An external SQLite import can contain impossible/non-canonical dates even
+// when foreign keys and page integrity pass. Reject them before publishing a
+// CSV: spreadsheet sorting and month-based accounting would be misleading.
+// Only check the date actually represented by the requested register.
+fn validate_export_dates(conn: &Connection, kind: &str) -> Result<(), String> {
+    let (table, date_column, label) = match kind {
+        "sales" | "balances" | "allocations" => ("sales", "sold_at", "vendita"),
+        "receipts" => ("sale_receipts", "received_at", "incasso"),
+        "expenses" => ("expenses", "expense_date", "spesa"),
+        "installments" => ("sale_installments", "due_date", "scadenza rata"),
+        "certificates" => ("certificates", "issued_at", "emissione certificato"),
+        _ => return Ok(()),
+    };
+    // All identifiers above are fixed literals, never interpolated user input.
+    let sql = format!("SELECT id,{date_column} FROM {table} ORDER BY id");
+    let mut statement = conn.prepare(&sql).map_err(error)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(error)?;
+    for entry in rows {
+        let (id, date) = entry.map_err(error)?;
+        let canonical = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+            .map(|parsed| parsed.format("%Y-%m-%d").to_string() == date)
+            .unwrap_or(false);
+        if !canonical {
+            return Err(format!(
+                "Esportazione annullata: data di {label} non valida ({id}). Verifica l'archivio."
+            ));
+        }
+    }
+    Ok(())
+}
+
+// CSV must not silently lose records when foreign keys were disabled during
+// an external SQLite import. INNER JOIN would otherwise omit orphaned rows.
+fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String> {
+    let broken: Option<(String, Option<i64>, String)> = conn.query_row(
+        "SELECT \"table\", rowid, parent FROM pragma_foreign_key_check LIMIT 1",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).optional().map_err(error)?;
+    if let Some((table, rowid, parent)) = broken {
+        return Err(format!(
+            "Esportazione annullata: relazione SQLite non valida nella tabella {table} (riga {rowid:?}, riferimento a {parent}). Verifica o ripristina l'archivio prima di esportare."
+        ));
+    }
+    validate_export_dates(conn, kind)?;
+    // Missing dependent sale_finances rows do not violate foreign keys. Do not
+    // use COALESCE to invent taxes and shipping in financial exports.
+    if matches!(kind, "sales" | "allocations") {
+        let missing_sale: Option<String> = conn.query_row(
+            "SELECT s.id FROM sales s WHERE NOT EXISTS
+                (SELECT 1 FROM sale_finances f WHERE f.sale_id=s.id)
+             ORDER BY s.id LIMIT 1",
+            [], |row| row.get(0)
+        ).optional().map_err(error)?;
+        if let Some(id) = missing_sale {
+            return Err(format!(
+                "Esportazione annullata: dati finanziari mancanti per la vendita {id}. Nessuna imposta o spedizione è stata stimata."
+            ));
+        }
+    }
+    // Imported SQLite data may satisfy foreign keys but contain deductions
+    // larger than the price, or CHECK constraints bypassed by external tools.
+    // Never export an apparently authoritative negative net sale. Compute in
+    // i64 with checked arithmetic so even corrupt extreme values cannot wrap.
+    if matches!(kind, "sales" | "allocations") {
+        let mut stmt = conn.prepare(
+            "SELECT s.id,s.amount_cents,f.tax_cents,f.shipping_cents
+             FROM sales s JOIN sale_finances f ON f.sale_id=s.id
+             ORDER BY s.id"
+        ).map_err(error)?;
+        let entries = stmt.query_map([], |row| Ok((
+            row.get::<_, String>(0)?, row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?, row.get::<_, i64>(3)?,
+        ))).map_err(error)?;
+        for entry in entries {
+            let (sale_id, gross, taxes, shipping) = entry.map_err(error)?;
+            let net = gross.checked_sub(taxes).and_then(|v| v.checked_sub(shipping));
+            if gross <= 0 || taxes < 0 || shipping < 0 || net.is_none_or(|v| v < 0) {
+                return Err(format!(
+                    "Esportazione annullata: imposte, spedizione o importo incoerenti per la vendita {sale_id}. Verifica l'archivio prima di esportare."
+                ));
+            }
+        }
+    }
+    // An external SQLite import can bypass the receipt limit triggers. A CSV
+    // reporting negative outstanding money would be misleading even though all
+    // foreign keys still resolve and the underlying database is readable.
+    if matches!(kind, "balances" | "receipts") {
+        let invalid_balance: Option<String> = conn.query_row(
+            "SELECT s.id FROM sales s
+             LEFT JOIN (
+                 SELECT sale_id, SUM(amount_cents) AS received_cents,
+                        MIN(amount_cents) AS minimum_receipt
+                 FROM sale_receipts GROUP BY sale_id
+             ) totals ON totals.sale_id=s.id
+             WHERE s.amount_cents <= 0
+                OR COALESCE(totals.received_cents,0) NOT BETWEEN 0 AND s.amount_cents
+                OR (totals.minimum_receipt IS NOT NULL AND totals.minimum_receipt <= 0)
+             ORDER BY s.id LIMIT 1",
+            [], |row| row.get(0)
+        ).optional().map_err(error)?;
+        if let Some(id) = invalid_balance {
+            return Err(format!(
+                "Esportazione annullata: incassi incoerenti con l'importo della vendita {id}. Verifica l'archivio prima di esportare."
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
@@ -132,6 +243,7 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
         ),
         _ => return Err("Tipo di registro CSV non riconosciuto".into()),
     };
+    validate_export_relations(conn, kind)?;
     let mut out = String::from("\u{feff}"); // UTF-8 BOM for Excel
     out.push_str(header);
     out.push_str("\r\n");
@@ -201,6 +313,182 @@ mod tests {
     use super::*;
     use crate::db;
 
+
+    #[test]
+    fn corrupted_imported_dates_never_become_authoritative_csv_registers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','ART-1','Opera','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Collezionista','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',5000,'2026-11-01','t');
+            INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+                VALUES('s',3334,3333,3333);
+            INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                VALUES('r','s','2026-11-02',1000,'cash','t');
+            INSERT INTO expenses(id,expense_date,category,description,amount_cents,fund,created_at,updated_at)
+                VALUES('e','2026-11-02','materiali','Cornice',100,'activity','t','t');
+            INSERT INTO sale_installments(id,sale_id,position,due_date,amount_cents)
+                VALUES('i1','s',1,'2026-11-02',2500),
+                      ('i2','s',2,'2026-12-02',2500);
+            INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('cert','a','RS-0001','2026-11-02','Artista','{}','t');
+            -- Simulate an external SQLite edit that disabled historic immutability.
+            DROP TRIGGER certificates_no_update;
+        "#).unwrap();
+        for (table, column, id, kinds) in [
+            ("sales", "sold_at", "s", &["sales", "balances", "allocations"][..]),
+            ("sale_receipts", "received_at", "r", &["receipts"][..]),
+            ("expenses", "expense_date", "e", &["expenses"][..]),
+            ("sale_installments", "due_date", "i1", &["installments"][..]),
+            ("certificates", "issued_at", "cert", &["certificates"][..]),
+        ] {
+            let update = format!("UPDATE {table} SET {column}=?1 WHERE id=?2");
+            for bad_date in ["2026-02-30", "2026-2-3", "invalid"] {
+                conn.execute(&update, rusqlite::params![bad_date, id]).unwrap();
+                for kind in kinds {
+                    let error = render_csv(&conn, kind).unwrap_err();
+                    assert!(error.contains("data di"), "{kind}: {error}");
+                    assert!(error.contains(id), "{kind}: {error}");
+                }
+            }
+            conn.execute(&update, rusqlite::params!["2026-11-02", id]).unwrap();
+            for kind in kinds {
+                assert!(render_csv(&conn, kind).is_ok(), "{kind} should recover");
+            }
+        }
+        // The native export must reject before opening a destination file.
+        conn.execute("UPDATE expenses SET expense_date='2026-02-30' WHERE id='e'", []).unwrap();
+        drop(conn);
+        let destination = dir.path().join("expenses.csv");
+        let failure = export_file(&db, "expenses", &destination).unwrap_err();
+        assert!(failure.contains("data di spesa"), "{failure}");
+        assert!(!destination.exists(), "no partial CSV should be published");
+    }
+
+    #[test]
+    fn csv_rejects_orphaned_sale_instead_of_omitting_it_from_joined_registers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            // Simulate third-party SQLite changes made with FK checks disabled.
+            conn.execute_batch(r#"
+                PRAGMA foreign_keys=OFF;
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','A-1','Opera','t','t');
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','missing-collector',4200,'2026-11-01','t');
+                PRAGMA foreign_keys=ON;
+            "#).unwrap();
+            let failure = render_csv(&conn, "balances").unwrap_err();
+            assert!(failure.contains("relazione SQLite non valida"), "{failure}");
+        }
+        let output = dir.path().join("balances.csv");
+        assert!(export_file(&db, "balances", &output).is_err());
+        assert!(!output.exists(), "do not create a misleading partial CSV");
+        let conn = db.conn.lock().unwrap();
+        conn.execute("INSERT INTO collectors(id,name,created_at,updated_at)
+            VALUES('missing-collector','Anna','t','t')", []).unwrap();
+        let restored = render_csv(&conn, "balances").unwrap();
+        assert!(restored.contains("\"s\";\"2026-11-01\";\"a\";"), "{restored}");
+    }
+
+    #[test]
+    fn financial_csv_does_not_invent_zero_taxes_when_sale_finances_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A-1','Opera','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Anna','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',4200,'2026-11-01','t');
+        "#).unwrap();
+        for kind in ["sales", "allocations"] {
+            let failure = render_csv(&conn, kind).unwrap_err();
+            assert!(failure.contains("vendita s"), "{kind}: {failure}");
+        }
+        // Genuine zero tax/shipping values are allowed once the row exists.
+        conn.execute("INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+            VALUES('s',3334,3333,3333)", []).unwrap();
+        assert!(render_csv(&conn, "sales").unwrap().contains(";4200;0;0;4200;"));
+        assert!(render_csv(&conn, "allocations").is_ok());
+    }
+
+    #[test]
+    fn financial_csv_rejects_deductions_above_sale_amount_before_creating_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(r#"
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','ART-1','Opera','t','t');
+                INSERT INTO collectors(id,name,created_at,updated_at)
+                    VALUES('c','Cliente','t','t');
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','c',4200,'2026-11-01','t');
+                INSERT INTO sale_finances(sale_id,tax_cents,shipping_cents,personal_bp,activity_bp,savings_bp)
+                    VALUES('s',0,0,3334,3333,3333);
+            "#).unwrap();
+            for (taxes, shipping) in [(4201, 0), (2000, 2201)] {
+                conn.execute(
+                    "UPDATE sale_finances SET tax_cents=?1,shipping_cents=?2 WHERE sale_id='s'",
+                    rusqlite::params![taxes, shipping],
+                ).unwrap();
+                for kind in ["sales", "allocations"] {
+                    let failure = render_csv(&conn, kind).unwrap_err();
+                    assert!(failure.contains("vendita s"), "{kind}: {failure}");
+                    assert!(failure.contains("incoerenti"), "{kind}: {failure}");
+                }
+            }
+        }
+        let destination = dir.path().join("sales.csv");
+        assert!(export_file(&db, "sales", &destination).is_err());
+        assert!(!destination.exists(), "invalid money must never reach a CSV");
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE sale_finances SET tax_cents=1200,shipping_cents=300 WHERE sale_id='s'",
+            [],
+        ).unwrap();
+        assert!(render_csv(&conn, "sales").unwrap().contains(";4200;1200;300;2700;"));
+        assert!(render_csv(&conn, "allocations").is_ok());
+    }
+
+    #[test]
+    fn financial_csv_rejects_negative_imported_deductions_and_recovers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','ART-1','Opera','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Cliente','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',4200,'2026-11-01','t');
+            INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+                VALUES('s',3334,3333,3333);
+            PRAGMA ignore_check_constraints=ON;
+            UPDATE sale_finances SET tax_cents=-1 WHERE sale_id='s';
+            PRAGMA ignore_check_constraints=OFF;
+        "#).unwrap();
+        for kind in ["sales", "allocations"] {
+            let failure = render_csv(&conn, kind).unwrap_err();
+            assert!(failure.contains("vendita s"), "{kind}: {failure}");
+        }
+        conn.execute("UPDATE sale_finances SET tax_cents=0 WHERE sale_id='s'", []).unwrap();
+        assert!(render_csv(&conn, "sales").is_ok());
+        assert!(render_csv(&conn, "allocations").is_ok());
+    }
+
     #[test]
     fn receipts_csv_is_distinct_from_sales_and_preserves_references_and_exact_cents() {
         let dir = tempfile::tempdir().unwrap();
@@ -217,6 +505,9 @@ mod tests {
         conn.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,reference,created_at)
             VALUES('r2','sale','2026-11-12',2001,'cash','cash-02','t')", []).unwrap();
 
+        // Finance metadata must also exist for this test's sales export.
+        conn.execute("INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+            VALUES('sale',3334,3333,3333)", []).unwrap();
         let csv = render_csv(&conn, "receipts").unwrap();
         assert!(csv.starts_with("\u{feff}receipt_id;sale_id;received_at;artwork_id;"));
         assert!(csv.contains("\"r1\";\"sale\";\"2026-11-10\";\"art\";\"ART-1\";\"Landscape\";\"buyer\";\"Client\";1500;\"EUR\";\"bank_transfer\";\"'  =2+3\";\"comment;line\";"));
@@ -302,6 +593,54 @@ seconda riga','t','t')", []).unwrap();
     }
 
 
+
+    #[test]
+    fn balance_and_receipts_csv_reject_overpayment_or_negative_receipts_from_imports() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(r#"
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','A-1','Opera','t','t');
+                INSERT INTO collectors(id,name,created_at,updated_at)
+                    VALUES('c','Cliente','t','t');
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','c',5000,'2026-11-01','t');
+                INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                    VALUES('r1','s','2026-11-01',3000,'cash','t');
+                -- Simulate an imported archive whose normal limit triggers were removed.
+                DROP TRIGGER sale_receipts_limit_insert;
+                DROP TRIGGER sale_receipts_limit_update;
+                INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                    VALUES('r2','s','2026-11-02',3000,'cash','t');
+            "#).unwrap();
+            for kind in ["balances", "receipts"] {
+                let failure = render_csv(&conn, kind).unwrap_err();
+                assert!(failure.contains("incassi incoerenti"), "{kind}: {failure}");
+            }
+        }
+        let destination = dir.path().join("inconsistent-balances.csv");
+        assert!(export_file(&db, "balances", &destination).is_err());
+        assert!(!destination.exists(), "a misleading report must not be published");
+
+        let conn = db.conn.lock().unwrap();
+        conn.execute("DELETE FROM sale_receipts WHERE id='r2'", []).unwrap();
+        // An invalid negative receipt can also be masked by an otherwise
+        // plausible positive total; do not allow it into a financial register.
+        conn.execute_batch(r#"
+            PRAGMA ignore_check_constraints=ON;
+            UPDATE sale_receipts SET amount_cents=-1 WHERE id='r1';
+            PRAGMA ignore_check_constraints=OFF;
+        "#).unwrap();
+        for kind in ["balances", "receipts"] {
+            assert!(render_csv(&conn, kind).unwrap_err().contains("incassi incoerenti"));
+        }
+        conn.execute("UPDATE sale_receipts SET amount_cents=3000 WHERE id='r1'", []).unwrap();
+        for kind in ["balances", "receipts"] {
+            assert!(render_csv(&conn, kind).is_ok(), "{kind} should recover after repair");
+        }
+    }
 
     #[test]
     fn balances_csv_preserves_partial_full_and_unpaid_sales_without_inventing_receipts() {

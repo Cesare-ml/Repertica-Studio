@@ -40,22 +40,61 @@ pub fn friendly(error: impl std::fmt::Display) -> String {
     message.to_string()
 }
 
-/// Lower-case and strip common Latin accents so that "Cafè" matches "cafe".
+/// Lower-case and fold common Latin accents, including decomposed Unicode.
+/// Artists and collectors may use names such as "Straße", "Œuvre" or "Łódź":
+/// searching for "strasse", "oeuvre" or "lodz" should find the local media.
+/// This is intentionally a small Latin-oriented search fold, not a complete
+/// transliterator. Characters outside the mappings are preserved.
 pub fn fold(text: &str) -> String {
-    text.chars()
-        .flat_map(char::to_lowercase)
-        .map(|c| match c {
-            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
-            'ç' => 'c',
-            'è' | 'é' | 'ê' | 'ë' => 'e',
-            'ì' | 'í' | 'î' | 'ï' => 'i',
-            'ñ' => 'n',
-            'ò' | 'ó' | 'ô' | 'õ' | 'ö' => 'o',
-            'ù' | 'ú' | 'û' | 'ü' => 'u',
-            'ý' | 'ÿ' => 'y',
-            other => other,
-        })
-        .collect()
+    let mut folded = String::with_capacity(text.len());
+    for c in text.chars().flat_map(char::to_lowercase) {
+        // macOS filenames and imported metadata can contain decomposed accents.
+        if matches!(c,
+            '\u{0300}'..='\u{036f}' | '\u{1ab0}'..='\u{1aff}' |
+            '\u{1dc0}'..='\u{1dff}' | '\u{20d0}'..='\u{20ff}' |
+            '\u{fe20}'..='\u{fe2f}') {
+            continue;
+        }
+        match c {
+            // Imported artwork/media metadata may be typed on fullwidth keyboards.
+            // U+FF01..U+FF5E maps one-to-one to ASCII U+0021..U+007E.
+            '\u{ff01}'..='\u{ff5e}' => folded.push(
+                char::from_u32((c as u32) - 0xfee0).expect("fullwidth ASCII mapping")
+            ),
+            // Normalize common no-break/ideographic spaces and smart punctuation
+            // just as the desktop archive search does.
+            '\u{3000}' | '\u{00a0}' | '\u{202f}' => folded.push(' '),
+            '\u{2018}' | '\u{2019}' | '\u{02bc}' => folded.push('\u{0027}'),
+            '\u{201c}' | '\u{201d}' => folded.push('"'),
+            '\u{2010}'..='\u{2015}' | '\u{2212}' => folded.push('-'),
+            // Multi-letter equivalents must be expanded, not dropped.
+            'æ' => folded.push_str("ae"),
+            'œ' => folded.push_str("oe"),
+            'ß' => folded.push_str("ss"),
+            'þ' => folded.push_str("th"),
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' | 'ǎ' => folded.push('a'),
+            'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' => folded.push('c'),
+            'ď' | 'đ' | 'ð' => folded.push('d'),
+            'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => folded.push('e'),
+            'ĝ' | 'ğ' | 'ġ' | 'ģ' => folded.push('g'),
+            'ĥ' | 'ħ' => folded.push('h'),
+            'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' | 'ı' | 'ǐ' => folded.push('i'),
+            'ĵ' => folded.push('j'),
+            'ķ' => folded.push('k'),
+            'ĺ' | 'ļ' | 'ľ' | 'ŀ' | 'ł' => folded.push('l'),
+            'ñ' | 'ń' | 'ņ' | 'ň' => folded.push('n'),
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ō' | 'ŏ' | 'ő' | 'ø' | 'ǒ' => folded.push('o'),
+            'ŕ' | 'ŗ' | 'ř' => folded.push('r'),
+            'ś' | 'ŝ' | 'ş' | 'š' => folded.push('s'),
+            'ţ' | 'ť' | 'ŧ' => folded.push('t'),
+            'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' | 'ǔ' => folded.push('u'),
+            'ŵ' => folded.push('w'),
+            'ý' | 'ÿ' | 'ŷ' => folded.push('y'),
+            'ź' | 'ż' | 'ž' => folded.push('z'),
+            other => folded.push(other),
+        }
+    }
+    folded
 }
 
 /// ENOSPC (28), ERROR_DISK_FULL (112), ERROR_HANDLE_DISK_FULL (39) and SQLite's "database or disk is full".
@@ -107,6 +146,62 @@ mod tests {
         let io = std::io::Error::from_raw_os_error(if cfg!(windows) { 112 } else { 28 });
         assert!(friendly(io).contains("Spazio su disco"));
         assert!(friendly("Accesso negato. (os error 5)").contains("Accesso negato"));
+    }
+
+    #[test]
+    fn local_media_search_folds_decomposed_unicode_accents() {
+        // Media filenames and tags may originate on macOS, where combining
+        // characters are common. Normalise both query and stored metadata.
+        assert_eq!(fold("Café"), "cafe");
+        assert_eq!(fold("Cafe\u{301}"), "cafe");
+        assert_eq!(fold("CAFÉ"), fold("cafe\u{301}"));
+        assert_eq!(fold("Piñata"), fold("Pin\u{303}ata"));
+        assert_eq!(fold("İSTANBUL"), "istanbul");
+
+        let title = fold("Antichita\u{300} · SÖLE");
+        assert!(title.contains(&fold("antichità")));
+        assert!(title.contains(&fold("sole")));
+        assert_eq!(fold("Studio #42 & 📷"), "studio #42 & 📷",
+            "unrelated characters and punctuation are preserved");
+    }
+
+    #[test]
+    fn local_media_search_matches_ligatures_and_extended_latin_names() {
+        // File names, artwork titles and photo credits can come from other
+        // European languages; searches should not require the same keyboard.
+        for (stored, typed) in [
+            ("Straße", "STRASSE"),
+            ("Œuvre", "oeuvre"),
+            ("Æther", "aether"),
+            ("Sølv", "SOLV"),
+            ("Łódź", "lodz"),
+            ("Dvořák", "dvorak"),
+            ("Český", "cesky"),
+            ("İstanbul", "istanbul"),
+            ("Þing", "thing"),
+        ] {
+            assert_eq!(fold(stored), fold(typed), "{stored} versus {typed}");
+        }
+        // Non-Latin text and emoji must not be transliterated or stripped.
+        assert_eq!(fold("日本語 · 📷"), "日本語 · 📷");
+    }
+
+    #[test]
+    fn local_media_search_matches_fullwidth_codes_and_smart_punctuation() {
+        // These are real forms of pasted archive codes, artwork titles and
+        // photograph credits. Both stored fields and queries use this fold.
+        for (stored, query) in [
+            ("ＡＲＴ－００４２", "art-0042"),
+            ("Ｓｔｕｄｉｏ　４２", "studio 42"),
+            ("Ｌ’Ａｍｉｃｏ — Œuvre", "l'amico - oeuvre"),
+            ("“Carta”　Ａ４", "\"carta\" a4"),
+            ("olio\u{00a0}su\u{202f}tela", "olio su tela"),
+            ("Collezione − privata", "collezione - privata"),
+        ] {
+            assert_eq!(fold(stored), fold(query), "{stored} vs {query}");
+        }
+        // Never drop unrelated scripts, punctuation or emoji from metadata.
+        assert_eq!(fold("日本語 · 📷"), "日本語 · 📷");
     }
 
     #[test]

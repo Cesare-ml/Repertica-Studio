@@ -40,14 +40,13 @@ test('text search includes metadata and related collector, case-insensitively', 
     artwork('b', { title: 'Paesaggio', support: 'Carta', location: 'MILANO', status: 'sold' })
   ];
   const indexes = buildSaleIndexes([sale('b', 'c-1', 'Paesaggio', 'Elena Verdi')]);
-  // The location field is no longer part of the interface, so it is not searched.
-  for (const term of ['carta', 'ELENA']) {
+  // Artwork location remains searchable alongside technique and buyer.
+  for (const term of ['carta', 'ELENA', 'milano']) {
     assert.deepEqual(filterArtworks(artworks, options({ query: term }), indexes)
       .map(a => a.id), ['b']);
   }
   assert.deepEqual(filterArtworks(artworks, options({ query: 'OLIO' }), indexes)
     .map(a => a.id), ['a']);
-  assert.deepEqual(filterArtworks(artworks, options({ query: 'milano' }), indexes), []);
 });
 
 test('title/year sorting is stable for missing years and does not mutate source array', () => {
@@ -235,4 +234,144 @@ test('artwork dimensions are searchable in cm with x or × and decimal commas', 
   assert.deepEqual(found('30,5'), ['a', 'b']); // Single dimensions remain searchable.
   assert.deepEqual(found('0x0'), []); // Missing measurements are never fabricated.
   assert.deepEqual(found('"senza misure"'), ['d']);
+});
+
+
+test('collector search uses the archive codes of purchased artworks, never unrelated works', () => {
+  const works = [
+    artwork('one', { code: 'ART-0042', title: 'Natura' }),
+    artwork('two', { code: 'ML-2026-014', title: 'Natura' }),
+    artwork('unsold', { code: 'UNSOLD-0001', title: 'Natura' })
+  ];
+  const people = [
+    collector('c1', { name: 'Anna Rossi' }),
+    collector('c2', { name: 'Bruno Verdi' }),
+    collector('c3', { name: 'Carla' })
+  ];
+  const indexes = buildSaleIndexes([
+    sale('one', 'c1', 'Natura', 'Anna Rossi'),
+    sale('two', 'c2', 'Natura', 'Bruno Verdi')
+  ]);
+  const found = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+
+  assert.deepEqual(found('art-0042'), ['c1']);
+  assert.deepEqual(found('"ML-2026-014"'), ['c2']);
+  assert.deepEqual(found('art-0042 anna'), ['c1']);
+  assert.deepEqual(found('art-0042 bruno'), []);
+  assert.deepEqual(found('UNSOLD-0001'), []);
+  assert.deepEqual(filterCollectors(people, 'ART-0042', indexes), []); // Existing callers remain compatible.
+});
+
+test('artwork location search combines phrases with status, collector and metadata', () => {
+  const works = [
+    artwork('a', { title: 'Marea', location: 'Studio di Venezia' }),
+    artwork('b', { title: 'Marea', location: 'Deposito a Venezia', status: 'sold' }),
+    artwork('c', { title: 'Cielo', location: null })
+  ];
+  const indexes = buildSaleIndexes([sale('b', 'buyer', 'Marea', 'Élodie')]);
+  const found = (query, extra = {}) =>
+    filterArtworks(works, options({ query, ...extra }), indexes).map(a => a.id);
+
+  assert.deepEqual(found('venezia'), ['a', 'b']);
+  assert.deepEqual(found('"studio di venezia"'), ['a']);
+  assert.deepEqual(found('VENEZIA ÉLODIE'), ['b']);
+  assert.deepEqual(found('venezia', { status: 'sold' }), ['b']);
+  assert.deepEqual(found('venezia', { collectorId: 'buyer' }), ['b']);
+  assert.deepEqual(found('deposito marea'), ['b']);
+  assert.deepEqual(found('padova'), []);
+});
+
+
+test('artwork search matches European ligatures in titles, locations and buyer names', () => {
+  const works = [
+    artwork('a', { title: 'Œuvre de Dvořák', location: 'Łódź', status: 'sold' }),
+    artwork('b', { title: 'Straße di Sølv', description: 'Æther' }),
+    artwork('c', { title: '日本語 · 光' })
+  ];
+  const indexes = buildSaleIndexes([sale('a', 'buyer', 'Œuvre de Dvořák', 'Þór Ægir')]);
+  const found = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+
+  assert.deepEqual(found('oeuvre dvorak'), ['a']);
+  assert.deepEqual(found('"oeuvre de dvorak" lodz'), ['a']);
+  assert.deepEqual(found('thor aegir'), ['a']);
+  assert.deepEqual(found('STRASSE SOLV'), ['b']);
+  assert.deepEqual(found('aether'), ['b']);
+  assert.deepEqual(found('日本語'), ['c'], 'unrelated scripts are left intact');
+  assert.deepEqual(found('strasse dvorak'), [], 'AND terms cannot combine unrelated works');
+});
+
+test('collector search folds European names and only the artworks they purchased', () => {
+  const people = [
+    collector('buyer', { name: 'Søren Straße', address: 'Łódź', notes: 'Æther' }),
+    collector('other', { name: 'Þór Ægir', notes: '日本語' })
+  ];
+  const works = [
+    artwork('w1', { code: 'ART-0042', title: 'Œuvre de Dvořák' }),
+    artwork('w2', { code: 'UNSOLD-0003', title: 'Straße' })
+  ];
+  const indexes = buildSaleIndexes([sale('w1', 'buyer', 'Œuvre de Dvořák', 'Søren Straße')]);
+  const found = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+
+  assert.deepEqual(found('soren strasse lodz'), ['buyer']);
+  assert.deepEqual(found('"oeuvre de dvorak" aether'), ['buyer']);
+  assert.deepEqual(found('thor aegir'), ['other']);
+  assert.deepEqual(found('日本語'), ['other']);
+  assert.deepEqual(found('unsold-0003'), [], 'unrelated artwork codes stay private to their own records');
+  assert.deepEqual(found('lodz thor'), [], 'terms cannot cross two collectors');
+});
+
+test('fullwidth imported codes and metadata remain searchable in artworks and buyers', () => {
+  const works = [
+    artwork('stored', { code: 'ＡＲＴ－００４２', title: 'Ｌ’Ａｍｉｃｏ — Œuvre',
+      technique: 'Olio　su tela', status: 'sold' }),
+    artwork('plain', { code: 'ART-0043', title: 'Studio 43' }),
+    artwork('unrelated', { code: 'ART-0999', title: '日本語 · 📷' })
+  ];
+  const indexes = buildSaleIndexes([sale('stored', 'buyer', 'L’Amico — Œuvre', 'Ｅｌｅｎａ')]);
+  const found = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+
+  assert.deepEqual(found('art-0042'), ['stored']);
+  assert.deepEqual(found('ＡＲＴ－００４３'), ['plain']);
+  assert.deepEqual(found('"l\'amico - oeuvre" elena'), ['stored']);
+  assert.deepEqual(found('"olio su tela"'), ['stored']);
+  assert.deepEqual(found('日本語'), ['unrelated'], 'other writing systems and emoji remain searchable');
+
+  const people = [
+    collector('buyer', { name: 'Ｅｌｅｎａ', address: 'Ｖｅｎｅｚｉａ' }),
+    collector('elsewhere', { name: 'Mario' })
+  ];
+  const findBuyers = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+  assert.deepEqual(findBuyers('elena venezia'), ['buyer']);
+  assert.deepEqual(findBuyers('art-0042'), ['buyer']);
+  assert.deepEqual(findBuyers('art-0043'), [], 'an unpurchased artwork must not match a buyer');
+});
+
+test('collector lookup uses current metadata only from genuinely purchased works', () => {
+  const works = [
+    artwork('owned', { code: 'ART-101', title: 'Fiume blu', technique: 'Acquerello',
+      support: 'Carta Fabriano', year: '2023', location: 'Atelier Venezia',
+      width_cm: 30, height_cm: 40 }),
+    artwork('unowned', { code: 'ART-999', title: 'Ritratto segreto',
+      technique: 'Tempera', location: 'Napoli' }),
+    artwork('other-owned', { code: 'ART-102', title: 'Mare verde',
+      technique: 'Olio', location: 'Firenze' })
+  ];
+  const people = [collector('a', { name: 'Anna' }), collector('b', { name: 'Bruno' })];
+  const indexes = buildSaleIndexes([
+    sale('owned', 'a', 'Vecchio titolo', 'Anna'),
+    sale('other-owned', 'b', 'Mare verde', 'Bruno')
+  ]);
+  const found = query => filterCollectors(people, query, indexes, 'all', works).map(c => c.id);
+
+  assert.deepEqual(found('fiume blu'), ['a']); // Current artwork title, not just sale text.
+  assert.deepEqual(found('acquerello fabriano'), ['a']);
+  assert.deepEqual(found('"atelier venezia" 2023'), ['a']);
+  assert.deepEqual(found('30 x 40 cm'), ['a']);
+  assert.deepEqual(found('art-101 anna'), ['a']);
+  assert.deepEqual(found('firenze olio'), ['b']);
+  assert.deepEqual(found('tempera'), []); // Unsold artwork cannot create a match.
+  assert.deepEqual(found('napoli'), []);
+  assert.deepEqual(found('acquerello bruno'), []); // No cross-buyer metadata.
+  assert.deepEqual(found('vecchio titolo'), ['a']); // Historical sale name still works.
+  assert.deepEqual(filterCollectors(people, 'vecchio titolo', indexes).map(c => c.id), ['a']);
 });

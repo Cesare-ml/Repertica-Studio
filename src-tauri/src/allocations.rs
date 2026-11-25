@@ -14,6 +14,15 @@ const MAX_PARTS: usize = 12;
 
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 
+// SQLite may silently skip writes when an externally imported database defines
+// a BEFORE INSERT/UPDATE/DELETE trigger with RAISE(IGNORE). Treat that as an
+// error so the transaction rolls back instead of reporting a partial plan save.
+fn require_plan_write(rows: usize, operation: &str) -> Result<(), String> {
+    if rows == 1 { Ok(()) } else {
+        Err(format!("SQLite did not apply the allocation plan change ({operation}); reload the settings and retry"))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Part {
     pub id: String,
@@ -33,7 +42,7 @@ pub struct PartInput {
     pub pays_expenses: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Plan {
     pub enabled: bool,
     /// Active parts in display order.
@@ -46,19 +55,62 @@ pub struct PlanInput {
     pub parts: Vec<PartInput>,
 }
 
+// Third-party SQLite importers can bypass CHECK constraints. Values other than
+// 0/1 must never be silently treated as "disabled" or "inactive": that could
+// stop the allocation of new sales or hide historical funds.
+fn persisted_flag(value: i64, field: &str) -> Result<bool, String> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(format!("Invalid {field} flag in imported allocation data; repair the archive before continuing")),
+    }
+}
+
+// Imported databases can also bypass the allocation_parts CHECK constraints.
+// Reject invalid history before displaying funds or freezing a distribution on
+// a new sale; do not silently expose an invented percentage or an empty label.
+// Historical inactive parts may share positions, so only require a positive
+// position rather than globally unique/contiguous numbering.
+fn validate_persisted_part(name: &str, share_bp: i64, position: i64) -> Result<(), String> {
+    let length = name.trim().chars().count();
+    if !(1..=60).contains(&length) {
+        return Err("Invalid allocation part name in imported SQLite data; repair the archive".into());
+    }
+    if !(0..=10_000).contains(&share_bp) {
+        return Err("Invalid allocation share_bp in imported SQLite data; repair the archive".into());
+    }
+    if position < 1 {
+        return Err("Invalid allocation position in imported SQLite data; repair the archive".into());
+    }
+    Ok(())
+}
+
 pub fn enabled(conn: &Connection) -> Result<bool, String> {
-    conn.query_row("SELECT enabled FROM allocation_settings WHERE singleton=1", [], |r| r.get::<_, i64>(0))
-        .map(|v| v == 1).map_err(err)
+    let value = conn.query_row(
+        "SELECT enabled FROM allocation_settings WHERE singleton=1",
+        [], |r| r.get::<_, i64>(0),
+    ).map_err(err)?;
+    persisted_flag(value, "allocation enabled")
 }
 
 /// Every part ever defined, active or not, in display order.
 pub fn all_parts(conn: &Connection) -> Result<Vec<Part>, String> {
     let mut statement = conn.prepare(
         "SELECT id,name,share_bp,pays_expenses,position,active FROM allocation_parts ORDER BY position,id").map_err(err)?;
-    let parts = statement.query_map([], |r| Ok(Part {
-        id: r.get(0)?, name: r.get(1)?, share_bp: r.get(2)?, pays_expenses: r.get::<_, i64>(3)? == 1,
-        position: r.get(4)?, active: r.get::<_, i64>(5)? == 1,
-    })).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
+    let rows = statement.query_map([], |r| Ok((
+        r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?,
+        r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?,
+    ))).map_err(err)?;
+    let mut parts = Vec::new();
+    for row in rows {
+        let (id, name, share_bp, pays_expenses, position, active) = row.map_err(err)?;
+        validate_persisted_part(&name, share_bp, position)?;
+        parts.push(Part {
+            id, name, share_bp,
+            pays_expenses: persisted_flag(pays_expenses, "pays_expenses")?,
+            position, active: persisted_flag(active, "active")?,
+        });
+    }
     Ok(parts)
 }
 
@@ -129,36 +181,52 @@ pub fn save_plan_core(db: &Database, input: PlanInput) -> Result<Plan, String> {
     validate(&input)?;
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
-    let existing: Vec<String> = all_parts(&tx)?.into_iter().map(|p| p.id).collect();
+    let existing = all_parts(&tx)?;
     let mut kept: Vec<String> = Vec::new();
+    // Keep the exact expected state: an AFTER trigger can alter a row while
+    // SQLite still reports that our INSERT/UPDATE/DELETE affected one row.
+    let mut expected_parts: Vec<Part> = Vec::new();
     for (position, part) in input.parts.iter().enumerate() {
         let name = part.name.trim().to_string();
         let id = match &part.id {
-            Some(id) if existing.contains(id) => id.clone(),
+            Some(id) if existing.iter().any(|old| old.id == *id) => id.clone(),
             Some(_) => return Err("Parte non trovata: ricarica le impostazioni".into()),
             None => Uuid::new_v4().to_string(),
         };
         // Parts of a disabled plan are stored too, so the artist's configuration is never lost.
-        tx.execute(
+        let changed = tx.execute(
             "INSERT INTO allocation_parts(id,name,share_bp,pays_expenses,position,active) VALUES(?1,?2,?3,?4,?5,1)
              ON CONFLICT(id) DO UPDATE SET name=excluded.name,share_bp=excluded.share_bp,
                 pays_expenses=excluded.pays_expenses,position=excluded.position,active=1",
             params![id, name, part.share_bp, i64::from(part.pays_expenses), position as i64 + 1],
         ).map_err(err)?;
+        require_plan_write(changed, "save part")?;
+        expected_parts.push(Part {
+            id: id.clone(), name, share_bp: part.share_bp,
+            pays_expenses: part.pays_expenses, position: position as i64 + 1, active: true,
+        });
         kept.push(id);
     }
-    for id in existing.iter().filter(|id| !kept.contains(id)) {
+    for old in existing.iter().filter(|old| !kept.contains(&old.id)) {
         let used: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM sale_allocations WHERE part_id=?1) OR EXISTS(SELECT 1 FROM expenses WHERE fund=?1)",
-            params![id], |r| r.get(0)).map_err(err)?;
+            params![&old.id], |r| r.get(0)).map_err(err)?;
         if used {
             // History keeps pointing at the part; it just stops being offered.
-            tx.execute("UPDATE allocation_parts SET active=0 WHERE id=?1", params![id]).map_err(err)?;
+            let changed = tx.execute("UPDATE allocation_parts SET active=0 WHERE id=?1", params![&old.id]).map_err(err)?;
+            require_plan_write(changed, "deactivate historical part")?;
+            expected_parts.push(Part { active: false, ..old.clone() });
         } else {
-            tx.execute("DELETE FROM allocation_parts WHERE id=?1", params![id]).map_err(err)?;
+            let changed = tx.execute("DELETE FROM allocation_parts WHERE id=?1", params![&old.id]).map_err(err)?;
+            require_plan_write(changed, "remove unused part")?;
         }
     }
-    tx.execute("UPDATE allocation_settings SET enabled=?1 WHERE singleton=1", params![i64::from(input.enabled)]).map_err(err)?;
+    let changed = tx.execute("UPDATE allocation_settings SET enabled=?1 WHERE singleton=1", params![i64::from(input.enabled)]).map_err(err)?;
+    require_plan_write(changed, "save enabled state")?;
+    expected_parts.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
+    if enabled(&tx)? != input.enabled || all_parts(&tx)? != expected_parts {
+        return Err("SQLite changed the allocation plan unexpectedly; no changes were saved".into());
+    }
     let plan = load_plan(&tx)?;
     tx.commit().map_err(err)?;
     Ok(plan)
@@ -185,6 +253,64 @@ mod tests {
         (dir, db)
     }
     fn part(name: &str, bp: i64, pays: bool) -> PartInput { PartInput { id: None, name: name.into(), share_bp: bp, pays_expenses: pays } }
+
+    #[test]
+    fn invalid_imported_boolean_flags_do_not_hide_allocations() {
+        let (_dir, db) = setup();
+        let conn = db.conn.lock().unwrap();
+        let before = load_plan(&conn).unwrap();
+        // An external importer can disable CHECK constraints while modifying
+        // a perfectly valid SQLite file; opening the file must not mask this.
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+        conn.execute("UPDATE allocation_settings SET enabled=2 WHERE singleton=1", []).unwrap();
+        assert!(enabled(&conn).unwrap_err().contains("allocation enabled"));
+        assert!(shares_for_new_sale(&conn).is_err(),
+            "corruption cannot silently turn a new sale's allocations off");
+        conn.execute("UPDATE allocation_settings SET enabled=1 WHERE singleton=1", []).unwrap();
+
+        conn.execute("UPDATE allocation_parts SET pays_expenses=2 WHERE id='activity'", []).unwrap();
+        assert!(all_parts(&conn).unwrap_err().contains("pays_expenses"));
+        assert!(load_plan(&conn).is_err());
+        conn.execute("UPDATE allocation_parts SET pays_expenses=1 WHERE id='activity'", []).unwrap();
+
+        conn.execute("UPDATE allocation_parts SET active=-1 WHERE id='savings'", []).unwrap();
+        assert!(all_parts(&conn).unwrap_err().contains("active"));
+        assert!(shares_for_new_sale(&conn).is_err(),
+            "a corrupt active flag must not silently exclude the historic fund");
+        conn.execute("UPDATE allocation_parts SET active=1 WHERE id='savings'", []).unwrap();
+        conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+
+        assert_eq!(load_plan(&conn).unwrap(), before);
+        assert_eq!(shares_for_new_sale(&conn).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn invalid_imported_part_fields_cannot_be_shown_as_valid_funds() {
+        let (_dir, db) = setup();
+        let conn = db.conn.lock().unwrap();
+        let original = all_parts(&conn).unwrap();
+        // Simulate imports that bypass SQLite CHECK constraints.
+        conn.execute_batch("PRAGMA ignore_check_constraints=ON;").unwrap();
+        for (column, sql, expected) in [
+            ("share_bp", "UPDATE allocation_parts SET share_bp=10001 WHERE id='activity'", "share_bp"),
+            ("share_bp", "UPDATE allocation_parts SET share_bp=-1 WHERE id='activity'", "share_bp"),
+            ("name", "UPDATE allocation_parts SET name='   ' WHERE id='activity'", "name"),
+            ("name", "UPDATE allocation_parts SET name=printf('%061d',0) WHERE id='activity'", "name"),
+            ("position", "UPDATE allocation_parts SET position=0 WHERE id='activity'", "position"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+            let message = all_parts(&conn).unwrap_err();
+            assert!(message.contains(expected), "{column}: {message}");
+            assert!(load_plan(&conn).is_err(), "{column} must not be shown as a valid fund");
+            assert!(shares_for_new_sale(&conn).is_err(), "{column} must not be frozen onto a new sale");
+            conn.execute(
+                "UPDATE allocation_parts SET name='Attività',share_bp=3333,position=2 WHERE id='activity'",
+                [],
+            ).unwrap();
+            assert_eq!(all_parts(&conn).unwrap(), original);
+        }
+        conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+    }
 
     #[test]
     fn three_default_parts_are_created_and_enabled() {
@@ -300,6 +426,144 @@ mod tests {
         drop(tx);
         let count: i64 = c.query_row("SELECT COUNT(*) FROM sale_finances WHERE sale_id='s'", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn ignored_part_updates_are_rejected_without_changing_the_saved_plan() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        let edited = || PlanInput {
+            enabled: true,
+            parts: before.parts.iter().map(|p| PartInput {
+                id: Some(p.id.clone()),
+                name: if p.id == "personal" { "Nuovo nome".into() } else { p.name.clone() },
+                share_bp: p.share_bp,
+                pays_expenses: p.pays_expenses,
+            }).collect(),
+        };
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("CREATE TRIGGER ignore_part_edit BEFORE UPDATE ON allocation_parts
+                WHEN OLD.id='personal' BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("SQLite did not apply"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER ignore_part_edit").unwrap();
+        let updated = save_plan_core(&db, edited()).unwrap();
+        assert_eq!(updated.parts[0].name, "Nuovo nome");
+    }
+
+    #[test]
+    fn ignored_settings_update_rolls_back_earlier_part_changes() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        let edited = || PlanInput {
+            enabled: false,
+            parts: before.parts.iter().map(|p| PartInput {
+                id: Some(p.id.clone()),
+                name: format!("Modificato {}", p.name),
+                share_bp: p.share_bp,
+                pays_expenses: p.pays_expenses,
+            }).collect(),
+        };
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_plan_setting BEFORE UPDATE ON allocation_settings
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("save enabled state"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before,
+            "both the enabled flag and the earlier part changes must roll back");
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER ignore_plan_setting").unwrap();
+        let updated = save_plan_core(&db, edited()).unwrap();
+        assert!(!updated.enabled);
+        assert!(updated.parts[0].name.starts_with("Modificato"));
+    }
+
+    #[test]
+    fn silently_ignored_new_part_does_not_delete_the_old_configuration() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_new_part BEFORE INSERT ON allocation_parts
+             WHEN NEW.name='Nuovo' BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        let message = save_plan_core(&db, PlanInput {
+            enabled: true,
+            parts: vec![part("Nuovo", 10_000, true)],
+        }).unwrap_err();
+        assert!(message.contains("save part"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before);
+    }
+
+    #[test]
+    fn after_update_triggers_cannot_change_the_saved_shares_or_enabled_flag() {
+        let (_dir, db) = setup();
+        let before = load_plan(&db.conn.lock().unwrap()).unwrap();
+        let edited = || PlanInput {
+            enabled: false,
+            parts: before.parts.iter().map(|p| PartInput {
+                id: Some(p.id.clone()), name: format!("Nuovo {}", p.name),
+                share_bp: p.share_bp, pays_expenses: p.pays_expenses,
+            }).collect(),
+        };
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER tamper_saved_part AFTER UPDATE OF name ON allocation_parts
+                   WHEN NEW.id='personal' BEGIN
+                   UPDATE allocation_parts SET share_bp=1234 WHERE id=NEW.id;
+                 END;"
+            ).unwrap();
+        }
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("unexpectedly"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before,
+            "a mutated part must roll back all changes");
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER tamper_saved_part;
+                 CREATE TRIGGER tamper_saved_setting AFTER UPDATE OF enabled ON allocation_settings
+                   BEGIN UPDATE allocation_settings SET enabled=1; END;"
+            ).unwrap();
+        }
+        let message = save_plan_core(&db, edited()).unwrap_err();
+        assert!(message.contains("unexpectedly"), "{message}");
+        assert_eq!(load_plan(&db.conn.lock().unwrap()).unwrap(), before,
+            "a mutated enabled flag must roll back all part edits");
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER tamper_saved_setting;").unwrap();
+        let saved = save_plan_core(&db, edited()).unwrap();
+        assert!(!saved.enabled);
+        assert!(saved.parts.iter().all(|p| p.name.starts_with("Nuovo ")));
+    }
+
+    #[test]
+    fn after_delete_trigger_cannot_silently_recreate_an_unused_allocation_part() {
+        let (_dir, db) = setup();
+        let before = all_parts(&db.conn.lock().unwrap()).unwrap();
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER recreate_deleted_part AFTER DELETE ON allocation_parts
+             WHEN OLD.id='activity' BEGIN
+               INSERT INTO allocation_parts(id,name,share_bp,pays_expenses,position,active)
+               VALUES(OLD.id,OLD.name,OLD.share_bp,OLD.pays_expenses,OLD.position,OLD.active);
+             END;"
+        ).unwrap();
+        let only_personal = || PlanInput {
+            enabled: true,
+            parts: vec![PartInput {
+                id: Some("personal".into()), name: "Personale".into(),
+                share_bp: 10_000, pays_expenses: false,
+            }],
+        };
+        let message = save_plan_core(&db, only_personal()).unwrap_err();
+        assert!(message.contains("unexpectedly"), "{message}");
+        assert_eq!(all_parts(&db.conn.lock().unwrap()).unwrap(), before);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER recreate_deleted_part;").unwrap();
+        let saved = save_plan_core(&db, only_personal()).unwrap();
+        assert_eq!(saved.parts.len(), 1);
+        assert_eq!(all_parts(&db.conn.lock().unwrap()).unwrap().len(), 1);
     }
 
     #[test]

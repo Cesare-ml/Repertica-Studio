@@ -12,7 +12,7 @@ use crate::{backup, db::Database, util::display_path};
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::atomic::{AtomicU64, Ordering}};
 use tauri::{Emitter, Manager, State};
 
 const STAMP: &str = "%Y-%m-%dT%H:%M:%S";
@@ -94,6 +94,30 @@ pub fn is_due(
     !last_attempt_failed.is_some_and(|t| now < t + Duration::minutes(RETRY_MINUTES))
 }
 
+/// Show the next *actual attempt*, including overdue jobs and pending retries.
+/// Reporting only the next calendar slot hides a missed backup while the app
+/// is about to run it, and can make a disconnected USB disk look scheduled for
+/// tomorrow when a retry is due in minutes.
+fn next_due_time(
+    schedule: &Schedule, now: NaiveDateTime, enabled_at: Option<NaiveDateTime>,
+    last_success: Option<NaiveDateTime>, last_failure: Option<NaiveDateTime>,
+) -> NaiveDateTime {
+    if is_due(schedule, now, enabled_at, last_success, last_failure) {
+        return now;
+    }
+    let previous = schedule.previous_occurrence(now);
+    let covered = [enabled_at, last_success].into_iter().flatten().max()
+        .is_some_and(|at| at >= previous);
+    if !covered {
+        if let Some(retry_at) = last_failure
+            .and_then(|at| at.checked_add_signed(Duration::minutes(RETRY_MINUTES)))
+        {
+            if retry_at > now { return retry_at; }
+        }
+    }
+    schedule.next_occurrence(now)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct ScheduleInput {
     pub enabled: bool,
@@ -146,26 +170,37 @@ fn schedule_of(status: &ScheduleStatus) -> Schedule {
 }
 
 pub fn status(conn: &Connection, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
-    let mut status = conn.query_row(
+    let (mut status, enabled_at): (ScheduleStatus, Option<String>) = conn.query_row(
         "SELECT enabled,frequency,time_of_day,weekday,day_of_month,destination,keep_last,last_success_at,
-                last_attempt_at,last_status,last_message,last_directory FROM backup_schedule WHERE singleton=1",
-        [], |r| Ok(ScheduleStatus {
+                last_attempt_at,last_status,last_message,last_directory,enabled_at FROM backup_schedule WHERE singleton=1",
+        [], |r| Ok((ScheduleStatus {
             enabled: r.get::<_, i64>(0)? == 1, frequency: r.get(1)?, time_of_day: r.get(2)?, weekday: r.get(3)?,
             day_of_month: r.get(4)?, destination: r.get(5)?, keep_last: r.get(6)?, last_success_at: r.get(7)?,
             last_attempt_at: r.get(8)?, last_status: r.get(9)?, last_message: r.get(10)?, last_directory: r.get(11)?,
             next_run_at: None,
-        })).map_err(err)?;
+        }, r.get(12)?))).map_err(err)?;
     if status.enabled {
-        status.next_run_at = Some(schedule_of(&status).next_occurrence(now).format(STAMP).to_string());
+        let failed_at = if status.last_status.as_deref() == Some("ERROR") {
+            parse_stamp(&status.last_attempt_at)
+        } else { None };
+        status.next_run_at = Some(next_due_time(
+            &schedule_of(&status), now, parse_stamp(&enabled_at),
+            parse_stamp(&status.last_success_at), failed_at,
+        ).format(STAMP).to_string());
     }
     Ok(status)
 }
 
 pub fn save_core(db: &Database, input: ScheduleInput, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
     validate(&input)?;
-    let conn = db.conn.lock().map_err(err)?;
+    let mut conn = db.conn.lock().map_err(err)?;
     let destination = input.destination.as_deref().map(str::trim).filter(|d| !d.is_empty()).map(String::from);
-    conn.execute(
+    // An imported SQLite archive may contain triggers that ignore an UPDATE or
+    // silently rewrite its values. A false success could leave automatic backups
+    // disabled, or send copies to the wrong external disk with the wrong quota.
+    // Read back every user-selected field before making this change permanent.
+    let tx = conn.transaction().map_err(err)?;
+    let updated = tx.execute(
         "UPDATE backup_schedule SET enabled=?1,frequency=?2,time_of_day=?3,weekday=?4,day_of_month=?5,
             destination=?6,keep_last=?7,
             enabled_at=CASE WHEN ?1=1 AND (enabled=0 OR enabled_at IS NULL) THEN ?8 ELSE enabled_at END,
@@ -177,10 +212,22 @@ pub fn save_core(db: &Database, input: ScheduleInput, now: NaiveDateTime) -> Res
             last_message=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_message END,
             last_directory=CASE WHEN destination IS NOT ?6 THEN NULL ELSE last_directory END
          WHERE singleton=1",
-        params![i64::from(input.enabled), input.frequency, input.time_of_day, input.weekday, input.day_of_month,
-            destination, input.keep_last, now.format(STAMP).to_string()],
+        params![i64::from(input.enabled), &input.frequency, &input.time_of_day, input.weekday, input.day_of_month,
+            &destination, input.keep_last, now.format(STAMP).to_string()],
     ).map_err(err)?;
-    status(&conn, now)
+    if updated != 1 {
+        return Err("SQLite non ha salvato la configurazione dei backup; controlla l'archivio".into());
+    }
+    let saved = status(&tx, now)?;
+    if saved.enabled != input.enabled || saved.frequency != input.frequency
+        || saved.time_of_day != input.time_of_day || saved.weekday != input.weekday
+        || saved.day_of_month != input.day_of_month || saved.destination != destination
+        || saved.keep_last != input.keep_last
+    {
+        return Err("SQLite ha alterato la configurazione dei backup: modifica annullata".into());
+    }
+    tx.commit().map_err(err)?;
+    Ok(saved)
 }
 
 /// Keep only the newest `keep` automatic backups **in this destination**.
@@ -264,6 +311,9 @@ fn same_configuration(a: &ScheduleStatus, b: &ScheduleStatus) -> bool {
 fn record_outcome(
     conn: &Connection, started: &ScheduleStatus, now: NaiveDateTime,
     outcome: &Result<backup::BackupSummary, String>,
+    // The in-process sequence breaks ties when two attempts started in the same second.
+    // `None` is reserved for deterministic historical-timestamp regression tests.
+    run_order: Option<(u64, &AtomicU64)>,
 ) -> Result<(), String> {
     let stamp = now.format(STAMP).to_string();
     if let Ok(summary) = outcome {
@@ -273,6 +323,23 @@ fn record_outcome(
             params![summary.directory, stamp]).map_err(err)?;
     }
     if !same_configuration(started, &status(conn, now)?) {
+        return Ok(());
+    }
+    // Manual "Run now" and the scheduled timer may overlap on a slow USB/NAS.
+    // A backup started earlier can finish last; its result must not replace the
+    // more recent attempt's success/error in the UI or rewind retry scheduling.
+    // Successful older copies are still added to auto_backup_log above.
+    let latest_attempt: Option<String> = conn.query_row(
+        "SELECT last_attempt_at FROM backup_schedule WHERE singleton=1",
+        [], |row| row.get(0),
+    ).map_err(err)?;
+    if parse_stamp(&latest_attempt).is_some_and(|latest| latest > now) {
+        return Ok(());
+    }
+    // SQLite calls are serialized by Database.conn, so compare and advance the
+    // sequence while holding that same lock. An older completion cannot replace
+    // a newer completion, even when their timestamps are identical to the second.
+    if run_order.is_some_and(|(run_id, latest)| latest.load(Ordering::Relaxed) > run_id) {
         return Ok(());
     }
     match outcome {
@@ -285,14 +352,20 @@ fn record_outcome(
                 params![stamp, message]).map_err(err)?;
         }
     }
+    if let Some((run_id, latest)) = run_order {
+        latest.fetch_max(run_id, Ordering::Relaxed);
+    }
     Ok(())
 }
 
 /// Run a backup now and record the outcome. Used by the timer and by "Run now".
 pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
-    let started = {
+    let (started, run_id) = {
         let conn = db.conn.lock().map_err(err)?;
-        status(&conn, now)?
+        let snapshot = status(&conn, now)?;
+        // Allocate while the SQLite mutex is held, preserving snapshot/start order.
+        let id = db.auto_backup_next_run.fetch_add(1, Ordering::Relaxed) + 1;
+        (snapshot, id)
     };
     let keep = started.keep_last;
     let destination = started.destination.clone().filter(|d| !d.trim().is_empty());
@@ -304,7 +377,8 @@ pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, Str
     };
     {
         let conn = db.conn.lock().map_err(err)?;
-        record_outcome(&conn, &started, now, &outcome)?;
+        record_outcome(&conn, &started, now, &outcome,
+            Some((run_id, &db.auto_backup_last_recorded)))?;
     }
     if outcome.is_ok() {
         if let Some(d) = &destination { let _ = apply_retention(db, Path::new(d), keep); }
@@ -473,6 +547,45 @@ mod tests {
     }
 
     #[test]
+    fn backup_schedule_save_rolls_back_ignored_and_rewritten_sqlite_updates() {
+        let (_dir, db, destination) = setup();
+        let now = at("2026-11-21 10:00");
+        let expected = input(&destination, 2);
+        {
+            let conn = db.conn.lock().unwrap();
+            // A third-party SQLite import can leave triggers behind. IGNORE does
+            // not raise an SQL error; without a row-count check, the UI lies.
+            conn.execute_batch("CREATE TRIGGER ignore_backup_schedule BEFORE UPDATE ON backup_schedule
+                BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+        let rejected = save_core(&db, input(&destination, 2), now).unwrap_err();
+        assert!(rejected.contains("SQLite"), "{rejected}");
+        {
+            let conn = db.conn.lock().unwrap();
+            assert!(!status(&conn, now).unwrap().enabled);
+            conn.execute_batch("DROP TRIGGER ignore_backup_schedule;").unwrap();
+            // AFTER triggers can change a valid destination and retention limit
+            // while reporting a successful update of the singleton row.
+            conn.execute_batch("CREATE TRIGGER rewrite_backup_schedule AFTER UPDATE ON backup_schedule
+                BEGIN UPDATE backup_schedule SET destination='/wrong/external/disk',keep_last=365 WHERE singleton=1; END;").unwrap();
+        }
+        let rejected = save_core(&db, input(&destination, 2), now).unwrap_err();
+        assert!(rejected.contains("alterato"), "{rejected}");
+        {
+            let conn = db.conn.lock().unwrap();
+            let unchanged = status(&conn, now).unwrap();
+            assert!(!unchanged.enabled && unchanged.destination.is_none());
+            assert_eq!(unchanged.keep_last, 0, "rollback must restore retention too");
+            conn.execute_batch("DROP TRIGGER rewrite_backup_schedule;").unwrap();
+        }
+        let saved = save_core(&db, expected, now).unwrap();
+        assert!(saved.enabled);
+        assert_eq!(saved.destination.as_deref(), Some(destination.to_str().unwrap()));
+        assert_eq!(saved.keep_last, 2);
+        assert_eq!(saved.next_run_at.as_deref(), Some("2026-11-22T09:00:00"));
+    }
+
+    #[test]
     fn a_due_run_creates_a_verified_backup_records_the_result_and_is_not_repeated() {
         let (_dir, db, destination) = setup();
         save_core(&db, input(&destination, 0), at("2026-11-19 10:00")).unwrap();
@@ -500,6 +613,44 @@ mod tests {
         fs::create_dir(&gone).unwrap();
         let recovered = tick(&db, at("2026-11-21 09:40")).unwrap().unwrap();
         assert_eq!(recovered.last_status.as_deref(), Some("OK"));
+    }
+
+    #[test]
+    fn next_run_shows_due_backups_and_retry_after_removable_disk_failure() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-19 10:00")).unwrap();
+        let check = |when: &str| {
+            let conn = db.conn.lock().unwrap();
+            status(&conn, at(when)).unwrap().next_run_at.unwrap()
+        };
+        assert_eq!(check("2026-11-21 09:05"), "2026-11-21T09:05:00",
+            "an overdue backup must not be advertised as tomorrow's run");
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE backup_schedule SET last_attempt_at='2026-11-21T09:06:00',
+                 last_status='ERROR',last_message='Disco scollegato' WHERE singleton=1", [],
+            ).unwrap();
+        }
+        assert_eq!(check("2026-11-21 09:20"), "2026-11-21T09:36:00",
+            "the artist should see the 30-minute retry, not the next day");
+        assert_eq!(check("2026-11-21 09:36"), "2026-11-21T09:36:00");
+        let completed = run_core(&db, at("2026-11-21 09:37")).unwrap();
+        assert_eq!(completed.last_status.as_deref(), Some("OK"));
+        assert_eq!(check("2026-11-21 09:38"), "2026-11-22T09:00:00",
+            "a completed backup must restore the regular schedule");
+    }
+
+    #[test]
+    fn next_run_respects_enable_time_and_reports_no_run_when_disabled() {
+        let (_dir, db, destination) = setup();
+        let saved = save_core(&db, input(&destination, 0), at("2026-11-21 12:00")).unwrap();
+        assert_eq!(saved.next_run_at.as_deref(), Some("2026-11-22T09:00:00"),
+            "enabling a schedule must not backfill earlier slots");
+        let mut disabled = input(&destination, 0);
+        disabled.enabled = false;
+        let off = save_core(&db, disabled, at("2026-11-21 13:00")).unwrap();
+        assert!(off.next_run_at.is_none());
     }
 
     #[test]
@@ -692,7 +843,7 @@ mod tests {
         save_core(&db, input(&second, 0), at("2026-11-21 09:05")).unwrap();
         {
             let conn = db.conn.lock().unwrap();
-            record_outcome(&conn, &started, at("2026-11-21 09:05"), &Ok(completed.clone())).unwrap();
+            record_outcome(&conn, &started, at("2026-11-21 09:05"), &Ok(completed.clone()), None).unwrap();
             let logged: i64 = conn.query_row(
                 "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
                 params![completed.directory], |r| r.get(0)).unwrap();
@@ -722,12 +873,87 @@ mod tests {
         {
             let conn = db.conn.lock().unwrap();
             record_outcome(&conn, &started, at("2026-11-21 09:05"),
-                &Err("Unità precedente scollegata".into())).unwrap();
+                &Err("Unità precedente scollegata".into()), None).unwrap();
         }
         let state = status(&db.conn.lock().unwrap(), at("2026-11-21 09:06")).unwrap();
         assert!(state.last_attempt_at.is_none() && state.last_status.is_none());
         assert!(tick(&db, at("2026-11-21 09:06")).unwrap().is_some(),
             "an old failure must not impose a 30-minute retry delay on the new disk");
+    }
+
+    #[test]
+    fn an_older_overlapping_backup_cannot_overwrite_the_newer_attempt() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-20 08:00")).unwrap();
+        let started = status(&db.conn.lock().unwrap(), at("2026-11-21 09:05")).unwrap();
+        // Real verified backup summaries: even an older, valid copy must not
+        // overwrite newer status when a USB/NAS operation finishes out of order.
+        let older_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let newer_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let conn = db.conn.lock().unwrap();
+
+        record_outcome(&conn, &started, at("2026-11-21 09:06"), &Ok(newer_copy.clone()), None).unwrap();
+        record_outcome(&conn, &started, at("2026-11-21 09:05"),
+            &Err("Older disk error arrived late".into()), None).unwrap();
+        let after_success = status(&conn, at("2026-11-21 09:07")).unwrap();
+        assert_eq!(after_success.last_attempt_at.as_deref(), Some("2026-11-21T09:06:00"));
+        assert_eq!(after_success.last_success_at.as_deref(), Some("2026-11-21T09:06:00"));
+        assert_eq!(after_success.last_status.as_deref(), Some("OK"));
+        assert_eq!(after_success.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+
+        record_outcome(&conn, &started, at("2026-11-21 09:10"),
+            &Err("Latest disk error".into()), None).unwrap();
+        record_outcome(&conn, &started, at("2026-11-21 09:07"), &Ok(older_copy.clone()), None).unwrap();
+        let after_error = status(&conn, at("2026-11-21 09:11")).unwrap();
+        assert_eq!(after_error.last_attempt_at.as_deref(), Some("2026-11-21T09:10:00"));
+        assert_eq!(after_error.last_success_at.as_deref(), Some("2026-11-21T09:06:00"));
+        assert_eq!(after_error.last_status.as_deref(), Some("ERROR"));
+        assert_eq!(after_error.last_message.as_deref(), Some("Latest disk error"));
+        assert_eq!(after_error.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+        let logged: i64 = conn.query_row(
+            "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
+            params![older_copy.directory], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(logged, 1, "the valid older backup remains registered for recovery");
+    }
+
+
+    #[test]
+    fn overlapping_attempts_in_the_same_second_do_not_rewind_the_result() {
+        let (_dir, db, destination) = setup();
+        save_core(&db, input(&destination, 0), at("2026-11-20 08:00")).unwrap();
+        let now = at("2026-11-21 09:05");
+        let started = status(&db.conn.lock().unwrap(), now).unwrap();
+        let newer_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let older_copy = backup::create_backup_core(&db, &destination).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let latest = AtomicU64::new(0);
+
+        // The newer success finishes before the older error, but their coarse
+        // persisted timestamps are exactly equal.
+        record_outcome(&conn, &started, now, &Ok(newer_copy.clone()), Some((2, &latest))).unwrap();
+        record_outcome(&conn, &started, now,
+            &Err("Old disk error completed late".into()), Some((1, &latest))).unwrap();
+        let after_success = status(&conn, now).unwrap();
+        assert_eq!(after_success.last_status.as_deref(), Some("OK"));
+        assert_eq!(after_success.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+        assert_eq!(latest.load(Ordering::Relaxed), 2);
+
+        // The reverse ordering is also protected: an older successful copy is
+        // registered in history, but cannot replace the newer failure/retry.
+        record_outcome(&conn, &started, now,
+            &Err("Latest disk failure".into()), Some((4, &latest))).unwrap();
+        record_outcome(&conn, &started, now, &Ok(older_copy.clone()), Some((3, &latest))).unwrap();
+        let after_error = status(&conn, now).unwrap();
+        assert_eq!(after_error.last_status.as_deref(), Some("ERROR"));
+        assert_eq!(after_error.last_message.as_deref(), Some("Latest disk failure"));
+        assert_eq!(after_error.last_directory.as_deref(), Some(newer_copy.directory.as_str()));
+        assert_eq!(latest.load(Ordering::Relaxed), 4);
+        let logged: i64 = conn.query_row(
+            "SELECT count(*) FROM auto_backup_log WHERE directory=?1",
+            params![older_copy.directory], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(logged, 1, "older valid copies remain recoverable in history");
     }
 
     #[test]

@@ -78,14 +78,26 @@ fn record_core(c:&mut Connection,input:SaleReceiptInput)->Result<SaleReceipt,Str
     Ok(saved)
 }
 fn delete_core(c:&Connection,id:&str)->Result<(),String>{
-    let attached: bool = c.query_row(
+    // Imported databases can have triggers that ignore DELETE or recreate the
+    // row. Keep the attachment check and the final result in one transaction:
+    // never report success or commit trigger side effects for a failed removal.
+    let tx = c.unchecked_transaction().map_err(err)?;
+    let attached: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM sale_receipt_attachments WHERE receipt_id=?1)",
         params![id], |r| r.get(0),
     ).map_err(err)?;
     if attached { return Err("Rimuovi l'allegato prima di cancellare l'incasso".into()); }
-    if c.execute("DELETE FROM sale_receipts WHERE id=?1",params![id]).map_err(err)?==0{
-        return Err("Receipt not found".into())
+    if tx.execute("DELETE FROM sale_receipts WHERE id=?1",params![id]).map_err(err)? != 1 {
+        return Err("Incasso non trovato o eliminazione ignorata da SQLite".into());
     }
+    let remains: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sale_receipts WHERE id=?1)",
+        params![id], |r| r.get(0),
+    ).map_err(err)?;
+    if remains {
+        return Err("SQLite ha ricreato l'incasso: eliminazione annullata".into());
+    }
+    tx.commit().map_err(err)?;
     Ok(())
 }
 
@@ -214,6 +226,41 @@ mod tests{
             params![receipt.id]).unwrap();
         delete_core(&c, &receipt.id).unwrap();
     }
+    #[test]
+    fn ignored_or_recreated_receipt_deletes_roll_back_without_changing_balances() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(temp.path().into()).unwrap();
+        let mut c = db.conn.lock().unwrap();
+        setup(&c);
+        let receipt = record_core(&mut c, input(2300)).unwrap();
+        let before = balances_core(&c).unwrap()[0].received_cents;
+
+        c.execute_batch("CREATE TRIGGER ignore_receipt_delete BEFORE DELETE ON sale_receipts
+            BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        let error = delete_core(&c, &receipt.id).unwrap_err();
+        assert!(error.contains("ignorata"), "{error}");
+        assert_eq!(list_core(&c).unwrap().len(), 1);
+        assert_eq!(balances_core(&c).unwrap()[0].received_cents, before);
+        c.execute_batch("DROP TRIGGER ignore_receipt_delete").unwrap();
+
+        // The DELETE claims to affect one row, but an AFTER trigger restores it.
+        c.execute_batch("CREATE TRIGGER recreate_receipt AFTER DELETE ON sale_receipts
+            BEGIN
+              INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,reference,notes,created_at)
+              VALUES(OLD.id,OLD.sale_id,OLD.received_at,OLD.amount_cents,
+                     OLD.method,OLD.reference,OLD.notes,OLD.created_at);
+            END;").unwrap();
+        let error = delete_core(&c, &receipt.id).unwrap_err();
+        assert!(error.contains("ricreato"), "{error}");
+        assert_eq!(list_core(&c).unwrap().len(), 1);
+        assert_eq!(balances_core(&c).unwrap()[0].received_cents, before);
+        c.execute_batch("DROP TRIGGER recreate_receipt").unwrap();
+
+        delete_core(&c, &receipt.id).unwrap();
+        assert!(list_core(&c).unwrap().is_empty());
+        assert_eq!(balances_core(&c).unwrap()[0].received_cents, 0);
+    }
+
     #[test]
     fn receipt_year_overview_uses_collection_date_not_sale_date_and_includes_empty_months(){
         let temp=tempfile::tempdir().unwrap();
