@@ -537,6 +537,34 @@ mod tests {
         let listener = worker.join().unwrap();
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
         assert_eq!(ledger::count(&db),3);
+        // Exercise the exact typed read-only request after real loopback ingestion.
+        // The synthetic resolver is native-only and cannot be supplied over IPC.
+        let request = || serde_json::from_value(json!({"action":"readSettlement",
+            "artworkId":binding.local_work,"scope":binding.scope})).unwrap();
+        let resolve = |_: &rusqlite::Connection, scope: &str, work: &str, subject: &str| {
+            assert_eq!(scope,binding.scope);
+            assert_eq!(work,binding.local_work);
+            assert_eq!(subject,binding.owner);
+            Ok(Some(binding.clone()))
+        };
+        let summary = settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),resolve).unwrap();
+        assert_eq!(summary,json!({"sequence":3,"status":"review_required","amount":25000,"currency":"EUR",
+            "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z"}));
+        assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&profile),||Ok(NOW),
+            |_,_,_,_| panic!("profile must not resolve")),Err("oauth_token_rejected"));
+        assert_eq!(settlement_http::read_selected_summary(&mut db,request(),None,||Ok(NOW),
+            |_,_,_,_| panic!("anonymous must not resolve")),Err("settlement_access_denied"));
+        assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),
+            |_,_,_,_| Ok(None)),Err("settlement_binding_unavailable"));
+        let mut foreign = binding.clone();
+        foreign.owner = "repertica:1".into();
+        assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),
+            |_,_,_,_| Ok(Some(foreign))),Err("settlement_binding_mismatch"));
+        db.execute("UPDATE auction_archive_scope SET scope='other'",[]).unwrap();
+        assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),
+            |_,_,_,_| panic!("restored archive must not resolve")),Err("settlement_binding_mismatch"));
+        db.execute("UPDATE auction_archive_scope SET scope=?1",[&binding.scope]).unwrap();
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
         let stamp:String = db.query_row("SELECT acknowledged_at FROM settlement_fixture_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
         assert_eq!(stamp,"2026-11-25T04:02:00.000Z");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);

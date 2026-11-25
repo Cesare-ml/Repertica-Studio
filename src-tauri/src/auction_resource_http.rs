@@ -555,6 +555,8 @@ pub(super) async fn dispatch_isolated(
             Ok(json!({"revision":s.confirm_prepare(conn, &confirmation_id, &clock).await?})),
         Request::ConfirmReconcile { confirmation_id } =>
             project(serde_json::to_value(s.confirm_reconcile(conn, &confirmation_id, &clock).await?)),
+        // Profile grants cannot read private settlement data.
+        Request::ReadSettlement { .. } => Err("settlement_access_denied".into()),
         Request::Status {} | Request::Disconnect {} => Err("auction_invalid_request".into()),
     }
 }

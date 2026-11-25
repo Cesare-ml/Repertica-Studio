@@ -77,3 +77,40 @@ impl NativeSettlementHttp {
         ledger::ack(c, b, &target, &bytes)
     }
 }
+
+// Read-only IPC-shaped dispatch for the isolated native composition. The
+// renderer selects only a local artwork and archive scope. The resolver is
+// native-owned, must independently verify the immutable published association
+// and current authority, and must never infer it from a preview or ledger row.
+// No HTTP request is made by this function and no release dispatcher mounts it.
+pub(super) fn read_selected_summary(
+    conn: &mut Connection,
+    request: super::resource_http::ipc::Request,
+    token: Option<&NativeAccessToken>,
+    clock: impl Fn() -> Result<u64, Failure>,
+    resolve: impl FnOnce(&Connection, &str, &str, &str) -> Result<Option<Binding>, Failure>,
+) -> Result<Value, Failure> {
+    use super::resource_http::ipc::Request;
+    let Request::ReadSettlement { artwork_id, scope } = request else {
+        return Err("settlement_invalid_request");
+    };
+    let token = token.ok_or("settlement_access_denied")?;
+    token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
+    let canonical_uuid = |s: &str| uuid::Uuid::parse_str(s).is_ok_and(|u| u.to_string() == s);
+    if !canonical_uuid(&artwork_id) || !canonical_uuid(&scope) {
+        return Err("settlement_binding_mismatch");
+    }
+    let current: String = conn.query_row(
+        "SELECT scope FROM auction_archive_scope WHERE singleton=1", [], |r| r.get(0)
+    ).map_err(|_| "settlement_storage_failed")?;
+    if current != scope { return Err("settlement_binding_mismatch"); }
+    let binding = resolve(conn, &scope, &artwork_id, &token.subject)?
+        .ok_or("settlement_binding_unavailable")?;
+    if binding.scope != scope || binding.local_work != artwork_id || binding.owner != token.subject {
+        return Err("settlement_binding_mismatch");
+    }
+    // Ledger rechecks archive and existence inside its own read transaction.
+    let summary = ledger::summary(conn, &binding)?;
+    token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
+    serde_json::to_value(summary).map_err(|_| "settlement_invalid_response")
+}

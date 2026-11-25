@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 #[serde(tag = "action", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum Request {
     Status {},
+    ReadSettlement { artwork_id: String, scope: String },
     Disconnect {},
     Organizations {},
     SelectOrganization { tenant_id: String },
@@ -35,6 +36,7 @@ mod tests {
     #[test]
     fn release_dispatch_is_fail_closed_for_every_remote_operation() {
         for request in [
+            json!({"action":"readSettlement","artworkId":"a","scope":"s"}),
             json!({"action":"organizations"}),
             json!({"action":"selectOrganization","tenantId":"tenant-test"}),
             json!({"action":"clearSelection"}), json!({"action":"cancelReview"}),
@@ -55,6 +57,9 @@ mod tests {
     #[test]
     fn wire_rejects_destination_token_keys_and_unknown_operations() {
         for invalid in [
+            json!({"action":"readSettlement","artworkId":"a","scope":"s","auctionId":"arbitrary"}),
+            json!({"action":"readSettlement","artworkId":"a","scope":"s","ownerSubject":"repertica:1"}),
+            json!({"action":"readSettlement","artworkId":"a","scope":"s","accessToken":"x"}),
             json!({"action":"status","provider":"isolated"}),
             json!({"action":"organizations","url":"http://127.0.0.1:1234"}),
             json!({"action":"selectOrganization","tenantId":"tenant-test","accessToken":"x"}),
