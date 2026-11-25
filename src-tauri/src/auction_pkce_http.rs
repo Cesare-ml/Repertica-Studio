@@ -28,6 +28,7 @@ pub(super) struct NativeAccessToken {
     bearer: String,
     client: GrantClient,
     expires_at: u64,
+    subject: String,
 }
 
 impl NativeAccessToken {
@@ -65,8 +66,15 @@ async fn bounded_json<T: serde::de::DeserializeOwned>(
 }
 
 async fn read_json<T: serde::de::DeserializeOwned>(
-    mut response: reqwest::Response, deadline: Instant,
+    response: reqwest::Response, deadline: Instant,
 ) -> Result<T, Failure> {
+    let bytes = read_json_bytes(response, deadline).await?;
+    serde_json::from_slice(&bytes).map_err(|_| "oauth_invalid_response")
+}
+
+async fn read_json_bytes(
+    mut response: reqwest::Response, deadline: Instant,
+) -> Result<Vec<u8>, Failure> {
     let json = response.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(';').next()).is_some_and(|v| v.trim().eq_ignore_ascii_case("application/json"));
     if !json { return Err("oauth_invalid_response"); }
@@ -80,7 +88,7 @@ async fn read_json<T: serde::de::DeserializeOwned>(
         bytes.extend_from_slice(&chunk);
     }
     remaining(deadline)?;
-    serde_json::from_slice(&bytes).map_err(|_| "oauth_invalid_response")
+    Ok(bytes)
 }
 
 #[derive(Deserialize)]
@@ -157,6 +165,10 @@ fn valid_session_id(sid: &str) -> bool {
 }
 
 fn verified_expiry(token: &str, jwks: &Jwks, client: GrantClient, now: u64) -> Result<u64, Failure> {
+    Ok(verified_claims(token, jwks, client, now)?.exp)
+}
+
+fn verified_claims(token: &str, jwks: &Jwks, client: GrantClient, now: u64) -> Result<Claims, Failure> {
     if token.len() > MAX_TOKEN || jwks.keys.len() > 32 { return Err("oauth_token_rejected"); }
     let mut segments = token.split('.');
     let h = segments.next().ok_or("oauth_token_rejected")?;
@@ -189,7 +201,7 @@ fn verified_expiry(token: &str, jwks: &Jwks, client: GrantClient, now: u64) -> R
         claims.nbf.is_some_and(|nbf| nbf > now) {
         return Err("oauth_claims_rejected");
     }
-    Ok(claims.exp)
+    Ok(claims)
 }
 
 fn isolated_client() -> Result<Client, Failure> {
@@ -205,6 +217,95 @@ fn isolated_client() -> Result<Client, Failure> {
 
 #[path = "auction_resource_http.rs"]
 mod resource_http;
+
+// Settlement is deliberately a different client and remains in the test target.
+// The fixture ledger is shared with its standalone transactional regression tests.
+#[cfg(test)]
+#[path = "../tests/auction_settlement_ingestion_contract.rs"]
+mod settlement_ledger;
+
+#[cfg(test)]
+mod settlement_http {
+    use super::*;
+    use super::settlement_ledger::{self as ledger, Binding};
+    use rusqlite::Connection;
+    use serde_json::{json, Value};
+
+    const PATH: &str = "/api/studio/settlement/delivery";
+
+    pub(super) struct NativeSettlementHttp {
+        addr: SocketAddrV4,
+        client: Client,
+    }
+
+    impl NativeSettlementHttp {
+        pub(super) fn new(addr: SocketAddrV4) -> Result<Self, Failure> {
+            allowed(addr)?;
+            Ok(Self { addr, client: isolated_client()? })
+        }
+
+        fn authorize<'a>(&self, token: &'a NativeAccessToken, binding: &Binding,
+            clock: &impl Fn() -> Result<u64, Failure>) -> Result<&'a str, Failure> {
+            let bearer = token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
+            if token.subject != binding.owner { return Err("settlement_binding_mismatch"); }
+            allowed(self.addr)?;
+            Ok(bearer)
+        }
+
+        async fn request(&self, token: &NativeAccessToken, binding: &Binding,
+            body: Value, clock: &impl Fn() -> Result<u64, Failure>) -> Result<Vec<u8>, Failure> {
+            let deadline = Instant::now() + DEADLINE;
+            let bearer = self.authorize(token, binding, clock)?;
+            let bytes = serde_json::to_vec(&body).map_err(|_| "settlement_invalid_request")?;
+            if bytes.len() > 4096 { return Err("settlement_invalid_request"); }
+            let response = self.client.post(format!("http://{}{PATH}", self.addr))
+                .bearer_auth(bearer).header(header::CONTENT_TYPE, "application/json")
+                .body(bytes).timeout(remaining(deadline)?).send().await.map_err(http_error)?;
+            match response.status() {
+                StatusCode::OK => (),
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => return Err("settlement_access_denied"),
+                StatusCode::NOT_FOUND => return Err("settlement_not_found"),
+                StatusCode::CONFLICT => return Err("settlement_conflict"),
+                StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE => return Err("settlement_unavailable"),
+                _ => return Err("settlement_http_rejected"),
+            }
+            // Keep the exact bytes: normalizing JSON before strict deserialization
+            // would discard duplicate fields. Never parse a server error body.
+            let bytes = read_json_bytes(response, deadline).await?;
+            self.authorize(token, binding, clock)?;
+            Ok(bytes)
+        }
+
+        pub(super) async fn poll(&self, c: &mut Connection, b: &Binding,
+            token: &NativeAccessToken, clock: impl Fn() -> Result<u64, Failure>) -> Result<u64, Failure> {
+            self.authorize(token, b, &clock)?;
+            ledger::cursor(c, b)?;
+            let bytes = self.request(token, b, json!({"action":"poll","auctionId":b.auction,
+                "tenantId":b.tenant}), &clock).await?;
+            ledger::poll(c, b, &bytes)
+        }
+
+        pub(super) async fn history(&self, c: &mut Connection, b: &Binding,
+            token: &NativeAccessToken, clock: impl Fn() -> Result<u64, Failure>) -> Result<u64, Failure> {
+            self.authorize(token, b, &clock)?;
+            let after = ledger::cursor(c, b)?;
+            let bytes = self.request(token, b, json!({"action":"history","auctionId":b.auction,
+                "tenantId":b.tenant,"afterSequence":after}), &clock).await?;
+            ledger::history(c, b, after, &bytes)
+        }
+
+        pub(super) async fn ack(&self, c: &mut Connection, b: &Binding,
+            token: &NativeAccessToken, clock: impl Fn() -> Result<u64, Failure>) -> Result<(), Failure> {
+            self.authorize(token, b, &clock)?;
+            let target = ledger::ack_target(c, b)?;
+            let bytes = self.request(token, b, json!({"action":"ack","auctionId":b.auction,
+                "tenantId":b.tenant,"resultId":target.result_id,
+                "deliverySequence":target.sequence}), &clock).await?;
+            ledger::ack(c, b, &target, &bytes)
+        }
+    }
+}
+
 
 impl NativeIdentityHttp {
     pub(super) fn new(provider: IdentityProvider) -> Result<Self, Failure> {
@@ -253,9 +354,9 @@ impl NativeIdentityHttp {
         if reply.token_type != "Bearer" || reply.expires_in != 900 || reply.scope != grant.expected_client.scope() {
             return Err("oauth_token_rejected");
         }
-        let expires_at = verified_expiry(&reply.access_token, &keys, grant.expected_client, clock()?)?;
+        let claims = verified_claims(&reply.access_token, &keys, grant.expected_client, clock()?)?;
         remaining(deadline)?;
-        Ok(NativeAccessToken { bearer: reply.access_token, client: grant.expected_client, expires_at })
+        Ok(NativeAccessToken { bearer: reply.access_token, client: grant.expected_client, expires_at: claims.exp, subject: claims.sub })
     }
 }
 
@@ -430,6 +531,72 @@ mod tests {
         let rejected = tauri::async_runtime::block_on(resource.list_tenants(&result, || Ok(NOW)));
         assert_eq!(rejected.err(), Some("oauth_token_rejected"));
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+
+        // The settlement transport uses the verified subject, not an arbitrary
+        // owner from a renderer, and only an explicitly bound local artwork.
+        use super::settlement_ledger as ledger;
+        let client = settlement_http::NativeSettlementHttp::new(addr).unwrap();
+        let mut db = ledger::database();
+        let mut binding = ledger::binding();
+        let profile = verified_resource_token();
+        assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW))),
+            Err("settlement_binding_mismatch"));
+        binding.owner = "repertica:42".into();
+        assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&profile,||Ok(NOW))),
+            Err("oauth_token_rejected"));
+        assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW+900))),
+            Err("oauth_token_rejected"));
+        assert_eq!(tauri::async_runtime::block_on(client.ack(&mut db,&binding,&result,||Ok(NOW))),
+            Err("settlement_not_ingested"));
+        assert!(settlement_http::NativeSettlementHttp::new(SocketAddrV4::new(Ipv4Addr::new(192,0,2,1),addr.port())).is_err());
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+
+        let bearer = signed.to_owned();
+        let worker = thread::spawn(move || {
+            let poll = json!({"action":"poll","auctionId":"fixture-auction","tenantId":"fixture-tenant"});
+            let history = json!({"action":"history","auctionId":"fixture-auction","tenantId":"fixture-tenant","afterSequence":0});
+            let ack = json!({"action":"ack","auctionId":"fixture-auction","tenantId":"fixture-tenant",
+                "resultId":"fixture-auction:1:fulfillment","deliverySequence":3});
+            let latest = ledger::delivery(3,"review_required");
+            let mut acknowledged = latest.clone();
+            acknowledged["acknowledged_at"] = json!("2026-11-25T04:02:00.000Z");
+            let mut confirmation = ledger::reply(acknowledged);
+            confirmation["replayed"] = json!(false);
+            for (expected,status,body) in [
+                (poll.clone(),"200 OK",ledger::reply(latest.clone())),
+                (history,"200 OK",ledger::page(vec![ledger::delivery(1,"fulfilled"),
+                    ledger::delivery(2,"fulfilled"),latest.clone()],3,None)),
+                (ack.clone(),"503 Service Unavailable",json!({"ok":false,"code":"unavailable"})),
+                (ack,"200 OK",confirmation),
+                (poll.clone(),"200 OK",ledger::reply(latest)),
+                (poll,"403 Forbidden",json!({"ok":false,"code":"denied"})),
+            ] {
+                let mut stream = accept(&listener);
+                let body_bytes = read_resource_request(&mut stream,
+                    "POST /api/studio/settlement/delivery HTTP/1.1",Some(&bearer),None);
+                assert_eq!(serde_json::from_slice::<Value>(&body_bytes).unwrap(),expected);
+                reply(&mut stream,status,&body);
+            }
+            listener
+        });
+        tauri::async_runtime::block_on(async {
+            assert_eq!(client.poll(&mut db,&binding,&result,||Ok(NOW)).await,Err("settlement_history_gap"));
+            assert_eq!(ledger::count(&db),0);
+            assert_eq!(client.history(&mut db,&binding,&result,||Ok(NOW)).await,Ok(3));
+            assert_eq!(client.ack(&mut db,&binding,&result,||Ok(NOW)).await,Err("settlement_unavailable"));
+            let stamp:Option<String> = db.query_row("SELECT acknowledged_at FROM settlement_fixture_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
+            assert!(stamp.is_none());
+            // An explicit second attempt uses the same committed target.
+            assert_eq!(client.ack(&mut db,&binding,&result,||Ok(NOW)).await,Ok(()));
+            assert_eq!(client.poll(&mut db,&binding,&result,||Ok(NOW)).await,Ok(3));
+            assert_eq!(client.poll(&mut db,&binding,&result,||Ok(NOW)).await,Err("settlement_access_denied"));
+        });
+        let listener = worker.join().unwrap();
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+        assert_eq!(ledger::count(&db),3);
+        let stamp:String = db.query_row("SELECT acknowledged_at FROM settlement_fixture_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
+        assert_eq!(stamp,"2026-11-25T04:02:00.000Z");
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
     }
 
     #[test]
@@ -480,8 +647,8 @@ mod tests {
         let f = fixture();
         let keys: Jwks = serde_json::from_value(f["jwks"].clone()).unwrap();
         let bearer = f["valid"].as_str().unwrap().to_owned();
-        let expires_at = verified_expiry(&bearer,&keys,GrantClient::Auctions,NOW).unwrap();
-        NativeAccessToken { bearer, client: GrantClient::Auctions, expires_at }
+        let claims = verified_claims(&bearer,&keys,GrantClient::Auctions,NOW).unwrap();
+        NativeAccessToken { bearer, client: GrantClient::Auctions, expires_at: claims.exp, subject: claims.sub }
     }
     fn tenants(role: &str) -> Value {
         json!({"month":"2027-01","monthlyPerArtistLimit":3,"globalMonthlyLimit":12,"tenants":[
