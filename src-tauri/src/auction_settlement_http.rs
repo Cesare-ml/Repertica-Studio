@@ -125,19 +125,49 @@ pub(super) fn read_selected_summary(
     serde_json::to_value(summary).map_err(|_| "settlement_invalid_response")
 }
 
+// The review is native-only, short lived, and tied to exact durable evidence,
+// association and settlement grant. The renderer only receives an opaque ID.
+pub(super) struct ReviewedAck {
+    id: String,
+    binding: Binding,
+    summary: ledger::SettlementSummary,
+    grant_digest: ring::digest::Digest,
+    expires_at: u64,
+}
+pub(super) fn review_selected_ack(
+    conn: &mut Connection, work: &str, scope: &str, expected: u64,
+    token: Option<&NativeAccessToken>, clock: impl Fn() -> Result<u64, Failure>,
+    verify_live: impl Fn(&super::settlement_store::PublishedBinding) -> Result<(), Failure>,
+) -> Result<(ReviewedAck, Value), Failure> {
+    let token = token.ok_or("settlement_access_denied")?;
+    let now = clock()?;
+    let bearer = token.bearer_for(GrantClient::AuctionsSettlement, now)?;
+    let binding = super::settlement_store::resolve_selected(conn, scope, work, &token.subject, verify_live)?
+        .ok_or("settlement_binding_unavailable")?;
+    let summary = ledger::summary(conn, &binding)?.ok_or("settlement_not_ingested")?;
+    if expected != summary.sequence { return Err("settlement_stale_ack"); }
+    token.bearer_for(GrantClient::AuctionsSettlement, clock()?)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let response = json!({"confirmationId":id,"summary":summary});
+    Ok((ReviewedAck { id, binding, summary,
+        grant_digest: ring::digest::digest(&ring::digest::SHA256, bearer.as_bytes()),
+        expires_at: now.saturating_add(60) }, response))
+}
+
 // One explicit operation; no automatic pagination, retries or ACK.
 pub(super) async fn dispatch_selected_remote(
     addr: SocketAddrV4, conn: &mut Connection, request: super::resource_http::ipc::Request,
     token: Option<&NativeAccessToken>, clock: impl Fn() -> Result<u64, Failure>,
     verify_live: impl Fn(&super::settlement_store::PublishedBinding) -> Result<(), Failure>,
+    reviewed: Option<ReviewedAck>,
 ) -> Result<Value, Failure> {
     use super::resource_http::ipc::Request;
-    enum Operation { Poll, History, Ack(u64) }
+    enum Operation { Poll, History, Ack(u64, String) }
     let (work, scope, op) = match request {
         Request::PollSettlement { artwork_id, scope } => (artwork_id, scope, Operation::Poll),
         Request::HistorySettlement { artwork_id, scope } => (artwork_id, scope, Operation::History),
-        Request::AckSettlement { artwork_id, scope, expected_sequence } =>
-            (artwork_id, scope, Operation::Ack(expected_sequence)),
+        Request::AckSettlement { artwork_id, scope, expected_sequence, confirmation_id } =>
+            (artwork_id, scope, Operation::Ack(expected_sequence, confirmation_id)),
         _ => return Err("settlement_invalid_request"),
     };
     let token = token.ok_or("settlement_access_denied")?;
@@ -152,9 +182,17 @@ pub(super) async fn dispatch_selected_remote(
     match op {
         Operation::Poll => { client.poll(conn, &binding, token, &clock).await?; }
         Operation::History => { client.history(conn, &binding, token, &clock).await?; }
-        Operation::Ack(expected) => {
+        Operation::Ack(expected, id) => {
+            let review = reviewed.ok_or("settlement_review_required")?;
+            let now = clock()?;
+            let bearer = token.bearer_for(GrantClient::AuctionsSettlement, now)?;
+            let digest = ring::digest::digest(&ring::digest::SHA256, bearer.as_bytes());
+            if id != review.id || now >= review.expires_at ||
+                digest.as_ref() != review.grant_digest.as_ref() || binding != review.binding {
+                return Err("settlement_review_required");
+            }
             let summary = ledger::summary(conn, &binding)?.ok_or("settlement_not_ingested")?;
-            if expected != summary.sequence { return Err("settlement_stale_ack"); }
+            if expected != summary.sequence || summary != review.summary { return Err("settlement_stale_ack"); }
             if summary.acknowledged_at.is_none() {
                 client.ack_reviewed(conn, &binding, token, Some(expected), &clock).await?;
             }

@@ -324,6 +324,7 @@ pub(super) struct NativePreviewSession {
     api: NativeAuctionsHttp,
     token: NativeAccessToken,
     reviewed: Option<ReviewedAction>,
+    settlement_review: Option<super::settlement_http::ReviewedAck>,
     selected: Option<(String, bool)>,
 }
 
@@ -387,10 +388,10 @@ impl NativePreviewSession {
     pub(super) fn new(api: NativeAuctionsHttp, token: NativeAccessToken,
         now: u64) -> Result<Self, Failure> {
         token.bearer_for(GrantClient::Auctions, now)?;
-        Ok(Self { api, token, reviewed: None, selected: None })
+        Ok(Self { api, token, reviewed: None, settlement_review: None, selected: None })
     }
 
-    pub(super) fn cancel_review(&mut self) { self.reviewed = None; }
+    pub(super) fn cancel_review(&mut self) { self.reviewed = None; self.settlement_review = None; }
 
     pub(super) fn clear_selection(&mut self) {
         self.cancel_review();
@@ -557,7 +558,7 @@ pub(super) async fn dispatch_isolated(
             project(serde_json::to_value(s.confirm_reconcile(conn, &confirmation_id, &clock).await?)),
         // Profile grants cannot read private settlement data.
         Request::ReadSettlement { .. } | Request::PollSettlement { .. } |
-        Request::HistorySettlement { .. } | Request::AckSettlement { .. } =>
+        Request::HistorySettlement { .. } | Request::ReviewSettlementAck { .. } | Request::AckSettlement { .. } =>
             Err("settlement_access_denied".into()),
         Request::Status {} | Request::Disconnect {} => Err("auction_invalid_request".into()),
     }
@@ -575,6 +576,9 @@ pub(super) async fn dispatch_workspace_isolated(
     clock: impl Fn() -> Result<u64, Failure>,
     verify_live: impl Fn(&super::settlement_store::PublishedBinding) -> Result<(), Failure>,
 ) -> Result<Value, String> {
+    // Every IPC action consumes/invalidates the previous review before any
+    // await, even on a failed confirmation. A new review replaces it.
+    let reviewed = profile.as_mut().and_then(|p| p.settlement_review.take());
     let now = clock();
     let profile_active = profile.as_ref().is_some_and(|s|
         now.is_ok_and(|t| s.token.bearer_for(GrantClient::Auctions, t).is_ok()));
@@ -587,11 +591,12 @@ pub(super) async fn dispatch_workspace_isolated(
         }
     }
     if matches!(&request, Request::ReadSettlement { .. } | Request::PollSettlement { .. } |
-        Request::HistorySettlement { .. } | Request::AckSettlement { .. }) {
+        Request::HistorySettlement { .. } | Request::ReviewSettlementAck { .. } | Request::AckSettlement { .. }) {
         if !profile_active {
             *profile = None;
             return Err("settlement_access_denied".into());
         }
+        let mut next_review = None;
         let outcome = {
             let p = profile.as_ref().ok_or("settlement_access_denied")?;
             let guarded_clock = || {
@@ -608,9 +613,13 @@ pub(super) async fn dispatch_workspace_isolated(
                 )
             } else if p.reviewed.is_some() {
                 Err("auction_review_required")
+            } else if let Request::ReviewSettlementAck { artwork_id, scope, expected_sequence } = &request {
+                super::settlement_http::review_selected_ack(
+                    conn, artwork_id, scope, *expected_sequence, settlement.as_ref(), &guarded_clock, &verify_live
+                ).map(|(review, projection)| { next_review = Some(review); projection })
             } else {
                 super::settlement_http::dispatch_selected_remote(
-                    p.api.addr, conn, request, settlement.as_ref(), &guarded_clock, &verify_live,
+                    p.api.addr, conn, request, settlement.as_ref(), &guarded_clock, &verify_live, reviewed,
                 ).await
             }
         };
@@ -627,6 +636,7 @@ pub(super) async fn dispatch_workspace_isolated(
             *settlement = None;
             return Err("settlement_access_denied".into());
         }
+        if outcome.is_ok() { if let Some(p) = profile.as_mut() { p.settlement_review = next_review; } }
         return outcome.map_err(str::to_owned);
     }
     let outcome = dispatch_isolated(profile, conn, request, clock).await;

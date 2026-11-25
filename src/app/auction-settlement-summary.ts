@@ -58,7 +58,8 @@ export function settlementPresentation(raw: unknown, language: SettlementLanguag
 export type SettlementSelection = Readonly<{ artworkId: string; scope: string; revision: string }>;
 export type SettlementReadAction = 'readSettlement' | 'pollSettlement' | 'historySettlement';
 export type SettlementReadRequest = Readonly<{action: SettlementReadAction; artworkId: string; scope: string}> |
-  Readonly<{action: 'ackSettlement'; artworkId: string; scope: string; expectedSequence: number}>;
+  Readonly<{action: 'reviewSettlementAck'; artworkId: string; scope: string; expectedSequence: number}> |
+  Readonly<{action: 'ackSettlement'; artworkId: string; scope: string; expectedSequence: number; confirmationId: string}>;
 export type SettlementReadState = Readonly<
   {kind: 'idle' | 'loading' | 'empty' | 'unavailable'} |
   {kind: 'ready'; summary: SettlementSummary}
@@ -93,8 +94,30 @@ export class SettlementReader {
   async acknowledge(selection: SettlementSelection): Promise<void> {
     const state = this.current(selection);
     if (this.busy || state.kind !== 'ready' || state.summary.acknowledgedAt !== null) return;
-    await this.execute(selection, {action:'ackSettlement', artworkId:selection.artworkId,
-      scope:selection.scope, expectedSequence:state.summary.sequence}, state.summary);
+    const reviewed = state.summary;
+    this.clear();
+    const generation = this.generation;
+    const {artworkId, scope, revision} = selection;
+    this.selection = {artworkId, scope, revision};
+    this.state = {kind:'loading'};
+    try {
+      const raw = await this.read({action:'reviewSettlementAck', artworkId, scope, expectedSequence:reviewed.sequence});
+      if (generation !== this.generation) return;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('settlement_invalid_summary');
+      const view = raw as Record<string, unknown>;
+      const id = view['confirmationId'];
+      const native = parseSettlementSummary(view['summary']);
+      if (Object.keys(view).length !== 2 || typeof id !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ||
+          !native || keys.some(k => native[k] !== reviewed[k])) throw new Error('settlement_invalid_summary');
+      const value = parseSettlementSummary(await this.read({action:'ackSettlement', artworkId, scope,
+        expectedSequence:reviewed.sequence, confirmationId:id}));
+      if (!value || value.acknowledgedAt === null ||
+          keys.some(k => k !== 'acknowledgedAt' && value[k] !== reviewed[k])) throw new Error('settlement_invalid_summary');
+      if (generation === this.generation) this.state = {kind:'ready',summary:value};
+    } catch {
+      if (generation === this.generation) this.state = {kind:'unavailable'};
+    }
   }
 
   private async execute(selection: SettlementSelection, request: SettlementReadRequest,

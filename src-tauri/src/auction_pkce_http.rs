@@ -609,8 +609,10 @@ mod tests {
             "artworkId":binding.local_work,"scope":binding.scope})).unwrap();
         let history_request = || serde_json::from_value(json!({"action":"historySettlement",
             "artworkId":binding.local_work,"scope":binding.scope})).unwrap();
-        let ack_request = |sequence: u64| serde_json::from_value(json!({"action":"ackSettlement",
+        let review_request = |sequence: u64| serde_json::from_value(json!({"action":"reviewSettlementAck",
             "artworkId":binding.local_work,"scope":binding.scope,"expectedSequence":sequence})).unwrap();
+        let ack_request = |sequence: u64, id: &str| serde_json::from_value(json!({"action":"ackSettlement",
+            "artworkId":binding.local_work,"scope":binding.scope,"expectedSequence":sequence,"confirmationId":id})).unwrap();
         let listener = {
             let mut active = Some(resource_http::NativePreviewSession::new(
                 resource_http::NativeAuctionsHttp::new(addr).unwrap(),verified_resource_token(),NOW).unwrap());
@@ -618,13 +620,27 @@ mod tests {
             let mut scoped = Some(NativeAccessToken { bearer:signed.to_owned(),
                 client:GrantClient::AuctionsSettlement, expires_at:claims.exp, subject:claims.sub });
             use super::resource_http::dispatch_workspace_isolated as dispatch;
+            macro_rules! reviewed_ack {
+                ($sequence:expr) => {{
+                    match dispatch(&mut active,&mut scoped,&mut db,review_request($sequence),||Ok(NOW),verify).await {
+                        Ok(review) => dispatch(&mut active,&mut scoped,&mut db,
+                            ack_request($sequence,review["confirmationId"].as_str().unwrap()),||Ok(NOW),verify).await,
+                        Err(e) => Err(e),
+                    }
+                }};
+            }
             tauri::async_runtime::block_on(async {
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),
                     |_| Err("settlement_access_denied")).await.unwrap_err(),"settlement_access_denied");
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(2),||Ok(NOW),verify)
-                    .await.unwrap_err(),"settlement_stale_ack");
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3),||Ok(NOW),verify)
-                    .await.unwrap(),summary);
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,"forged"),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_review_required");
+                let reviewed = dispatch(&mut active,&mut scoped,&mut db,review_request(3),||Ok(NOW),verify).await.unwrap();
+                let id = reviewed["confirmationId"].as_str().unwrap();
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW),verify).await.unwrap(),summary);
+                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3,id),||Ok(NOW),verify)
+                    .await.unwrap_err(),"settlement_review_required");
+                assert_eq!(reviewed_ack!(2).unwrap_err(),"settlement_stale_ack");
+                assert_eq!(reviewed_ack!(3).unwrap(),summary);
             });
             assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
             let bearer = signed.to_owned();
@@ -670,13 +686,10 @@ mod tests {
                 assert!(updated["acknowledgedAt"].is_null());
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),verify)
                     .await.unwrap(),updated);
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(3),||Ok(NOW),verify)
-                    .await.unwrap_err(),"settlement_stale_ack");
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify)
-                    .await.unwrap_err(),"oauth_http_failed");
+                assert_eq!(reviewed_ack!(3).unwrap_err(),"settlement_stale_ack");
+                assert_eq!(reviewed_ack!(4).unwrap_err(),"oauth_http_failed");
                 assert_eq!(ledger::summary(&mut db,&binding).unwrap().unwrap().acknowledged_at,None);
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify)
-                    .await.unwrap_err(),"settlement_conflict");
+                assert_eq!(reviewed_ack!(4).unwrap_err(),"settlement_conflict");
                 let fifth = dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),verify).await.unwrap();
                 assert_eq!(fifth["sequence"],5);
                 assert!(fifth["acknowledgedAt"].is_null());
@@ -686,12 +699,10 @@ mod tests {
                 assert_eq!(stamp.as_deref(),Some("2026-11-25T04:03:00.000Z"));
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,history_request(),||Ok(NOW),verify)
                     .await.unwrap_err(),"settlement_invalid_history");
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(4),||Ok(NOW),verify)
-                    .await.unwrap_err(),"settlement_stale_ack");
-                let ack = dispatch(&mut active,&mut scoped,&mut db,ack_request(5),||Ok(NOW),verify).await.unwrap();
+                assert_eq!(reviewed_ack!(4).unwrap_err(),"settlement_stale_ack");
+                let ack = reviewed_ack!(5).unwrap();
                 assert_eq!(ack["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,ack_request(5),||Ok(NOW),verify)
-                    .await.unwrap(),ack);
+                assert_eq!(reviewed_ack!(5).unwrap(),ack);
             });
             worker.join().unwrap()
         };
