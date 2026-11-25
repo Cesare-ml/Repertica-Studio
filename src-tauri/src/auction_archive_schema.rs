@@ -8,6 +8,7 @@ mod draft_record;
 
 const DRAFT_SQL: &str = include_str!("auction_draft_schema.sql");
 const LEDGER_SQL: &str = include_str!("auction_settlement_v20.sql");
+const ACK_SQL: &str = include_str!("auction_settlement_v22.sql");
 const MAIL_SQL: &str = "ALTER TABLE studio_settings ADD COLUMN mail_notifications INTEGER NOT NULL DEFAULT 1 CHECK(mail_notifications IN (0,1));";
 
 type Result<T> = std::result::Result<T,String>;
@@ -28,8 +29,12 @@ const LEDGER_OBJECTS: &[(&str,&str)] = &[
     ("auction_published_bindings_no_delete","trigger"),("auction_settlement_receipts_no_replace","trigger"),
     ("auction_settlement_receipts_ack_only","trigger"),("auction_settlement_receipts_no_delete","trigger"),
 ];
+const ACK_OBJECTS: &[(&str,&str)] = &[
+    ("auction_settlement_ack_attempts","table"),("auction_ack_attempt_no_replace","trigger"),
+    ("auction_ack_attempt_checked_only","trigger"),("auction_ack_attempt_no_delete","trigger"),
+];
 #[derive(Clone,Copy)]
-struct Layout { mail:bool, drafts:bool, ledger:bool }
+struct Layout { mail:bool, drafts:bool, ledger:bool, journal:bool }
 fn layout(c:&Connection,v:i64)->Result<Layout>{
     let mail:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('studio_settings') WHERE name='mail_notifications')",[],|r|r.get(0)).map_err(error)?;
     let scope=object(c,"auction_archive_scope","table")?;
@@ -37,12 +42,16 @@ fn layout(c:&Connection,v:i64)->Result<Layout>{
     let mut n=0;
     for &(name,kind) in LEDGER_OBJECTS { if object(c,name,kind)? { n+=1; } }
     let ledger=n==LEDGER_OBJECTS.len();
-    if scope!=drafts || (n!=0&&!ledger) || (ledger&&!drafts)
+    let mut a=0;
+    for &(name,kind) in ACK_OBJECTS { if object(c,name,kind)? { a+=1; } }
+    let journal=a==ACK_OBJECTS.len();
+    if (a!=0&&!journal) || (journal&&!ledger) || (v==22&&!journal)
+        || scope!=drafts || (n!=0&&!ledger) || (ledger&&!drafts)
         || (v==19&&!mail&&!drafts) || (v==20&&!ledger)
-        || (v==21&&!(mail&&drafts&&ledger)) {
+        || (v>=21&&!(mail&&drafts&&ledger)) {
         return Err("auction_archive_schema_invalid".into());
     }
-    Ok(Layout{mail,drafts,ledger})
+    Ok(Layout{mail,drafts,ledger,journal})
 }
 fn validate_mail(c:&Connection)->Result<()>{
     let valid:bool=c.query_row("SELECT count(*)=1 AND COALESCE(SUM(singleton=1 AND typeof(mail_notifications)='integer' AND mail_notifications IN (0,1)),0)=1 FROM studio_settings",[],|r|r.get(0)).map_err(error)?;
@@ -70,23 +79,24 @@ fn validate(c:&Connection,l:Layout)->Result<()>{
     if l.mail { validate_mail(c)?; }
     if l.drafts { validate_drafts(c)?; }
     if l.ledger { crate::settlement_store::inspect_snapshot(c).map_err(str::to_owned)?; }
+    if l.journal { crate::settlement_ledger::validate_ack_journal(c).map_err(str::to_owned)?; }
     Ok(())
 }
 /// Validate old and current backups read-only, without upgrading a snapshot.
 pub(crate) fn inspect(c:&Connection)->Result<()>{
     let v=version(c)?;
-    if !(1..=21).contains(&v) { return Err("auction_archive_schema_invalid".into()); }
+    if !(1..=22).contains(&v) { return Err("auction_archive_schema_invalid".into()); }
     validate(c,layout(c,v)?)
 }
 /// Run only after core migrations through v18. All new DDL, scope creation,
 /// semantic checks and the version bump share one immediate transaction.
 pub(crate) fn upgrade(c:&mut Connection)->Result<()>{
     let v=version(c)?;
-    if v==21 { return inspect(c); }
-    if !(18..=20).contains(&v) { return Err("auction_archive_schema_invalid".into()); }
+    if v==22 { return inspect(c); }
+    if !(18..=21).contains(&v) { return Err("auction_archive_schema_invalid".into()); }
     let tx=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(error)?;
     let v=version(&tx)?;
-    if !(18..=20).contains(&v) { return Err("auction_archive_schema_invalid".into()); }
+    if !(18..=21).contains(&v) { return Err("auction_archive_schema_invalid".into()); }
     let l=layout(&tx,v)?;
     // Validate every present capability before writing, irrespective of the
     // historical number. The layout gate separately constrains v19/v20/v21.
@@ -97,7 +107,8 @@ pub(crate) fn upgrade(c:&mut Connection)->Result<()>{
         tx.execute("INSERT INTO auction_archive_scope(singleton,scope) VALUES(1,?1)",[Uuid::new_v4().to_string()]).map_err(error)?;
     }
     if !l.ledger { tx.execute_batch(LEDGER_SQL).map_err(error)?; }
-    tx.pragma_update(None,"user_version",21).map_err(error)?;
+    if !l.journal { tx.execute_batch(ACK_SQL).map_err(error)?; }
+    tx.pragma_update(None,"user_version",22).map_err(error)?;
     inspect(&tx)?;
     let orphan:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",[],|r|r.get(0)).map_err(error)?;
     if orphan { return Err("auction_archive_schema_invalid".into()); }
@@ -113,7 +124,7 @@ mod tests {
     const REV:&str="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     fn scalar(c:&Connection,sql:&str)->String { c.query_row(sql,[],|r|r.get(0)).unwrap() }
     fn scope(c:&Connection)->String { scalar(c,"SELECT scope FROM auction_archive_scope") }
-    fn drop_ledger(c:&Connection){c.execute_batch("DROP TABLE auction_settlement_receipts; DROP TABLE auction_published_bindings;").unwrap();}
+    fn drop_ledger(c:&Connection){c.execute_batch("DROP TABLE IF EXISTS auction_settlement_ack_attempts; DROP TABLE auction_settlement_receipts; DROP TABLE auction_published_bindings;").unwrap();}
     fn drop_drafts(c:&Connection){c.execute_batch("DROP TABLE auction_drafts; DROP TABLE auction_archive_scope;").unwrap();}
     fn drop_mail(c:&Connection){c.execute_batch("ALTER TABLE studio_settings DROP COLUMN mail_notifications;").unwrap();}
     fn pending(c:&Connection)->String {
@@ -146,6 +157,7 @@ mod tests {
                 let old_scope=scope(&c);
                 let raw=has_draft.then(||pending(&c));
                 let ack=has_ledger.then(||legacy_ack(&mut c));
+                c.execute_batch("DROP TABLE auction_settlement_ack_attempts").unwrap();
                 if !has_ledger {drop_ledger(&c);}
                 if !has_draft {drop_drafts(&c);}
                 if let Some(value)=mail {c.execute("UPDATE studio_settings SET mail_notifications=?1",[value]).unwrap();} else {drop_mail(&c);}
@@ -155,7 +167,7 @@ mod tests {
             };
             let db=db::open(dir.path().into()).unwrap();
             let c=db.conn.lock().unwrap();
-            assert_eq!(version(&c).unwrap(),21);
+            assert_eq!(version(&c).unwrap(),22);
             assert_eq!(c.query_row("SELECT mail_notifications FROM studio_settings",[],|r|r.get::<_,i64>(0)).unwrap(),mail.unwrap_or(1));
             if let Some(raw)=raw {assert_eq!(scope(&c),old_scope);assert_eq!(scalar(&c,"SELECT record_json FROM auction_drafts"),raw);assert_eq!(scalar(&c,"SELECT revision FROM auction_drafts"),REV);}
             if let Some((snapshot,at))=ack {assert_eq!(scalar(&c,"SELECT snapshot FROM auction_settlement_receipts"),snapshot);assert_eq!(scalar(&c,"SELECT acknowledged_at FROM auction_settlement_receipts"),at);}
@@ -201,6 +213,57 @@ mod tests {
         assert_eq!(version(&c).unwrap(),19);
         let l=layout(&c,19).unwrap();assert!(!l.mail&&!l.ledger&&l.drafts);
         assert_eq!(scope(&c),old_scope);assert_eq!(scalar(&c,"SELECT record_json FROM auction_drafts"),raw);
+    }
+    #[test]
+    fn v21_upgrade_and_backup_restore_keep_uncertain_ack_without_replaying(){
+        let dir=tempfile::tempdir().unwrap();let destination=tempfile::tempdir().unwrap();
+        let archive=dir.path().join("archive");
+        let mut b=ledger::binding();
+        {
+            let db=db::open(archive.clone()).unwrap();
+            let c=db.conn.lock().unwrap();
+            b.scope=scope(&c);
+            c.execute_batch("DROP TABLE auction_settlement_ack_attempts; PRAGMA user_version=21;").unwrap();
+            inspect(&c).unwrap();
+        }
+        let db=db::open(archive.clone()).unwrap();
+        {
+            let mut c=db.conn.lock().unwrap();
+            assert_eq!(version(&c).unwrap(),22);
+            c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES(?1,'FIX-ACK','Synthetic','t','t')",[&b.local_work]).unwrap();
+            let value=store::PublishedBinding{binding:b.clone(),request_id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
+                selection_digest:"a".repeat(64),published_at:"2026-11-24T03:00:00.000Z".into()};
+            store::record(&mut c,&value,&b.owner,|_|Ok(())).unwrap();
+            ledger::poll(&mut c,&b,&serde_json::to_vec(&ledger::reply(ledger::delivery(1,"fulfilled"))).unwrap()).unwrap();
+            ledger::begin_ack_attempt(&mut c,&b,Some(1)).unwrap();
+            for n in 2..=5 {ledger::poll(&mut c,&b,&serde_json::to_vec(&ledger::reply(ledger::delivery(n,"review_required"))).unwrap()).unwrap();}
+        }
+        let saved=backup::create_backup_core(&db,destination.path()).unwrap();
+        let folder=std::path::Path::new(&saved.directory);
+        backup::inspect_backup_core(folder).unwrap();
+        {
+            let mut c=db.conn.lock().unwrap();
+            ledger::begin_ack_attempt(&mut c,&b,Some(5)).unwrap();
+        }
+        backup::restore_backup_core(&db,folder).unwrap();
+        drop(db);
+        let db=db::open(archive).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        assert_eq!(ledger::history_cursor(&mut c,&b),Ok(0));
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM auction_settlement_ack_attempts",[],|r|r.get::<_,u64>(0)).unwrap(),1);
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
+        assert_eq!(ledger::summary(&mut c,&b).unwrap().unwrap().acknowledged_at,None);
+    }
+    #[test]
+    fn v21_upgrade_rolls_back_journal_on_late_validation_failure(){
+        let dir=tempfile::tempdir().unwrap();
+        let db=db::open(dir.path().into()).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        c.execute_batch("DROP TABLE auction_settlement_ack_attempts; PRAGMA user_version=21;
+            PRAGMA foreign_keys=OFF; INSERT INTO artwork_images(id,artwork_id,image_path,created_at) VALUES('x','missing','media/x.jpg','t'); PRAGMA foreign_keys=ON;").unwrap();
+        assert!(upgrade(&mut c).is_err());
+        assert_eq!(version(&c).unwrap(),21);
+        assert!(!object(&c,"auction_settlement_ack_attempts","table").unwrap());
     }
     #[test]
     fn application_backup_restore_preserves_mail_draft_and_ack(){

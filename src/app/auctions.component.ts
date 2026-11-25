@@ -3,10 +3,13 @@ import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChange
 import { FormsModule } from '@angular/forms';
 import { invoke } from '@tauri-apps/api/core';
 import { previewLegacyDraft } from './auction-legacy-import';
+import { AuctionConnection } from './auction-connection';
+import { SettlementReader, settlementPresentation, type SettlementReadAction } from './auction-settlement-summary';
+import { assertSameSnapshot, assertPreviewReadback } from './auction-online-readback';
 import { AUCTION_API_CONNECTED, AUCTION_CONTRACT_VERSION } from './auction-contract';
 import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, slugify,
   utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
-import { newAuctionDraft, reviewRows, decodeNativeDraft, saveNativeAuctionDraft, type AuctionDraft, type ReviewRow, type NativeDraftPort, type NativeDraftSnapshot } from './auction-preview';
+import { newAuctionDraft, publicPreviewFields, reviewRows, decodeNativeDraft, saveNativeAuctionDraft, type AuctionDraft, type ReviewRow, type NativeDraftPort, type NativeDraftSnapshot } from './auction-preview';
 import type { AppLanguage } from './i18n';
 import { translate } from './i18n';
 import type { Artwork } from './models';
@@ -40,8 +43,9 @@ const ERRORS: Record<string, string> = {
 };
 
 /**
- * Auctions workspace. The online service does not yet offer a verified production API, so this section only
- * prepares local drafts and shows exactly what a future publication would send. No request is ever made here.
+ * One offline-first Auctions workspace. The optional native preview bridge has no
+ * renderer-supplied provider, URL, token or key. In release it is disabled; local
+ * storage remains usable when the command is missing or unavailable.
  */
 @Component({
   selector: 'rp-auctions',
@@ -62,6 +66,31 @@ const ERRORS: Record<string, string> = {
   <section class="auctions-card" aria-labelledby="auctions-published">
     <h3 id="auctions-published">{{ tr('Aste pubblicate') }}</h3>
     <p class="auctions-muted">{{ tr('Offerte, importi e risultati vengono letti dal server dopo il collegamento. Qui non vengono mai simulati.') }}</p>
+  </section>
+
+  <section class="auctions-card" aria-labelledby="auctions-online">
+    <h3 id="auctions-online">{{ previewHeading }}</h3>
+    <p role="status" class="auctions-muted">{{ onlineLabel(online.state) }}</p>
+    <div class="auctions-row">
+      <button type="button" (click)="checkConnection()" [disabled]="busy || !!online.review">{{ onlineLabel('check') }}</button>
+      <button type="button" (click)="loadOrganizations()" [disabled]="busy || !!online.review || online.state !== 'connected'">{{ onlineLabel('organizations') }}</button>
+      <button type="button" (click)="disconnectOnline()" [disabled]="busy || online.state !== 'connected'">{{ onlineLabel('disconnect') }}</button>
+    </div>
+    <select *ngIf="online.organizations.length" [disabled]="busy || !!online.review"
+      [ngModel]="online.selected?.tenantId ?? ''" (ngModelChange)="chooseOrganization($event)"
+      [attr.aria-label]="onlineLabel('organizations')">
+      <option value="" disabled>—</option>
+      <option *ngFor="let organization of online.organizations" [value]="organization.tenantId"
+        [disabled]="organization.status !== 'active'">{{ organization.artistName ?? organization.tenantId }} · {{ organization.role }}</option>
+    </select>
+    <ul class="auctions-list" *ngIf="online.selected && online.previews.length">
+      <li *ngFor="let preview of online.previews">
+        <div><strong>{{ preview.title }}</strong><small>{{ preview.startsAt }} – {{ preview.endsAt }}</small></div>
+        <span class="auctions-badge">{{ preview.status }}</span>
+      </li>
+    </ul>
+    <p role="status" *ngIf="onlineNotice">{{ onlineNotice }}</p>
+    <p role="alert" class="auctions-alert" *ngIf="onlineError">{{ onlineError }}</p>
   </section>
 
   <section class="auctions-card" aria-labelledby="auctions-drafts" *ngIf="!editing">
@@ -106,7 +135,7 @@ const ERRORS: Record<string, string> = {
     <p class="auctions-muted" *ngIf="editorState !== 'draft'">{{ tr('I dati della richiesta precedente restano intatti. Le modifiche alla bozza non inviano né sostituiscono una richiesta.') }}</p>
     <div class="auctions-alert" role="alert" *ngIf="error">{{ error }}</div>
     <p class="auctions-muted" *ngIf="importingLegacy">{{ tr('Importazione locale da confermare: controlla opera e dati prima di salvare.') }}</p>
-    <fieldset class="auctions-form" [disabled]="busy">
+    <fieldset class="auctions-form" [disabled]="busy || !!online.review">
       <label>{{ tr('Opera') }}
         <span>{{ artworkTitle(editing.artworkId) }}</span></label>
       <label>{{ tr('Titolo pubblico') }}
@@ -133,9 +162,9 @@ const ERRORS: Record<string, string> = {
       <p class="auctions-muted">{{ tr('Le immagini non sono ancora incluse: l’invio delle foto sarà disponibile con l’interfaccia online verificata.') }}</p>
     </fieldset>
     <div class="auctions-row">
-      <button type="button" (click)="cancelEdit()" [disabled]="busy">{{ tr('Annulla') }}</button>
-      <button type="button" (click)="save()" [disabled]="busy">{{ tr('Salva bozza') }}</button>
-      <button type="button" (click)="review()" [disabled]="busy">{{ tr('Rivedi i dati da inviare') }}</button>
+      <button type="button" (click)="cancelEdit()" [disabled]="busy || !!online.review">{{ tr('Annulla') }}</button>
+      <button type="button" (click)="save()" [disabled]="busy || !!online.review">{{ tr('Salva bozza') }}</button>
+      <button type="button" (click)="review()" [disabled]="busy || !!online.review">{{ tr('Rivedi i dati da inviare') }}</button>
     </div>
 
     <div *ngIf="reviewed" class="auctions-review" role="region" [attr.aria-label]="tr('Dati da inviare')">
@@ -147,6 +176,35 @@ const ERRORS: Record<string, string> = {
       <ul><li *ngFor="let item of notSent">{{ tr(item) }}</li></ul>
       <button type="button" disabled [attr.aria-describedby]="'auctions-publish-reason'">{{ tr('Pubblica asta') }}</button>
       <p id="auctions-publish-reason" class="auctions-muted">{{ tr('La pubblicazione si attiva solo con il collegamento verificato ad Auctions. Una pubblicazione richiederà sempre la tua conferma.') }}</p>
+    </div>
+    <div class="auctions-review" *ngIf="online.state === 'connected'">
+      <button type="button" (click)="reviewOnline()" [disabled]="!canReviewOnline">{{ onlineLabel('review') }}</button>
+      <div *ngIf="online.review as nativeReview">
+        <table><tbody><tr *ngFor="let row of onlineReviewRows"><th scope="row">{{ fieldLabel(row.field) }}</th><td>{{ row.value }}</td></tr></tbody></table>
+        <div class="auctions-row">
+          <button type="button" (click)="cancelOnlineReview()" [disabled]="busy">{{ onlineLabel('cancel') }}</button>
+          <button type="button" (click)="confirmOnline()" [disabled]="busy || !canConfirmOnline">{{ onlineLabel(nativeReview.action === 'prepare' ? 'prepare' : 'reconcile') }}</button>
+        </div>
+      </div>
+      <div class="auctions-row">
+        <button type="button" (click)="readSettlement()" [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('read') }}</button>
+        <button type="button" (click)="readSettlement('pollSettlement')" [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('poll') }}</button>
+        <button type="button" (click)="readSettlement('historySettlement')" [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('history') }}</button>
+      </div>
+      <p role="status" *ngIf="settlementState.kind === 'loading'">{{ settlementLabel('loading') }}</p>
+      <p role="status" *ngIf="!busy && settlementState.kind === 'empty'">{{ settlementLabel('empty') }}</p>
+      <p role="alert" *ngIf="!busy && settlementState.kind === 'unavailable'">{{ settlementLabel('unavailable') }}</p>
+      <div *ngIf="settlementDetails as result">
+        <strong>{{ result.status }} · {{ result.amount }}</strong>
+        <p>{{ result.receipt }} · {{ result.fulfilledAt }}</p>
+        <p *ngIf="result.acknowledgedAt">{{ result.acknowledgedAt }}</p>
+        <p class="auctions-muted">{{ result.notice }}</p>
+        <div class="auctions-muted" role="status">
+          <p *ngFor="let item of result.recovery">{{ item.label }}: {{ item.count }}</p>
+        </div>
+        <button type="button" *ngIf="!result.acknowledgedAt" (click)="acknowledgeSettlement()"
+          [disabled]="busy || !!online.review || !savedReference">{{ settlementLabel('ack') }} #{{ result.sequence }}</button>
+      </div>
     </div>
   </section>
 
@@ -199,6 +257,11 @@ export class AuctionsComponent implements OnInit, OnChanges {
   selectedArtworkId = '';
   private initialized = false;
   private snapshot: NativeDraftSnapshot | null = null;
+  private reviewSnapshot: NativeDraftSnapshot | null = null;
+  readonly online = new AuctionConnection(request => invoke<unknown>('auction_preview_command', { request }));
+  readonly settlement = new SettlementReader(request => invoke<unknown>('auction_preview_command', { request }));
+  onlineError = '';
+  onlineNotice = '';
   editing: AuctionDraft | null = null;
   startsLocal = '';
   endsLocal = '';
@@ -219,6 +282,11 @@ export class AuctionsComponent implements OnInit, OnChanges {
     void this.reloadList();
   }
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['artworks']) {
+      this.settlement.clear();
+      this.reviewSnapshot = null;
+      this.onlineNotice = '';
+    }
     if (this.initialized && changes['preselectedArtworkId'] && !this.busy && !this.editing) {
       void this.openPreselected();
     }
@@ -303,6 +371,8 @@ export class AuctionsComponent implements OnInit, OnChanges {
     } finally { this.busy = false; }
   }
   private begin(draft: AuctionDraft): void {
+    this.settlement.clear();
+    this.reviewSnapshot = null;
     this.editing = { ...draft };
     this.startsLocal = utcToLocalInput(draft.startsAt);
     this.endsLocal = utcToLocalInput(draft.endsAt);
@@ -311,7 +381,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
     this.reviewed = false; this.error = ''; this.rows = [];
   }
   cancelEdit(): void {
-    if (this.busy) return;
+    if (this.busy || this.online.review) return;
+    this.settlement.clear();
+    this.reviewSnapshot = null;
     this.editing = null; this.snapshot = null; this.importingLegacy = false;
     this.reviewed = false; this.error = '';
   }
@@ -335,7 +407,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
   }
 
   async save(): Promise<void> {
-    if (this.busy || !this.snapshot) return;
+    if (this.busy || this.online.review || !this.snapshot) return;
+    this.settlement.clear();
+    this.reviewSnapshot = null;
     const draft = this.collect(), snapshot = this.snapshot;
     if (!draft) return;
     this.busy = true; this.error = '';
@@ -376,6 +450,152 @@ export class AuctionsComponent implements OnInit, OnChanges {
       this.error = this.tr(ERRORS[code] ?? 'Dati non validi');
     }
   }
+
+  get previewHeading(): string {
+    return ({it:'Anteprime non vincolanti',en:'Non-binding previews',es:'Vistas previas no vinculantes',
+      fr:'Aperçus non contraignants',de:'Unverbindliche Vorschauen'})[this.language];
+  }
+
+  onlineLabel(key: 'unknown' | 'disabled' | 'disconnected' | 'connected' | 'check' | 'organizations' | 'disconnect' | 'readOnly' | 'review' | 'prepare' | 'reconcile' | 'cancel' | 'prepared' | 'received' | 'failed'): string {
+    const labels = {
+      it: { unknown:'Connessione non verificata', disabled:'Connessione non abilitata. Le bozze restano locali.', disconnected:'Non connesso. Le bozze restano locali.', connected:'Sessione nativa attiva', check:'Verifica stato connessione', organizations:'Carica organizzazioni', disconnect:'Disconnetti', readOnly:'Sola consultazione', review:'Rivedi richiesta con organizzazione', prepare:'Conferma preparazione locale', reconcile:'Conferma invio / riconciliazione anteprima', cancel:'Annulla conferma', prepared:'Richiesta salvata. Nessun invio effettuato.', received:'Ricevuta anteprima salvata. Nessuna vendita.', failed:'Operazione non confermata. Verifica lo stato locale prima di riprovare.' },
+      en: { unknown:'Connection not checked', disabled:'Connection not enabled. Drafts remain local.', disconnected:'Not connected. Drafts remain local.', connected:'Native session active', check:'Check connection status', organizations:'Load organizations', disconnect:'Disconnect', readOnly:'Read only', review:'Review request with organization', prepare:'Confirm local preparation', reconcile:'Confirm preview send / reconciliation', cancel:'Cancel confirmation', prepared:'Request saved. Nothing sent.', received:'Preview receipt saved. No sale.', failed:'Operation not confirmed. Check local state before retrying.' },
+      es: { unknown:'Conexión no verificada', disabled:'Conexión no habilitada. Los borradores siguen locales.', disconnected:'Sin conexión. Los borradores siguen locales.', connected:'Sesión nativa activa', check:'Verificar estado de conexión', organizations:'Cargar organizaciones', disconnect:'Desconectar', readOnly:'Solo lectura', review:'Revisar solicitud con organización', prepare:'Confirmar preparación local', reconcile:'Confirmar envío / conciliación de vista previa', cancel:'Cancelar confirmación', prepared:'Solicitud guardada. No se ha enviado.', received:'Recibo guardado. Sin venta.', failed:'Operación no confirmada. Verifica el estado local antes de reintentar.' },
+      fr: { unknown:'Connexion non vérifiée', disabled:'Connexion non activée. Les brouillons restent locaux.', disconnected:'Non connecté. Les brouillons restent locaux.', connected:'Session native active', check:'Vérifier la connexion', organizations:'Charger les organisations', disconnect:'Déconnecter', readOnly:'Lecture seule', review:'Vérifier la demande avec organisation', prepare:'Confirmer la préparation locale', reconcile:'Confirmer envoi / rapprochement de l’aperçu', cancel:'Annuler la confirmation', prepared:'Demande enregistrée. Aucun envoi.', received:'Reçu enregistré. Aucune vente.', failed:'Opération non confirmée. Vérifiez l’état local avant de réessayer.' },
+      de: { unknown:'Verbindung nicht geprüft', disabled:'Verbindung nicht aktiviert. Entwürfe bleiben lokal.', disconnected:'Nicht verbunden. Entwürfe bleiben lokal.', connected:'Native Sitzung aktiv', check:'Verbindungsstatus prüfen', organizations:'Organisationen laden', disconnect:'Trennen', readOnly:'Nur lesen', review:'Anfrage mit Organisation prüfen', prepare:'Lokale Vorbereitung bestätigen', reconcile:'Vorschauversand / Abgleich bestätigen', cancel:'Bestätigung abbrechen', prepared:'Anfrage gespeichert. Nichts gesendet.', received:'Vorschaubeleg gespeichert. Kein Verkauf.', failed:'Vorgang nicht bestätigt. Vor erneutem Versuch lokalen Status prüfen.' }
+    };
+    return labels[this.language][key];
+  }
+
+  settlementLabel(key: 'read' | 'poll' | 'history' | 'ack' | 'empty' | 'unavailable' | 'loading'): string {
+    return ({
+      it: {read:'Leggi esito locale dell’asta',poll:'Aggiorna esito',history:'Recupera prossima pagina dello storico',ack:'Conferma solo ricezione esito',empty:'Nessun esito ricevuto per l’associazione verificata.',unavailable:'Operazione non confermata. Controlla l’esito locale prima di riprovare.',loading:'Operazione sull’esito…'},
+      en: {read:'Read local auction result',poll:'Refresh result',history:'Recover next history page',ack:'Confirm receipt only',empty:'No result received for the verified association.',unavailable:'Operation not confirmed. Check the local result before retrying.',loading:'Processing result…'},
+      es: {read:'Leer resultado local de la subasta',poll:'Actualizar resultado',history:'Recuperar siguiente página del historial',ack:'Confirmar solo recepción',empty:'No hay resultado para la asociación verificada.',unavailable:'Operación no confirmada. Comprueba el resultado local antes de reintentar.',loading:'Procesando resultado…'},
+      fr: {read:'Lire le résultat local de l’enchère',poll:'Actualiser le résultat',history:'Récupérer la page suivante de l’historique',ack:'Confirmer uniquement la réception',empty:'Aucun résultat reçu pour l’association vérifiée.',unavailable:'Opération non confirmée. Vérifiez le résultat local avant de réessayer.',loading:'Traitement du résultat…'},
+      de: {read:'Lokales Auktionsergebnis lesen',poll:'Ergebnis aktualisieren',history:'Nächste Verlaufsseite abrufen',ack:'Nur Empfang bestätigen',empty:'Kein Ergebnis für die verifizierte Zuordnung erhalten.',unavailable:'Vorgang nicht bestätigt. Vor erneutem Versuch das lokale Ergebnis prüfen.',loading:'Ergebnis wird verarbeitet…'}
+    })[this.language][key];
+  }
+
+
+  private get cleanSaved() {
+    const snapshot = this.snapshot, draft = this.editing;
+    if (!snapshot?.revision || !draft || snapshot.scope !== this.scope || snapshot.artworkId !== draft.artworkId) return null;
+    try {
+      const stored = decodeNativeDraft(snapshot,draft.artworkId);
+      if (!stored || JSON.stringify(draft) !== JSON.stringify(stored.draft) ||
+          this.startsLocal !== utcToLocalInput(stored.draft.startsAt) ||
+          this.endsLocal !== utcToLocalInput(stored.draft.endsAt) ||
+          this.startingText !== centsToEuro(stored.draft.startingAmount) ||
+          this.incrementText !== centsToEuro(stored.draft.minimumIncrementAmount)) return null;
+      return {snapshot,stored,reference:{artworkId:snapshot.artworkId,scope:snapshot.scope,revision:snapshot.revision}};
+    } catch { return null; }
+  }
+  get savedReference() { return this.cleanSaved?.reference ?? null; }
+  get canReviewOnline(): boolean {
+    const clean = this.cleanSaved, selected = this.online.selected;
+    return !this.busy && this.online.state === 'connected' && !this.online.review &&
+      !!clean && !clean.stored.receipt && !!selected?.publicationEligible &&
+      (clean.stored.pending ? JSON.parse(clean.stored.pending.body)['tenantId'] === selected.tenantId :
+        this.available.some(a => a.id === clean.snapshot.artworkId));
+  }
+  get canConfirmOnline(): boolean {
+    const clean = this.cleanSaved;
+    if (!clean || !this.reviewSnapshot || !this.online.review || this.online.state !== 'connected') return false;
+    try { assertSameSnapshot(this.reviewSnapshot,clean.snapshot); return true; } catch { return false; }
+  }
+  get onlineReviewRows(): ReviewRow[] {
+    return this.online.review ? Object.entries(JSON.parse(this.online.review.publicBody) as Record<string,unknown>)
+      .map(([field,value]) => ({field,value:String(value)})) : [];
+  }
+  private async onlineAction(work: () => Promise<void>, preserveSettlement = false): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.onlineError = ''; this.onlineNotice = '';
+    if (!preserveSettlement) this.settlement.clear();
+    try { await work(); }
+    catch { this.settlement.clear(); this.onlineError = this.onlineLabel('failed'); }
+    finally { this.busy = false; }
+  }
+  checkConnection(): Promise<void> { return this.onlineAction(() => this.online.refreshStatus()); }
+  loadOrganizations(): Promise<void> { return this.onlineAction(() => this.online.loadOrganizations()); }
+  chooseOrganization(id: string): Promise<void> { return this.onlineAction(() => this.online.selectOrganization(id)); }
+  disconnectOnline(): Promise<void> {
+    return this.onlineAction(async () => { this.reviewSnapshot = null; await this.online.disconnect(); });
+  }
+  cancelOnlineReview(): Promise<void> {
+    return this.onlineAction(async () => { this.reviewSnapshot = null; await this.online.cancelReview(); });
+  }
+  reviewOnline(): Promise<void> {
+    if (!this.canReviewOnline) return Promise.resolve();
+    return this.onlineAction(async () => {
+      const clean = this.cleanSaved, selected = this.online.selected;
+      if (!clean || !selected) throw new Error('auction_draft_conflict');
+      const {snapshot,stored,reference} = clean;
+      assertSameSnapshot(snapshot,await nativeDrafts.read(snapshot.artworkId));
+      const body = stored.pending?.body ?? JSON.stringify({tenantId:selected.tenantId,...publicPreviewFields(stored.draft)});
+      this.reviewSnapshot = snapshot;
+      try { await this.online.reviewDraft(reference,body,!!stored.pending); }
+      catch (error) { this.reviewSnapshot = null; throw error; }
+    });
+  }
+  confirmOnline(): Promise<void> {
+    if (this.busy || !this.canConfirmOnline) return Promise.resolve();
+    return this.onlineAction(async () => {
+      const clean = this.cleanSaved, review = this.online.review, pinned = this.reviewSnapshot;
+      this.reviewSnapshot = null;
+      if (!clean || !review || !pinned) throw new Error('auction_draft_conflict');
+      assertSameSnapshot(pinned,clean.snapshot);
+      // After confirmation is attempted, an uncertain outcome requires reopening
+      // the persisted draft. Never reuse a stale revision or retry automatically.
+      this.snapshot = null;
+      assertSameSnapshot(pinned,await nativeDrafts.read(pinned.artworkId));
+      const result = await this.online.confirm();
+      const after = await nativeDrafts.read(pinned.artworkId);
+      const saved = decodeNativeDraft(after,pinned.artworkId);
+      assertPreviewReadback(pinned,after,clean.stored,saved,review.publicBody,result);
+      this.snapshot = after;
+      this.editorState = saved?.receipt ? 'receipt' : 'pending';
+      this.onlineNotice = this.onlineLabel(result.action === 'prepare' ? 'prepared' : 'received');
+    });
+  }
+  get settlementState() {
+    return this.settlement.current(this.online.state === 'connected' ? this.savedReference : null);
+  }
+  get settlementDetails() {
+    const state = this.settlementState;
+    return !this.busy && state.kind === 'ready' ? settlementPresentation(state.summary,this.language) : null;
+  }
+  readSettlement(action: SettlementReadAction = 'readSettlement'): Promise<void> {
+    return this.settlementAction(action);
+  }
+  acknowledgeSettlement(): Promise<void> {
+    const state = this.settlementState;
+    if (state.kind !== 'ready' || state.summary.acknowledgedAt !== null) return Promise.resolve();
+    return this.settlementAction('ackSettlement');
+  }
+  private settlementAction(action: SettlementReadAction | 'ackSettlement'): Promise<void> {
+    if (this.busy || this.online.state !== 'connected' || this.online.review || !this.savedReference) return Promise.resolve();
+    const reviewed = this.settlementState;
+    return this.onlineAction(async () => {
+      const clean = this.cleanSaved;
+      if (!clean) throw new Error('auction_draft_conflict');
+      assertSameSnapshot(clean.snapshot,await nativeDrafts.read(clean.reference.artworkId));
+      const current = this.cleanSaved;
+      if (!current) throw new Error('auction_draft_conflict');
+      assertSameSnapshot(clean.snapshot,current.snapshot);
+      if (action === 'ackSettlement') {
+        // A cleared/changed selection cannot confirm an older result.
+        if (this.settlementState !== reviewed) throw new Error('auction_draft_conflict');
+        await this.settlement.acknowledge(clean.reference);
+      } else {
+        await this.settlement.load(clean.reference,action);
+      }
+      try { assertSameSnapshot(clean.snapshot,await nativeDrafts.read(clean.reference.artworkId)); }
+      catch (error) { this.settlement.clear(); throw error; }
+    }, true);
+  }
+
   fieldLabel(field: string): string {
     const labels: Record<string, string> = { slug: 'Indirizzo della pagina', title: 'Titolo pubblico', description: 'Descrizione pubblica',
       startsAt: 'Inizio (UTC)', endsAt: 'Fine (UTC)', startingAmount: 'Prezzo di partenza (centesimi)',

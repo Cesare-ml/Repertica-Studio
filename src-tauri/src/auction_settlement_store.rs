@@ -133,7 +133,7 @@ mod tests {
         binding.scope=conn.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",[],|r|r.get(0)).unwrap();
         conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES(?1,'FIX-1','Synthetic','t','t')",
             [&binding.local_work]).unwrap();
-        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),21);
+        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),22);
         let value=PublishedBinding{binding,request_id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
             selection_digest:"a".repeat(64),published_at:"2026-11-24T03:00:00.000Z".into()};
         (dir,conn,value)

@@ -46,19 +46,26 @@ export function retry(op: Operation): Operation {
   return Object.freeze({ ...op, state: 'in_flight' as const, attempts: op.attempts + 1 });
 }
 
-export function confirmPublication(op: Operation, serverAuctions: readonly AuctionSummary[]): Operation {
+export function confirmPublication(op: Operation, serverAuctions: readonly AuctionSummary[], receiptId?: string): Operation {
   if (op.kind !== 'publish') throw new Error('wrong_kind');
-  if (serverAuctions.some(a => a.slug === op.target)) return Object.freeze({ ...op, state: 'confirmed' as const });
-  return op.state === 'rejected' ? op : Object.freeze({ ...op, state: 'pending_confirmation' as const });
+  if (op.state === 'rejected' || op.state === 'confirmed') return op;
+  if (receiptId && /^[A-Za-z0-9_-]{3,96}$/.test(receiptId) &&
+      serverAuctions.some(a => a.auctionId === receiptId && a.slug === op.target))
+    return Object.freeze({ ...op, state: 'confirmed' as const });
+  return Object.freeze({ ...op, state: 'pending_confirmation' as const });
 }
 
 export function confirmCancellation(op: Operation, serverBids: readonly AuctionBid[], answer: CancelResult | null): Operation {
   if (op.kind !== 'cancel_bid') throw new Error('wrong_kind');
+  if (op.state === 'rejected' || op.state === 'confirmed') return op;
   const bid = serverBids.find(b => b.bidId === op.target);
-  if (bid?.state === 'cancelled') return Object.freeze({ ...op, state: 'confirmed' as const });
+  if (answer && answer.bidId !== op.target)
+    return Object.freeze({ ...op, state: 'pending_confirmation' as const });
   if (answer && (answer.outcome === 'not_allowed' || answer.outcome === 'contested')) {
+    if (bid?.state === 'cancelled') return Object.freeze({ ...op, state: 'pending_confirmation' as const });
     return Object.freeze({ ...op, state: 'rejected' as const, reason: answer.outcome });
   }
+  if (bid?.state === 'cancelled') return Object.freeze({ ...op, state: 'confirmed' as const });
   // Still valid on the server, or not found: not confirmed.
   return Object.freeze({ ...op, state: 'pending_confirmation' as const });
 }

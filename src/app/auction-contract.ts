@@ -98,7 +98,11 @@ export function parseBidPage(input: unknown): { bids: AuctionBid[]; nextCursor: 
   const o = record(input);
   if (!Array.isArray(o['items']) || o['items'].length > 500) fail();
   const seen = new Map<string, AuctionBid>();
-  for (const item of o['items'] as unknown[]) { const bid = parseBid(item); seen.set(bid.bidId, bid); }
+  for (const item of o['items'] as unknown[]) {
+    const bid = parseBid(item), prior = seen.get(bid.bidId);
+    if (prior && JSON.stringify(prior) !== JSON.stringify(bid)) fail();
+    seen.set(bid.bidId, bid);
+  }
   const bids = [...seen.values()].sort((a, b) => a.placedAt.localeCompare(b.placedAt) || a.bidId.localeCompare(b.bidId));
   return { bids, nextCursor: optional(o['nextCursor'], v => text(v, 512)) };
 }

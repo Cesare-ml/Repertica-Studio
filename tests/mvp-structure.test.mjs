@@ -8,7 +8,26 @@ test('no cloud or Sites dependency in runtime', () => {
   const cargo = get('src-tauri/Cargo.toml');
   const api = get('src/app/api.ts');
   assert.doesNotMatch(api, /fetch\(|axios|http:\/\/|https:\/\//);
-  assert.doesNotMatch(cargo, /reqwest|sqlx|postgres|aws-sdk/);
+  // Only the exact dev-dependencies table may declare the isolated HTTP client.
+  // All other tables (including target-specific runtime dependencies) stay gated.
+  const production = cargo.split(/(?=^\[)/m)
+    .filter(section => !/^\[dev-dependencies\]\s*(?:#.*)?$/m.test(section.split('\n')[0].trim()))
+    .join('');
+  assert.doesNotMatch(cargo, /sqlx|postgres|aws-sdk/);
+  assert.doesNotMatch(production, /reqwest|rustls|\bring\b/);
+  assert.doesNotMatch(get('src-tauri/src/lib.rs'), /auction_pkce|auction_pkce_http/);
+  assert.match(get('src-tauri/src/auction_pkce.rs'), /#\[cfg\(test\)\]\s*#\[path = "auction_pkce_http\.rs"\]\s*mod native_http;/);
+});
+test('optional Auctions release IPC is typed and fail-closed', () => {
+  const native = get('src-tauri/src/lib.rs');
+  const boundary = get('src-tauri/src/auction_preview_ipc.rs');
+  const ui = get('src/app/auctions.component.ts');
+  assert.match(native, /^mod auction_preview_ipc;$/m);
+  assert.match(native, /auction_preview_ipc::auction_preview_command,/);
+  assert.match(boundary, /#\[tauri::command\]\s*pub fn auction_preview_command\(request: Request\) -> Result<Value, String> \{\s*request\.disabled\(\)\s*\}/);
+  assert.match(boundary, /deny_unknown_fields/);
+  assert.doesNotMatch(boundary, /reqwest|NativeIdentityHttp|TokenExchange|std::net|tauri::State/);
+  assert.match(ui, /invoke<unknown>\('auction_preview_command', \{ request \}\)/);
 });
 test('four MVP modules available via typed native IPC', () => {
   const native = get('src-tauri/src/lib.rs');

@@ -102,7 +102,9 @@ fn latest(t:&Transaction<'_>,b:&Binding)->Result<u64,Error>{
         AND (tenant<>?3 OR association<>?4 OR cloud_work<>?5 OR local_work<>?6 OR owner<>?7))",
         params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner],|r|r.get(0)).map_err(db)?;
     if conflict{return Err("settlement_binding_mismatch")}
-    validate_history(t,b)
+    let n=validate_history(t,b)?;
+    validate_ack_journal(t)?;
+    Ok(n)
 }
 
 // Validate every persisted row, not only MAX(sequence) or the latest snapshot.
@@ -129,6 +131,33 @@ pub(crate) fn validate_history(c:&Connection,b:&Binding)->Result<u64,Error>{
         cursor=sequence;
     }
     Ok(cursor)
+}
+
+// Read-only semantic validation, including rehashed backups built with FKs off.
+// Receipt history and its full binding are validated separately before this.
+pub(crate) fn validate_ack_journal(c:&Connection)->Result<(),Error>{
+    let mut stmt=c.prepare("SELECT a.sequence,a.owner,a.result_id,a.checked_through,r.owner,r.snapshot,
+        (SELECT MAX(h.sequence) FROM auction_settlement_receipts h WHERE h.scope=a.scope AND h.auction=a.auction)
+        FROM auction_settlement_ack_attempts a LEFT JOIN auction_settlement_receipts r
+        ON r.scope=a.scope AND r.auction=a.auction AND r.sequence=a.sequence").map_err(db)?;
+    let mut rows=stmt.query([]).map_err(db)?;
+    while let Some(row)=rows.next().map_err(db)? {
+        let n:u64=row.get(0).map_err(db)?;
+        let owner:String=row.get(1).map_err(db)?;
+        let result_id:String=row.get(2).map_err(db)?;
+        let checked:Option<u64>=row.get(3).map_err(db)?;
+        let receipt_owner:Option<String>=row.get(4).map_err(db)?;
+        let raw:Option<String>=row.get(5).map_err(db)?;
+        let head:Option<u64>=row.get(6).map_err(db)?;
+        let d:Delivery=decode(raw.as_deref().ok_or("settlement_ack_journal_invalid")?.as_bytes())
+            .map_err(|_|"settlement_ack_journal_invalid")?;
+        if !positive(n)||d.delivery_sequence!=n||d.result_id!=result_id||
+            receipt_owner.as_deref()!=Some(owner.as_str())||
+            checked.is_some_and(|v|v<=n||!positive(v)||head.is_none_or(|h|v>h)){
+            return Err("settlement_ack_journal_invalid")
+        }
+    }
+    Ok(())
 }
 
 // Read back the exact durable evidence inside the same transaction. A trigger
@@ -184,6 +213,19 @@ pub(crate) fn cursor(c:&mut Connection,b:&Binding)->Result<u64,Error>{
     t.commit().map_err(db)?;
     Ok(n)
 }
+// One explicit read; rewind to the oldest unscanned uncertain attempt,
+// even after an app restart or more than two newer deliveries.
+pub(crate) fn history_cursor(c:&mut Connection,b:&Binding)->Result<u64,Error>{
+    let t=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
+    let n=latest(&t,b)?;
+    let pending:Option<u64>=t.query_row("SELECT MIN(a.sequence) FROM auction_settlement_ack_attempts a
+        JOIN auction_settlement_receipts r USING(scope,auction,sequence)
+        WHERE a.scope=?1 AND a.auction=?2 AND a.owner=?3 AND a.checked_through IS NULL
+          AND r.acknowledged_at IS NULL",params![b.scope,b.auction,b.owner],|r|r.get(0)).map_err(db)?;
+    let after=pending.map_or(n.saturating_sub(2),|p|n.saturating_sub(2).min(p-1));
+    t.commit().map_err(db)?;
+    Ok(after)
+}
 pub(crate) fn poll(c:&mut Connection,b:&Binding,bytes:&[u8])->Result<u64,Error>{
     let r:Poll=decode(bytes)?;
     envelope(b,r.ok,&r.artwork_id,&r.association_id)?;
@@ -206,10 +248,24 @@ pub(crate) fn history(c:&mut Connection,b:&Binding,after:u64,bytes:&[u8])->Resul
     let t=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
     let mut n=latest(&t,b)?;
     if after>n{return Err("settlement_history_gap")}
+    // An overlapping recovery page must not report a server head behind
+    // already committed local evidence. Reject before any receipt changes.
+    if h.latest_sequence<n{return Err("settlement_invalid_history")}
     for (i,d) in h.items.into_iter().enumerate(){
         if d.delivery_sequence!=after+i as u64+1{return Err("settlement_invalid_history")}
         store(&t,b,d,&mut n)?;
     }
+    // A complete overlapping page was validated and committed with its evidence.
+    // An older attempt without a stamp has been scanned, NOT acknowledged.
+    // Skip it for future rewind selection so a missing stamp cannot starve
+    // forward history. A later authenticated stamp can still be ingested.
+    t.execute("UPDATE auction_settlement_ack_attempts SET checked_through=?4
+        WHERE scope=?1 AND auction=?2 AND owner=?3 AND checked_through IS NULL
+          AND sequence>?5 AND sequence<?4 AND EXISTS(
+            SELECT 1 FROM auction_settlement_receipts r WHERE r.scope=auction_settlement_ack_attempts.scope
+              AND r.auction=auction_settlement_ack_attempts.auction AND r.sequence=auction_settlement_ack_attempts.sequence
+              AND r.acknowledged_at IS NULL)",params![b.scope,b.auction,b.owner,end,after]).map_err(db)?;
+    validate_ack_journal(&t)?;
     t.commit().map_err(db)?;
     Ok(n)
 }
@@ -230,6 +286,28 @@ pub(crate) fn ack_target(c:&mut Connection,b:&Binding)->Result<AckTarget,Error>{
     let r=stored_target(&t,b)?;
     t.commit().map_err(db)?;
     Ok(r)
+}
+// Commit the exact reviewed target BEFORE any network request. On a lost
+// response or restart this is evidence of uncertainty, never send authority.
+pub(crate) fn begin_ack_attempt(c:&mut Connection,b:&Binding,expected:Option<u64>)->Result<AckTarget,Error>{
+    let t=c.transaction_with_behavior(TransactionBehavior::Immediate).map_err(db)?;
+    let target=stored_target(&t,b)?;
+    if expected.is_some_and(|v|v!=target.sequence){return Err("settlement_stale_ack")}
+    let stamp:Option<String>=t.query_row("SELECT acknowledged_at FROM auction_settlement_receipts
+        WHERE scope=?1 AND auction=?2 AND sequence=?3",params![b.scope,b.auction,target.sequence],|r|r.get(0)).map_err(db)?;
+    if stamp.is_none(){
+        let select="SELECT owner,result_id FROM auction_settlement_ack_attempts WHERE scope=?1 AND auction=?2 AND sequence=?3";
+        let old:Option<(String,String)>=t.query_row(select,params![b.scope,b.auction,target.sequence],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(db)?;
+        if old.is_none(){
+            let changed=t.execute("INSERT INTO auction_settlement_ack_attempts(scope,auction,sequence,owner,result_id)
+                VALUES(?1,?2,?3,?4,?5)",params![b.scope,b.auction,target.sequence,b.owner,target.result_id]).map_err(db)?;
+            if changed!=1{return Err("settlement_storage_failed")}
+        }
+        let actual:(String,String)=t.query_row(select,params![b.scope,b.auction,target.sequence],|r|Ok((r.get(0)?,r.get(1)?))).map_err(db)?;
+        if actual!=(b.owner.clone(),target.result_id.clone()){return Err("settlement_ack_journal_invalid")}
+    }
+    t.commit().map_err(db)?;
+    Ok(target)
 }
 pub(crate) fn ack(c:&mut Connection,b:&Binding,request:&AckTarget,bytes:&[u8])->Result<(),Error>{
     let r:Ack=decode(bytes)?;
@@ -258,6 +336,9 @@ pub(crate) struct SettlementSummary {
     pub(crate) currency:String,
     pub(crate) fulfilled_at:String,
     pub(crate) acknowledged_at:Option<String>,
+    pub(crate) ack_pending:u64,
+    pub(crate) ack_scanned:u64,
+    pub(crate) ack_confirmed:u64,
 }
 
 pub(crate) fn summary(c:&mut Connection,b:&Binding)->Result<Option<SettlementSummary>,Error>{
@@ -270,8 +351,17 @@ pub(crate) fn summary(c:&mut Connection,b:&Binding)->Result<Option<SettlementSum
     let d:Delivery=decode(raw.as_bytes())?;
     if !d.valid(b)||d.delivery_sequence!=n||d.acknowledged_at.is_some()||
        ack.as_deref().is_some_and(|s|!date(s)){return Err("settlement_delivery_conflict")}
+    // Counts concern explicit local attempts only, never sales or all remote receipts.
+    // The journal and selected binding were validated by latest() in this transaction.
+    let (ack_pending,ack_scanned,ack_confirmed):(u64,u64,u64)=t.query_row(
+        "SELECT COUNT(CASE WHEN r.acknowledged_at IS NULL AND a.checked_through IS NULL THEN 1 END),
+                COUNT(CASE WHEN r.acknowledged_at IS NULL AND a.checked_through IS NOT NULL THEN 1 END),
+                COUNT(CASE WHEN r.acknowledged_at IS NOT NULL THEN 1 END)
+         FROM auction_settlement_ack_attempts a JOIN auction_settlement_receipts r USING(scope,auction,sequence)
+         WHERE a.scope=?1 AND a.auction=?2 AND a.owner=?3",
+        params![b.scope,b.auction,b.owner],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(db)?;
     let result=SettlementSummary{sequence:n,status:d.status,amount:d.amount,currency:d.currency,
-        fulfilled_at:d.fulfilled_at,acknowledged_at:ack};
+        fulfilled_at:d.fulfilled_at,acknowledged_at:ack,ack_pending,ack_scanned,ack_confirmed};
     t.commit().map_err(db)?;
     Ok(Some(result))
 }
@@ -300,7 +390,8 @@ mod fixtures {
         let b=binding();
         c.execute("INSERT INTO auction_published_bindings VALUES(?1,?2,?3,?4,?5,?6,?7)",
             params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner]).unwrap();
-        c.execute_batch(SCHEMA).unwrap();c
+        c.execute_batch(SCHEMA).unwrap();
+        c.execute_batch(include_str!("auction_settlement_v22.sql")).unwrap();c
     }
     pub(crate) fn delivery(n:u64,status:&str)->Value{json!({"auction_id":"fixture-auction","result_id":"fixture-auction:1:fulfillment",
         "closure_version":1,"delivery_sequence":n,"settlement_revision":2,"runtime_version":3,"fulfillment_revision":2,
@@ -401,7 +492,8 @@ mod fixtures {
         let view=summary(&mut c,&b).unwrap().unwrap();
         assert_eq!(serde_json::to_value(view).unwrap(),json!({
             "sequence":2,"status":"review_required","amount":25000,"currency":"EUR",
-            "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z"
+            "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z",
+            "ackPending":0,"ackScanned":0,"ackConfirmed":0
         }));
         let mut wrong=b.clone();wrong.owner="repertica:2".into();
         assert_eq!(summary(&mut c,&wrong),Err("settlement_binding_mismatch"));
@@ -452,6 +544,54 @@ mod fixtures {
             assert_eq!(ack(&mut c,&b,&target,&bytes(response)),Err("settlement_storage_failed"));
             assert_eq!(summary(&mut c,&b).unwrap().unwrap().acknowledged_at,None);
         }
+    }
+    #[test]
+    fn durable_attempt_recovers_older_stamp_and_unconfirmed_scan_does_not_starve(){
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("ack-journal.sqlite");
+        let b=binding();
+        let mut c=initialize(Connection::open(&path).unwrap());
+        poll(&mut c,&b,&bytes(reply(delivery(1,"fulfilled")))).unwrap();
+        assert_eq!(begin_ack_attempt(&mut c,&b,Some(2)),Err("settlement_stale_ack"));
+        let mut wrong=b.clone();wrong.owner="repertica:2".into();
+        assert_eq!(begin_ack_attempt(&mut c,&wrong,Some(1)),Err("settlement_binding_mismatch"));
+        let target=begin_ack_attempt(&mut c,&b,Some(1)).unwrap();
+        assert_eq!(begin_ack_attempt(&mut c,&b,Some(1)).unwrap(),target);
+        for n in 2..=5 {poll(&mut c,&b,&bytes(reply(delivery(n,"review_required")))).unwrap();}
+        begin_ack_attempt(&mut c,&b,Some(5)).unwrap();
+        for n in 6..=9 {poll(&mut c,&b,&bytes(reply(delivery(n,"review_required")))).unwrap();}
+        drop(c);
+        let mut c=Connection::open(&path).unwrap();
+        let before=summary(&mut c,&b).unwrap().unwrap();
+        assert_eq!((before.ack_pending,before.ack_scanned,before.ack_confirmed),(2,0,0));
+        assert_eq!(history_cursor(&mut c,&b),Ok(0));
+        let mut first=delivery(1,"fulfilled");
+        first["acknowledged_at"]=json!("2026-11-25T04:02:00.000Z");
+        let mut items=vec![first];
+        for n in 2..=9 {items.push(delivery(n,"review_required"));}
+        assert_eq!(history(&mut c,&b,0,&bytes(page(items,9,None))),Ok(9));
+        let after=summary(&mut c,&b).unwrap().unwrap();
+        assert_eq!((after.ack_pending,after.ack_scanned,after.ack_confirmed),(0,1,1));
+        assert_eq!(after.acknowledged_at,None);
+        assert_eq!(history_cursor(&mut c,&b),Ok(7));
+        let (stamp,checked):(Option<String>,Option<u64>)=c.query_row(
+            "SELECT r.acknowledged_at,a.checked_through FROM auction_settlement_ack_attempts a
+             JOIN auction_settlement_receipts r USING(scope,auction,sequence) WHERE a.sequence=5",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!((stamp,checked),(None,Some(9)));
+        assert_eq!(c.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=1",[],|r|r.get::<_,String>(0)).unwrap(),"2026-11-25T04:02:00.000Z");
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
+    }
+    #[test]
+    fn attempt_write_failure_prevents_request_and_snapshot_corruption_fails_closed(){
+        let mut c=database();let b=binding();
+        poll(&mut c,&b,&bytes(reply(delivery(1,"fulfilled")))).unwrap();
+        c.execute_batch("CREATE TRIGGER ignore_attempt BEFORE INSERT ON auction_settlement_ack_attempts BEGIN SELECT RAISE(IGNORE); END").unwrap();
+        assert_eq!(begin_ack_attempt(&mut c,&b,Some(1)),Err("settlement_storage_failed"));
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM auction_settlement_ack_attempts",[],|r|r.get::<_,u64>(0)).unwrap(),0);
+        c.execute_batch("DROP TRIGGER ignore_attempt").unwrap();
+        begin_ack_attempt(&mut c,&b,Some(1)).unwrap();
+        c.execute_batch("DROP TRIGGER auction_ack_attempt_checked_only; UPDATE auction_settlement_ack_attempts SET owner='repertica:2'").unwrap();
+        assert_eq!(history_cursor(&mut c,&b),Err("settlement_ack_journal_invalid"));
     }
     #[test]
     fn summary_rejects_corrupt_ack_and_archive_switch(){
