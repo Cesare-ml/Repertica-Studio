@@ -7,6 +7,7 @@ import { locale as osLocale } from '@tauri-apps/plugin-os';
 import { AppLanguage, chooseLanguage, translate } from './i18n';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { readImportFile, importErrorParts, type ArtworkMetadataPreview } from './artwork-metadata-import';
 import { csvRegisterOptions, type CsvRegisterKind } from './csv-registers';
 import { PaymentPlanComponent } from './payment-plan.component';
 import { MediaCenterComponent } from './media-center.component';
@@ -223,6 +224,9 @@ export class AppComponent implements OnInit {
   galleryCaption = '';
   galleryKind: PhotoKind = 'OTHER';
   readonly photoKinds = PHOTO_KINDS;
+  importPhotoKindLabel(kind: string): string {
+    return this.tr(this.photoKinds.find(item => item.code === kind)?.label ?? kind);
+  }
   editingGalleryCaptionId: string | null = null;
   editingGalleryCaption = '';
   artworkDialog = false;
@@ -402,6 +406,7 @@ export class AppComponent implements OnInit {
     this.navigate('auctions');
   }
   navigate(section: Section): void {
+    if (section !== 'settings') this.clearMetadataImport();
     this.section = section;
     this.mediaOpenId = null;
     this.search = '';
@@ -647,6 +652,62 @@ export class AppComponent implements OnInit {
       this.lastBackup = await api.createBackup(this.backupDestination);
     }, 'Backup completato e verificato. Conserva la cartella risultante in un luogo sicuro.');
   }
+  metadataImport: ArtworkMetadataPreview | null = null;
+  private metadataSource: string | null = null;
+  metadataImportError = '';
+  metadataImported: number | null = null;
+
+  clearMetadataImport(): void {
+    this.metadataImport = null;
+    this.metadataSource = null;
+    this.metadataImportError = '';
+    this.metadataImported = null;
+  }
+  private showMetadataImportError(error: unknown): void {
+    const {key, row} = importErrorParts(error);
+    const labels: Record<string,string> = {
+      size: 'Il file supera 16 MiB.',
+      format: 'Formato JSON di importazione non valido.',
+      count: 'Il file deve contenere da 1 a 1000 opere.',
+      invalid_row: 'Dati opera non validi. Riga:',
+      duplicate: 'Codice opera già presente. Riga:',
+      changed: 'Il contenuto è cambiato. Ripeti l’anteprima.',
+      relations: 'Relazioni o dati commerciali non validi o non supportati.',
+      collector_conflict: 'Collezionista già presente o ambiguo: nessuna fusione automatica.',
+      database: 'Importazione non riuscita. Verifica l’archivio e ripeti l’anteprima.'
+    };
+    this.metadataImportError = this.tr(labels[key]) + (row ? ' ' + row : '');
+  }
+  async chooseMetadataImport(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || this.busy || !this.initialized) return;
+    this.clearMetadataImport();
+    this.busy = true;
+    try {
+      const source = await readImportFile(file);
+      const preview = await api.previewArtworkMetadata(source);
+      if (this.section === 'settings') {
+        this.metadataSource = source;
+        this.metadataImport = preview;
+      }
+    } catch (error) { this.showMetadataImportError(error); }
+    finally { this.busy = false; this.change.detectChanges(); }
+  }
+  async confirmMetadataImport(): Promise<void> {
+    if (this.busy || !this.initialized || !this.metadataImport || this.metadataSource === null) return;
+    const source = this.metadataSource, digest = this.metadataImport.digest;
+    if (!window.confirm(this.tr('Importare tutti i record in anteprima? Nessun record esistente sarà sostituito.'))) return;
+    this.busy = true;
+    this.clearMetadataImport();
+    try {
+      this.metadataImported = await api.importArtworkMetadata(source, digest);
+      await this.refresh();
+    } catch (error) { this.showMetadataImportError(error); }
+    finally { this.busy = false; this.change.detectChanges(); }
+  }
+
   async exportLedger(kind: CsvRegisterKind): Promise<void> {
     if (this.busy || !this.initialized) return;
     const option = csvRegisterOptions[kind];
@@ -683,6 +744,7 @@ export class AppComponent implements OnInit {
     }
   }
   async restoreSelectedBackup(): Promise<void> {
+    if (!this.busy) this.clearMetadataImport();
     if (this.busy || !this.restoreCandidate) return;
     const candidate = this.restoreCandidate;
     if (!window.confirm('RIPRISTINO ARCHIVIO\\n\\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\\n\\nContinuare?')) return;

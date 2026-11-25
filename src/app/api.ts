@@ -17,6 +17,8 @@ import type { CsvRegisterKind } from './csv-registers';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
 export const api = {
+  previewArtworkMetadata: (source: string) => invoke<import('./artwork-metadata-import').ArtworkMetadataPreview>('preview_artwork_metadata', {source}),
+  importArtworkMetadata: (source: string, expectedDigest: string) => invoke<number>('import_artwork_metadata', {source, expectedDigest}),
   mailListAccounts: () => invoke<MailAccount[]>('mail_list_accounts'),
   mailSaveAccount: (input: MailAccountInput) => invoke<MailAccount>('mail_save_account', {input}),
   mailRemoveAccount: (accountId: string) => invoke<void>('mail_remove_account', {accountId}),

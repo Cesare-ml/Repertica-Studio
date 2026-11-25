@@ -99,7 +99,12 @@ test('photos are picked with the native dialog and read by path, not pushed as b
   const ui = get('src/app/app.component.ts');
   const html = get('src/app/app.component.html');
   const api = get('src/app/api.ts');
-  assert.doesNotMatch(html, /type="file"/);
+  // Only the bounded, explicit metadata JSON picker may use a browser file input.
+  const metadataPicker = '<input type="file" accept=".json,application/json" (change)="chooseMetadataImport($event)" [disabled]="busy || !initialized">';
+  assert.ok(html.includes(metadataPicker));
+  assert.doesNotMatch(html.replace(metadataPicker, ''), /type\s*=\s*["']file["']/i);
+  assert.match(ui, /await readImportFile\(file\)/);
+  assert.doesNotMatch(get('src/app/artwork-metadata-import.ts'), /readAsDataURL|base64|fetch\(/i);
   assert.doesNotMatch(ui, /readAsDataURL/);
   assert.match(api, /'save_artwork_image_from_path'/);
   assert.match(get('src-tauri/src/lib.rs'), /commands::save_artwork_image_from_path/);
