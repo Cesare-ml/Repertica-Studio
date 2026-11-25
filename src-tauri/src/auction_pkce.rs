@@ -13,6 +13,8 @@ const CALLBACK_PATH: &str = "/repertica/oauth/callback";
 #[derive(Clone, Copy)]
 pub(crate) enum GrantClient {
     Auctions,
+    // Separate native grant; same audience, never interchangeable with profile.
+    AuctionsSettlement,
     StudioApi,
 }
 
@@ -20,18 +22,20 @@ impl GrantClient {
     fn id(self) -> &'static str {
         match self {
             Self::Auctions => "repertica-desktop-auctions",
+            Self::AuctionsSettlement => "repertica-desktop-auctions-settlement",
             Self::StudioApi => "repertica-desktop-studio-api",
         }
     }
     fn scope(self) -> &'static str {
         match self {
             Self::Auctions => "profile",
+            Self::AuctionsSettlement => "auctions:settlement-read auctions:settlement-ack",
             Self::StudioApi => "artworks:create media:write",
         }
     }
     pub(crate) fn audience(self) -> &'static str {
         match self {
-            Self::Auctions => "repertica-auctions",
+            Self::Auctions | Self::AuctionsSettlement => "repertica-auctions",
             Self::StudioApi => "repertica-studio-api",
         }
     }
@@ -469,6 +473,7 @@ mod tests {
     fn provider_fixture_and_separate_grants() {
         for (client, id, audience, scope) in [
             (GrantClient::Auctions, "repertica-desktop-auctions", "repertica-auctions", "profile"),
+            (GrantClient::AuctionsSettlement, "repertica-desktop-auctions-settlement", "repertica-auctions", "auctions:settlement-read auctions:settlement-ack"),
             (GrantClient::StudioApi, "repertica-desktop-studio-api", "repertica-studio-api", "artworks:create media:write"),
         ] {
             let mut grant = fixture(client);
