@@ -19,11 +19,11 @@ export function parseSettlementSummary(raw: unknown): SettlementSummary | null {
   if (typeof raw !== 'object' || Array.isArray(raw) || raw === null) throw new Error('settlement_invalid_summary');
   const value = raw as Record<string, unknown>;
   if (Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key)) ||
-      !positive(value.sequence) || !positive(value.amount) || value.currency !== 'EUR' ||
-      (value.status !== 'fulfilled' && value.status !== 'review_required') || !timestamp(value.fulfilledAt) ||
-      (value.acknowledgedAt !== null && !timestamp(value.acknowledgedAt))) throw new Error('settlement_invalid_summary');
-  return Object.freeze({sequence: value.sequence, status: value.status, amount: value.amount, currency: value.currency,
-    fulfilledAt: value.fulfilledAt, acknowledgedAt: value.acknowledgedAt});
+      !positive(value['sequence']) || !positive(value['amount']) || value['currency'] !== 'EUR' ||
+      (value['status'] !== 'fulfilled' && value['status'] !== 'review_required') || !timestamp(value['fulfilledAt']) ||
+      (value['acknowledgedAt'] !== null && !timestamp(value['acknowledgedAt']))) throw new Error('settlement_invalid_summary');
+  return Object.freeze({sequence: value['sequence'], status: value['status'], amount: value['amount'], currency: value['currency'],
+    fulfilledAt: value['fulfilledAt'], acknowledgedAt: value['acknowledgedAt']});
 }
 
 const labels = {
