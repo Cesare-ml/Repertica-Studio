@@ -90,7 +90,10 @@ test('mail is synchronised automatically: no connect or refresh buttons, a backg
   assert.match(component, /sendNotification\(content\)/);
   assert.match(component, /if \(!this\.settings\.mail_notifications/, 'notifications can be switched off');
   assert.match(get('src-tauri/src/finance.rs'), /fn notifications_on\(\) -> bool \{ true \}/, 'notifications are on by default');
-  assert.match(get('src-tauri/src/db.rs'), /mail_notifications INTEGER NOT NULL DEFAULT 1/);
+  const schema = get('src-tauri/src/auction_archive_schema.rs');
+  assert.match(schema, /mail_notifications INTEGER NOT NULL DEFAULT 1 CHECK\(mail_notifications IN \(0,1\)\)/);
+  assert.match(schema, /if !l\.mail \{ tx\.execute_batch\(MAIL_SQL\)/, 'preserve existing mail preferences');
+  assert.match(get('src-tauri/src/db.rs'), /crate::auction_archive_schema::upgrade\(&mut conn\)/, 'archive opening invokes the composed migration');
 });
 
 test('the mail section has the layout of the Gestionale Opere with the look of Repertica Studio', () => {
