@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { NativeDraftPort, NativeDraftSnapshot } from './auction-preview';
 import { decodeNativeDraft, newAuctionDraft, saveNativeAuctionDraft } from './auction-preview';
 import { AuctionEditorSession } from './auction-editor-session';
+import { AuctionConnection } from './auction-connection';
 
 export interface AuctionDraftSummary {
   readonly artworkId: string;
@@ -34,4 +35,9 @@ export function createNativeAuctionEditor(): AuctionEditorSession {
     newDraft: newAuctionDraft,
     save: (snapshot, draft) => saveNativeAuctionDraft(nativeAuctionDrafts, snapshot, draft),
   });
+}
+
+/** Native capability gate. No renderer provider configuration or URL. */
+export function createNativeAuctionConnection(): AuctionConnection {
+  return new AuctionConnection(request => invoke<unknown>('auction_preview_command', { request }));
 }

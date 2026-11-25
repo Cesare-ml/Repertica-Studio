@@ -33,6 +33,14 @@ export class AuctionEditorSession {
       saved: s.snapshot.revision !== null };
   }
 
+  /** Pin the exact saved revision for native review. Never expose pending keys here. */
+  get savedReference() {
+    const s = this.session;
+    return s && !s.dirty && s.snapshot.revision
+      ? { artworkId: s.artwork.id, scope: s.snapshot.scope, revision: s.snapshot.revision }
+      : null;
+  }
+
   private ensureIdle(): void {
     if (this.inFlight) throw new Error('auction_editor_busy');
   }

@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, ElementRef, Input, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { translate, type AppLanguage } from './i18n';
-import { createNativeAuctionEditor, listNativeAuctionDrafts, type AuctionDraftPage, type AuctionDraftSummary } from './auction-native-api';
+import { createNativeAuctionEditor, createNativeAuctionConnection, listNativeAuctionDrafts, type AuctionDraftPage, type AuctionDraftSummary } from './auction-native-api';
 import type { SelectedAuctionArtwork } from './auction-editor-session';
 import { publicPreviewFields } from './auction-preview';
 import { auctionDraftEdits, auctionEditorError, fieldsFromAuctionDraft, type AuctionEditorFields } from './auction-editor-fields';
@@ -17,6 +17,8 @@ export class AuctionEditorComponent {
   @Input() language: AppLanguage = 'en';
   @ViewChild('dialog', { static: true }) private dialog!: ElementRef<HTMLDialogElement>;
   private readonly editor = createNativeAuctionEditor();
+  readonly online = createNativeAuctionConnection();
+  private onlineUpdating = false;
   private baseline = '';
   form: AuctionEditorFields | null = null;
   error = '';
@@ -40,7 +42,7 @@ export class AuctionEditorComponent {
     })[this.language];
   }
   get view() { return this.editor.view; }
-  get busy(): boolean { return this.editor.busy || this.listLoading; }
+  get busy(): boolean { return this.editor.busy || this.listLoading || this.online.busy || this.onlineUpdating; }
   get dirty(): boolean {
     return !!this.form && (JSON.stringify(this.form) !== this.baseline || !!this.view?.dirty);
   }
@@ -92,6 +94,79 @@ export class AuctionEditorComponent {
     const pending = this.view?.pending;
     // The session's native decoder validates the exact canonical body on read.
     return pending ? JSON.parse(pending.body) : null;
+  }
+
+  onlineLabel(key: 'unknown' | 'disabled' | 'disconnected' | 'connected' | 'check' | 'organizations' | 'disconnect' | 'readOnly' | 'review' | 'prepare' | 'reconcile' | 'cancel' | 'prepared' | 'received' | 'failed'): string {
+    const labels = {
+      it: { unknown:'Connessione non verificata', disabled:'Connessione non abilitata. Le bozze restano locali.', disconnected:'Non connesso. Le bozze restano locali.', connected:'Sessione nativa attiva', check:'Verifica stato connessione', organizations:'Carica organizzazioni', disconnect:'Disconnetti', readOnly:'Sola consultazione', review:'Rivedi richiesta con organizzazione', prepare:'Conferma preparazione locale', reconcile:'Conferma invio / riconciliazione anteprima', cancel:'Annulla conferma', prepared:'Richiesta salvata. Nessun invio effettuato.', received:'Ricevuta anteprima salvata. Nessuna vendita.', failed:'Operazione non confermata. Verifica lo stato locale prima di riprovare.' },
+      en: { unknown:'Connection not checked', disabled:'Connection not enabled. Drafts remain local.', disconnected:'Not connected. Drafts remain local.', connected:'Native session active', check:'Check connection status', organizations:'Load organizations', disconnect:'Disconnect', readOnly:'Read only', review:'Review request with organization', prepare:'Confirm local preparation', reconcile:'Confirm preview send / reconciliation', cancel:'Cancel confirmation', prepared:'Request saved. Nothing sent.', received:'Preview receipt saved. No sale.', failed:'Operation not confirmed. Check local state before retrying.' },
+      es: { unknown:'Conexión no verificada', disabled:'Conexión no habilitada. Los borradores siguen locales.', disconnected:'Sin conexión. Los borradores siguen locales.', connected:'Sesión nativa activa', check:'Verificar estado de conexión', organizations:'Cargar organizaciones', disconnect:'Desconectar', readOnly:'Solo lectura', review:'Revisar solicitud con organización', prepare:'Confirmar preparación local', reconcile:'Confirmar envío / conciliación de vista previa', cancel:'Cancelar confirmación', prepared:'Solicitud guardada. No se ha enviado.', received:'Recibo guardado. Sin venta.', failed:'Operación no confirmada. Verifica el estado local antes de reintentar.' },
+      fr: { unknown:'Connexion non vérifiée', disabled:'Connexion non activée. Les brouillons restent locaux.', disconnected:'Non connecté. Les brouillons restent locaux.', connected:'Session native active', check:'Vérifier la connexion', organizations:'Charger les organisations', disconnect:'Déconnecter', readOnly:'Lecture seule', review:'Vérifier la demande avec organisation', prepare:'Confirmer la préparation locale', reconcile:'Confirmer envoi / rapprochement de l’aperçu', cancel:'Annuler la confirmation', prepared:'Demande enregistrée. Aucun envoi.', received:'Reçu enregistré. Aucune vente.', failed:'Opération non confirmée. Vérifiez l’état local avant de réessayer.' },
+      de: { unknown:'Verbindung nicht geprüft', disabled:'Verbindung nicht aktiviert. Entwürfe bleiben lokal.', disconnected:'Nicht verbunden. Entwürfe bleiben lokal.', connected:'Native Sitzung aktiv', check:'Verbindungsstatus prüfen', organizations:'Organisationen laden', disconnect:'Trennen', readOnly:'Nur lesen', review:'Anfrage mit Organisation prüfen', prepare:'Lokale Vorbereitung bestätigen', reconcile:'Vorschauversand / Abgleich bestätigen', cancel:'Bestätigung abbrechen', prepared:'Anfrage gespeichert. Nichts gesendet.', received:'Vorschaubeleg gespeichert. Kein Verkauf.', failed:'Vorgang nicht bestätigt. Vor erneutem Versuch lokalen Status prüfen.' }
+    };
+    return labels[this.language][key];
+  }
+
+  private async onlineAction(work: () => Promise<void>): Promise<void> {
+    if (this.busy) return;
+    this.onlineUpdating = true;
+    this.error = ''; this.notice = '';
+    try { await work(); }
+    catch { this.error = this.onlineLabel('failed'); }
+    finally { this.onlineUpdating = false; this.cdr.markForCheck(); }
+  }
+
+  checkConnection(): Promise<void> { return this.onlineAction(() => this.online.refreshStatus()); }
+  loadOrganizations(): Promise<void> { return this.onlineAction(() => this.online.loadOrganizations()); }
+  chooseOrganization(id: string): Promise<void> { return this.onlineAction(() => this.online.selectOrganization(id)); }
+  disconnectOnline(): Promise<void> { return this.onlineAction(() => this.online.disconnect()); }
+  cancelOnlineReview(): Promise<void> { return this.onlineAction(() => this.online.cancelReview()); }
+
+  get canReviewOnline(): boolean {
+    const v = this.view;
+    return !!v?.saved && !v.receipt && !this.dirty && !this.busy && this.online.state === 'connected' &&
+      !!this.online.selected?.publicationEligible && !this.online.review &&
+      (v.pending ? this.pendingDetails?.tenantId === this.online.selected.tenantId : v.artwork.status === 'available');
+  }
+
+  reviewOnline(): Promise<void> {
+    if (!this.canReviewOnline) return Promise.resolve();
+    return this.onlineAction(async () => {
+      const v = this.view, ref = this.editor.savedReference, selected = this.online.selected;
+      if (!v || !ref || !selected) throw new Error('auction_draft_conflict');
+      const body = v.pending?.body ?? JSON.stringify({tenantId:selected.tenantId, ...publicPreviewFields(v.draft)});
+      await this.online.reviewDraft(ref, body, !!v.pending);
+    });
+  }
+
+  get onlineReviewDetails(): ReturnType<AuctionEditorComponent['readOnlineReview']> {
+    return this.readOnlineReview();
+  }
+
+  private readOnlineReview(): { tenantId: string; title: string; description: string; slug: string;
+    startsAt: string; endsAt: string; startingAmount: number; minimumIncrementAmount: number } | null {
+    return this.online.review ? JSON.parse(this.online.review.publicBody) : null;
+  }
+
+  confirmOnline(): Promise<void> {
+    if (this.dirty || !this.online.review || !this.editor.savedReference) return Promise.resolve();
+    return this.onlineAction(async () => {
+      const reviewedBody = this.online.review!.publicBody;
+      const result = await this.online.confirm();
+      await this.editor.reloadSaved(false, result.action === 'prepare' ? result.revision : undefined);
+      const v = this.view;
+      // No success shown until the persisted record matches the exact reviewed
+      // request and (for reconciliation) the native receipt. Never retry here.
+      if (!v?.pending || v.pending.body !== reviewedBody ||
+          (result.action === 'prepare' && !!v.receipt) ||
+          (result.action === 'reconcile' && (!v.receipt || v.receipt.auctionId !== result.receipt.auctionId ||
+            v.receipt.tenantId !== result.receipt.tenantId || v.receipt.slug !== result.receipt.slug))) {
+        this.refreshForm();
+        throw new Error('auction_draft_conflict');
+      }
+      this.refreshForm();
+      this.notice = this.onlineLabel(result.action === 'prepare' ? 'prepared' : 'received');
+    });
   }
 
   async showList(): Promise<void> {
@@ -154,7 +229,7 @@ export class AuctionEditorComponent {
   }
 
   async saveDraft(): Promise<void> {
-    if (this.busy || !this.form) return;
+    if (this.busy || !this.form || this.online.review) return;
     this.error = '';
     this.notice = '';
     try {
@@ -178,7 +253,7 @@ export class AuctionEditorComponent {
   }
 
   async reloadDraft(discard = false): Promise<void> {
-    if (this.busy || !this.view?.saved || (this.dirty && !discard)) return;
+    if (this.busy || this.online.review || !this.view?.saved || (this.dirty && !discard)) return;
     this.invalidateReview();
     this.error = '';
     this.notice = '';
@@ -189,8 +264,13 @@ export class AuctionEditorComponent {
     finally { this.cdr.markForCheck(); }
   }
 
-  close(discard = false): void {
+  async close(discard = false): Promise<void> {
     if (this.busy || (this.dirty && !discard)) return;
+    if (this.online.state === 'connected' || this.online.review) {
+      // No token survives an explicit UI logout; if the IPC fails the
+      // controller resets to unknown, and the offline dialog can still close.
+      try { await this.online.disconnect(); } catch { /* local editor remains usable */ }
+    }
     this.editor.close(discard);
     this.invalidateReview();
     this.dialog.nativeElement.close();
