@@ -460,7 +460,7 @@ mod tests {
         // owner from a renderer, and only an explicitly bound local artwork.
         use super::settlement_ledger as ledger;
         let client = settlement_http::NativeSettlementHttp::new(addr).unwrap();
-        // Use ordinary archive creation with the reconciled v21 migration.
+        // Use ordinary archive creation with the reconciled v22 migration.
         // The remote provider remains an isolated fixture only.
         let dir = tempfile::tempdir().unwrap();
         let archive = repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
@@ -570,7 +570,7 @@ mod tests {
         let request = || serde_json::from_value(json!({"action":"readSettlement",
             "artworkId":binding.local_work,"scope":binding.scope})).unwrap();
         // Reopen through the ordinary app entry point, not raw SQLite:
-        // reconciled schema v21 must retain the immutable binding and ACK.
+        // reconciled schema v22 must retain the immutable binding and ACK.
         drop(db);
         let archive = repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
         let mut db = archive.conn.into_inner().unwrap();
@@ -666,25 +666,30 @@ mod tests {
                     "resultId":"fixture-auction:1:fulfillment","deliverySequence":sequence});
                 let fourth = ledger::delivery(4,"review_required");
                 let fifth = ledger::delivery(5,"review_required");
+                let sixth = ledger::delivery(6,"review_required");
+                let seventh = ledger::delivery(7,"review_required");
                 let mut acknowledged = fourth.clone();
                 acknowledged["acknowledged_at"] = json!("2026-11-25T04:03:00.000Z");
-                let mut fifth_ack = fifth.clone();
-                fifth_ack["acknowledged_at"] = json!("2026-11-25T04:04:00.000Z");
-                let mut confirmation = ledger::reply(fifth_ack);
+                let mut seventh_ack = seventh.clone();
+                seventh_ack["acknowledged_at"] = json!("2026-11-25T04:04:00.000Z");
+                let mut confirmation = ledger::reply(seventh_ack);
                 confirmation["replayed"] = json!(false);
                 // The fixture records the fourth ACK but deliberately drops
-                // the HTTP response. A subsequent delivery makes ACK(4) stale.
-                // Only the explicit overlapping history read returns its stamp.
+                // the HTTP response. Three subsequent deliveries make ACK(4)
+                // older than the ordinary two-delivery overlap. Only the durable
+                // attempt journal can rewind history far enough to find its stamp.
                 for (expected,status,body) in [
                     (history(1),"200 OK",Some(ledger::page(vec![ledger::delivery(2,"fulfilled"),
                         ledger::delivery(3,"review_required"),fourth.clone()],4,None))),
                     (poll.clone(),"200 OK",Some(ledger::reply(fourth))),
                     (ack(4),"",None),
                     (ack(4),"409 Conflict",Some(json!({"ok":false,"code":"stale"}))),
-                    (poll, "200 OK",Some(ledger::reply(fifth.clone()))),
-                    (history(3),"200 OK",Some(ledger::page(vec![acknowledged.clone(),fifth],5,None))),
-                    (history(3),"200 OK",Some(ledger::page(vec![acknowledged],4,None))),
-                    (ack(5),"200 OK",Some(confirmation)),
+                    (poll.clone(),"200 OK",Some(ledger::reply(fifth.clone()))),
+                    (poll.clone(),"200 OK",Some(ledger::reply(sixth.clone()))),
+                    (poll,"200 OK",Some(ledger::reply(seventh.clone()))),
+                    (history(3),"200 OK",Some(ledger::page(vec![acknowledged,fifth,sixth.clone(),seventh],7,None))),
+                    (history(5),"200 OK",Some(ledger::page(vec![sixth],6,None))),
+                    (ack(7),"200 OK",Some(confirmation)),
                 ] {
                     let mut stream = accept(&listener);
                     let bytes = read_resource_request(&mut stream,
@@ -705,19 +710,32 @@ mod tests {
                 assert_eq!(reviewed_ack!(4).unwrap_err(),"oauth_http_failed");
                 assert_eq!(ledger::summary(&mut db,&binding).unwrap().unwrap().acknowledged_at,None);
                 assert_eq!(reviewed_ack!(4).unwrap_err(),"settlement_conflict");
-                let fifth = dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),verify).await.unwrap();
-                assert_eq!(fifth["sequence"],5);
-                assert!(fifth["acknowledgedAt"].is_null());
-                assert_eq!(dispatch(&mut active,&mut scoped,&mut db,history_request(),||Ok(NOW),verify)
-                    .await.unwrap(),fifth);
+                let attempt_count:u64=db.query_row("SELECT COUNT(*) FROM auction_settlement_ack_attempts WHERE sequence=4",[],|r|r.get(0)).unwrap();
+                assert_eq!(attempt_count,1);
+                for n in 5..=7 {
+                    let next=dispatch(&mut active,&mut scoped,&mut db,poll_request(),||Ok(NOW),verify).await.unwrap();
+                    assert_eq!(next["sequence"],n);
+                    assert!(next["acknowledgedAt"].is_null());
+                }
+                // Drop the actual connection before recovery. The native grant
+                // remains in memory, but the recovery cursor comes from SQLite.
+                let old=std::mem::replace(&mut db,rusqlite::Connection::open_in_memory().unwrap());
+                drop(old);
+                db=repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap().conn.into_inner().unwrap();
+                assert_eq!(ledger::history_cursor(&mut db,&binding),Ok(3));
+                let recovered=dispatch(&mut active,&mut scoped,&mut db,history_request(),||Ok(NOW),verify)
+                    .await.unwrap();
+                assert_eq!(recovered["sequence"],7);
+                assert!(recovered["acknowledgedAt"].is_null());
+                assert_eq!(ledger::history_cursor(&mut db,&binding),Ok(5));
                 let stamp: Option<String> = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=4",[],|r|r.get(0)).unwrap();
                 assert_eq!(stamp.as_deref(),Some("2026-11-25T04:03:00.000Z"));
                 assert_eq!(dispatch(&mut active,&mut scoped,&mut db,history_request(),||Ok(NOW),verify)
                     .await.unwrap_err(),"settlement_invalid_history");
                 assert_eq!(reviewed_ack!(4).unwrap_err(),"settlement_stale_ack");
-                let ack = reviewed_ack!(5).unwrap();
+                let ack = reviewed_ack!(7).unwrap();
                 assert_eq!(ack["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
-                assert_eq!(reviewed_ack!(5).unwrap(),ack);
+                assert_eq!(reviewed_ack!(7).unwrap(),ack);
             });
             worker.join().unwrap()
         };
@@ -725,8 +743,8 @@ mod tests {
         let archive = repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
         let mut db = archive.conn.into_inner().unwrap();
         let summary = serde_json::to_value(ledger::summary(&mut db,&binding).unwrap()).unwrap();
-        assert_eq!(ledger::count(&db),5);
-        assert_eq!(summary["sequence"],5);
+        assert_eq!(ledger::count(&db),7);
+        assert_eq!(summary["sequence"],7);
         assert_eq!(summary["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
         let recovered: String = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=4",[],|r|r.get(0)).unwrap();
         assert_eq!(recovered,"2026-11-25T04:03:00.000Z");
