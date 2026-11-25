@@ -68,7 +68,8 @@ export class SettlementReader {
   private selection: SettlementSelection | null = null;
   private generation = 0;
   private state: SettlementReadState = {kind:'idle'};
-  constructor(private readonly read: (request: SettlementReadRequest) => Promise<unknown>) {}
+  private readonly read: (request: SettlementReadRequest) => Promise<unknown>;
+  constructor(read: (request: SettlementReadRequest) => Promise<unknown>) { this.read = read; }
 
   get busy(): boolean { return this.state.kind === 'loading'; }
 
