@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { invoke } from '@tauri-apps/api/core';
+import { previewLegacyDraft } from './auction-legacy-import';
 import { AUCTION_API_CONNECTED, AUCTION_CONTRACT_VERSION } from './auction-contract';
 import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, slugify,
   utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
@@ -288,13 +289,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
       if ((requireExisting && !saved) || (legacy && saved)) throw new Error('auction_draft_conflict');
       const artwork = this.artworks.find(a => a.id === id);
       if (!saved && (!artwork || artwork.status !== 'available')) throw new Error('artwork_not_available');
-      const draft = saved?.draft ?? newAuctionDraft(artwork!);
-      if (legacy) {
-        // Explicit allowlist and review; never write, clear or mark legacy storage as migrated here.
-        Object.assign(draft, { title: legacy.title, description: legacy.description, slug: legacy.slug,
-          startsAt: legacy.startsAt, endsAt: legacy.endsAt, startingAmount: legacy.startingAmount,
-          minimumIncrementAmount: legacy.minimumIncrementAmount });
-      } else if (!saved && draft.title.length > 160) draft.title = '';
+      const draft = legacy ? previewLegacyDraft(legacy, artwork!, snapshot, expected)
+        : saved?.draft ?? newAuctionDraft(artwork!);
+      if (!legacy && !saved && draft.title.length > 160) draft.title = '';
       this.snapshot = snapshot;
       this.importingLegacy = !!legacy;
       this.begin(draft);
