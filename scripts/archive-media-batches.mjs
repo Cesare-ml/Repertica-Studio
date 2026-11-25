@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { publishLocalPackage } from './publish-local-package.mjs';
+import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 
 const FORMAT = 'repertica-studio-archive-relations-v2';
 const LIMIT = 16 * 1024 * 1024;
+const PIXEL_LIMIT = 128_000_000;
 const encode = pkg => JSON.stringify(pkg, null, 2) + '\n';
 const asciiFold = s => s.replace(/[A-Z]/g, c => c.toLowerCase());
 const blank = () => ({format:FORMAT,artworks:[],collectors:[],sales:[]});
@@ -67,6 +69,15 @@ function combine(a,b) {
   return {format:FORMAT,...Object.fromEntries(['artworks','collectors','sales','covers','gallery'].map(k=>[k,[...(a[k]??[]),...(b[k]??[])]]))};
 }
 const imageCount = p => p.covers.length + p.gallery.length;
+// Measure each assembled group once, including both covers and gallery entries.
+// The native preview still performs full decoding and hash verification.
+function groupPixels(p) {
+  let total=0;
+  for (const photo of [...p.covers,...p.gallery]) {
+    total=addArchiveImagePixels(total,Buffer.from(photo.data_base64,'base64'));
+  }
+  return total;
+}
 const bounded = p => p.artworks.length <= 1000 && p.collectors.length <= 1000 && p.sales.length <= 1000 &&
   p.sales.reduce((n,s)=>n+s.receipts.length,0) <= 1000 && p.sales.reduce((n,s)=>n+s.installments.length,0) <= 1000 &&
   imageCount(p) <= 1000 && Buffer.byteLength(encode(p),'utf8') <= LIMIT;
@@ -78,7 +89,7 @@ export async function publishArchiveMediaBatches(output, pkg, rows, attach) {
   const dir=resolve(output);
   await mkdir(dir,{mode:0o700}); // exclusive; never replace an existing directory
   const packages=[];
-  let batch=null;
+  let batch=null, batchPixels=0;
   async function flush() {
     if (!batch) return;
     const data=encode(batch), name=`package-${String(packages.length+1).padStart(4,'0')}.json`;
@@ -86,21 +97,20 @@ export async function publishArchiveMediaBatches(output, pkg, rows, attach) {
     packages.push({file:name,sha256:createHash('sha256').update(data,'utf8').digest('hex'),
       bytes:Buffer.byteLength(data,'utf8'),artworks:batch.artworks.length,collectors:batch.collectors.length,
       sales:batch.sales.length,photographs:imageCount(batch)});
-    batch=null;
+    batch=null; batchPixels=0;
   }
   try {
     for (const group of groups) {
       const part=JSON.parse(await attach(group.pkg,group.rows));
       if (!bounded(part)) throw Error('One linked group exceeds package limits');
-      // Eight individually valid photos cannot exceed the native aggregate pixel cap.
-      // A larger indivisible group may still fit; it is kept alone for native preview.
-      if (batch && (batch.artworks.length+part.artworks.length>100 || imageCount(batch)+imageCount(part)>8)) await flush();
+      const partPixels=groupPixels(part);
+      if (batch && (batch.artworks.length+part.artworks.length>100 || batchPixels+partPixels>PIXEL_LIMIT)) await flush();
       if (batch) {
         const candidate=combine(batch,part);
-        if (bounded(candidate)) {batch=candidate;continue;}
+        if (bounded(candidate)) {batch=candidate;batchPixels+=partPixels;continue;}
         await flush();
       }
-      batch=part;
+      batch=part; batchPixels=partPixels;
     }
     await flush();
     // Written last: no manifest means incomplete export, never import it.
