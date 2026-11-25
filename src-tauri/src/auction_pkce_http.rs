@@ -639,7 +639,7 @@ mod tests {
 
     #[test]
     fn native_pkce_preparation_and_explicit_reconciliation_preserve_exact_bytes() {
-        use super::resource_http::{NativeAuctionsHttp, NativePreviewSession};
+        use super::resource_http::{NativeAuctionsHttp, NativePreviewSession, dispatch_isolated};
         use rusqlite::{Connection,params};
         let (listener,addr)=listen();
         // Simulate the browser only at the injected opener boundary. The native
@@ -782,9 +782,21 @@ mod tests {
             conn.execute("UPDATE auction_drafts SET revision=?1 WHERE artwork_id='a'",[&changed_revision]).unwrap();
             assert_eq!(session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap_err(),"auction_draft_conflict");
             conn.execute("UPDATE auction_drafts SET revision=?1 WHERE artwork_id='a'",[&revision]).unwrap();
-            let review = session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).unwrap();
-            let next=session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap();
-            assert_eq!(session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap_err(),"auction_review_required");
+            // Same serialized request shape as the release Tauri command,
+            // but only this native fixture may own a connected session.
+            let mut active = Some(session);
+            let status = dispatch_isolated(&mut active,&mut conn,serde_json::from_value(json!({"action":"status"})).unwrap(),||Ok(NOW)).await.unwrap();
+            assert_eq!(status,json!({"status":"connected"}));
+            let review = dispatch_isolated(&mut active,&mut conn,serde_json::from_value(json!({
+                "action":"reviewNew","artworkId":"a","scope":scope,"revision":revision,"publicBody":RESOURCE_BODY
+            })).unwrap(),||Ok(NOW)).await.unwrap();
+            assert_eq!(review["publicBody"],RESOURCE_BODY);
+            assert_eq!(review["action"],"prepare");
+            let confirm = json!({"action":"confirmPrepare","confirmationId":review["confirmationId"]});
+            let prepared = dispatch_isolated(&mut active,&mut conn,serde_json::from_value(confirm.clone()).unwrap(),||Ok(NOW)).await.unwrap();
+            let next=prepared["revision"].as_str().unwrap().to_owned();
+            assert_eq!(dispatch_isolated(&mut active,&mut conn,serde_json::from_value(confirm).unwrap(),||Ok(NOW)).await.unwrap_err(),"auction_review_required");
+            let mut session=active.take().unwrap();
             let (actual,record)=stored(&conn);
             assert_ne!(revision,next);
             assert_eq!(actual,next);
@@ -800,8 +812,11 @@ mod tests {
             assert_eq!(review.public_body, RESOURCE_BODY);
             assert_eq!(review.action, "reconcile");
             assert_eq!(stored(&conn),(actual.clone(),record.clone()));
-            let confirmed = session.confirm_reconcile(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap();
-            assert_eq!(session.confirm_reconcile(&mut conn,&review.confirmation_id,||Ok(NOW)).await.err().as_deref(),Some("auction_review_required"));
+            let mut active=Some(session);
+            let confirm=json!({"action":"confirmReconcile","confirmationId":review.confirmation_id});
+            let confirmed=dispatch_isolated(&mut active,&mut conn,serde_json::from_value(confirm.clone()).unwrap(),||Ok(NOW)).await.unwrap();
+            assert_eq!(dispatch_isolated(&mut active,&mut conn,serde_json::from_value(confirm.clone()).unwrap(),||Ok(NOW)).await.unwrap_err(),"auction_review_required");
+            let mut session=active.take().unwrap();
             let (confirmed_revision, confirmed_record) = stored(&conn);
             assert_ne!(confirmed_revision, next);
             let saved: Value = serde_json::from_str(&confirmed_record).unwrap();
@@ -812,6 +827,12 @@ mod tests {
                 json!({"tenantId":"tenant-test","auctionId":RESOURCE_ID,"slug":"artist--art"}));
             session.clear_selection();
             assert_eq!(session.review_new(&conn,"a",&scope,&confirmed_revision,RESOURCE_BODY,NOW).err().as_deref(),Some("auction_access_denied"));
+            assert_eq!(stored(&conn),(confirmed_revision.clone(),confirmed_record.clone()));
+            let mut active=Some(session);
+            let disconnected=dispatch_isolated(&mut active,&mut conn,serde_json::from_value(json!({"action":"disconnect"})).unwrap(),||Ok(NOW)).await.unwrap();
+            assert_eq!(disconnected,json!({"status":"disconnected"}));
+            assert!(active.is_none());
+            assert_eq!(dispatch_isolated(&mut active,&mut conn,serde_json::from_value(confirm).unwrap(),||Ok(NOW)).await.unwrap_err(),"auction_not_connected");
             assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
         });
         let listener=worker.join().unwrap();

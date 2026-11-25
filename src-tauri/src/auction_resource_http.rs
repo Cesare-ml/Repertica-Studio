@@ -14,6 +14,11 @@ mod draft_record;
 use draft_record::{StoredReceipt, reconciliation, parse_record, Pending, pending_matches_draft};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
+#[path = "auction_preview_ipc.rs"]
+pub(super) mod ipc;
+use ipc::Request;
+use serde_json::{json, Value};
+
 const TENANTS: &str = "/api/studio/tenants";
 const PREVIEWS: &str = "/api/studio/previews";
 
@@ -501,5 +506,55 @@ impl NativePreviewSession {
             &r.revision, clock).await?;
         Ok(PublicPreviewReceipt { tenant_id: receipt.tenant_id,
             auction_id: receipt.auction_id, slug: receipt.slug })
+    }
+}
+
+
+/// The exact IPC request shape runs against a verified session only inside the
+/// isolated acceptance target. The renderer cannot instantiate this session;
+/// a test must first finish native PKCE + signed JWT exchange. No Tauri
+/// command registers this dispatcher in a distributed application.
+pub(super) async fn dispatch_isolated(
+    session: &mut Option<NativePreviewSession>, conn: &mut Connection, request: Request,
+    clock: impl Fn() -> Result<u64, Failure>,
+) -> Result<Value, String> {
+    let request = match request {
+        Request::Disconnect {} => {
+            *session = None;
+            return Ok(json!({"status":"disconnected"}));
+        }
+        Request::Status {} => {
+            let active = session.as_ref().is_some_and(|s|
+                clock().ok().is_some_and(|now| s.token.bearer_for(GrantClient::Auctions, now).is_ok()));
+            if !active { *session = None; }
+            return Ok(json!({"status":if active {"connected"} else {"disconnected"}}));
+        }
+        other => other,
+    };
+    // Expiry or clock failure must discard the entire native session before
+    // handling another operation. The persisted draft is not touched.
+    let active = session.as_ref().is_some_and(|s|
+        clock().ok().is_some_and(|now| s.token.bearer_for(GrantClient::Auctions, now).is_ok()));
+    if !active {
+        *session = None;
+        return Err("auction_not_connected".into());
+    }
+    let s = session.as_mut().ok_or_else(|| "auction_not_connected".to_string())?;
+    let project = |value: Result<Value, serde_json::Error>| value.map_err(|_| "auction_invalid_response".to_string());
+    match request {
+        Request::Organizations {} => project(serde_json::to_value(s.organizations(&clock).await.map_err(str::to_owned)?)),
+        Request::SelectOrganization { tenant_id } =>
+            project(serde_json::to_value(s.select_organization(&tenant_id, &clock).await.map_err(str::to_owned)?)),
+        Request::ClearSelection {} => { s.clear_selection(); Ok(json!(null)) },
+        Request::CancelReview {} => { s.cancel_review(); Ok(json!(null)) },
+        Request::ReviewNew { artwork_id, scope, revision, public_body } =>
+            project(serde_json::to_value(s.review_new(conn, &artwork_id, &scope, &revision, &public_body, clock().map_err(str::to_owned)?)?)),
+        Request::ReviewPending { artwork_id, scope, revision } =>
+            project(serde_json::to_value(s.review_pending(conn, &artwork_id, &scope, &revision, clock().map_err(str::to_owned)?)?)),
+        Request::ConfirmPrepare { confirmation_id } =>
+            Ok(json!({"revision":s.confirm_prepare(conn, &confirmation_id, &clock).await?})),
+        Request::ConfirmReconcile { confirmation_id } =>
+            project(serde_json::to_value(s.confirm_reconcile(conn, &confirmation_id, &clock).await?)),
+        Request::Status {} | Request::Disconnect {} => Err("auction_invalid_request".into()),
     }
 }

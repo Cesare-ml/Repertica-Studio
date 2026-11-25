@@ -71,7 +71,10 @@ pub struct DraftWrite {
     artwork_id: String, scope: String, expected_revision: Option<String>, record_json: String,
 }
 
-fn write(conn: &mut Connection, input: DraftWrite) -> Result<DraftSnapshot,String> {
+// Only the fixture helper below may seed a pending record directly. In
+// release IPC, first preparation belongs exclusively to the native confirmation
+// flow; existing pending requests and receipts remain immutable.
+fn write_record(conn: &mut Connection, input: DraftWrite, fixture_seed: bool) -> Result<DraftSnapshot,String> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(error)?;
     let previous = read(&tx,&input.artwork_id)?;
     if previous.scope != input.scope || previous.revision != input.expected_revision {
@@ -90,6 +93,9 @@ fn write(conn: &mut Connection, input: DraftWrite) -> Result<DraftSnapshot,Strin
     // boundary too. Later edits may differ; the original pending body is frozen.
     if old_pending.is_none() {
         if let Some(p) = &next.pending {
+            if !cfg!(test) || !fixture_seed {
+                return Err("auction_native_confirmation_required".into());
+            }
             if !pending_matches_draft(p, &next.draft)? {
                 return Err("preview_draft_changed".into());
             }
@@ -186,7 +192,17 @@ pub fn read_auction_draft(db: State<'_,Database>, artwork_id: String) -> Result<
 #[tauri::command]
 pub fn write_auction_draft(db: State<'_,Database>, input: DraftWrite) -> Result<DraftSnapshot,String> {
     let mut conn = db.conn.lock().map_err(error)?;
-    write(&mut conn,input)
+    write_record(&mut conn,input,false)
+}
+
+#[tauri::command]
+pub fn auction_preview_command(request: crate::auction_preview_ipc::Request) -> Result<serde_json::Value,String> {
+    request.disabled()
+}
+
+#[cfg(test)]
+fn write(conn: &mut Connection, input: DraftWrite) -> Result<DraftSnapshot,String> {
+    write_record(conn,input,true)
 }
 
 #[cfg(test)]
@@ -211,6 +227,30 @@ mod tests {
             expected_revision:snapshot.revision.clone(),record_json:raw}
     }
 
+
+    #[test]
+    fn editor_ipc_cannot_seed_a_pending_key_but_preserves_existing_attempts() {
+        let dir=tempfile::tempdir().unwrap();
+        let db=crate::db::open(dir.path().into()).unwrap();
+        let mut conn=db.conn.lock().unwrap();
+        seed(&conn);
+        let initial=read(&conn,"a").unwrap();
+        assert_eq!(write_record(&mut conn,input(&initial,record(&initial.scope,true)),false).unwrap_err(),
+            "auction_native_confirmation_required");
+        assert_eq!(read(&conn,"a").unwrap(),initial);
+        let saved=write_record(&mut conn,input(&initial,record(&initial.scope,false)),false).unwrap();
+        assert_eq!(write_record(&mut conn,input(&saved,record(&saved.scope,true)),false).unwrap_err(),
+            "auction_native_confirmation_required");
+        assert_eq!(read(&conn,"a").unwrap(),saved);
+        // Historical or natively prepared attempts are still editable offline.
+        let pending=write(&mut conn,input(&saved,record(&saved.scope,true))).unwrap();
+        let mut edited: serde_json::Value=serde_json::from_str(pending.record_json.as_ref().unwrap()).unwrap();
+        edited["draft"]["title"]=json!("Edited");
+        let updated=write_record(&mut conn,input(&pending,edited.to_string()),false).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(updated.record_json.as_ref().unwrap()).unwrap()["pending"],edited["pending"]);
+        assert_eq!(write_record(&mut conn,input(&updated,record(&updated.scope,false)),false).unwrap_err(),"pending_preview_unresolved");
+        assert_eq!(read(&conn,"a").unwrap(),updated);
+    }
 
     #[test]
     fn list_is_local_paginated_and_keeps_orphans_without_exposing_payloads() {

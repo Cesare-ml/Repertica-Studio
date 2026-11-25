@@ -2,6 +2,7 @@ mod allocations;
 mod archive_code;
 mod auto_backup;
 mod auction_drafts;
+mod auction_preview_ipc;
 mod backup;
 mod brochures;
 mod business_mail;
@@ -45,6 +46,7 @@ pub fn run() {
             auction_drafts::list_auction_drafts,
             auction_drafts::read_auction_draft,
             auction_drafts::write_auction_draft,
+            auction_drafts::auction_preview_command,
             business_mail::mail_list_accounts,
             business_mail::mail_save_account,
             business_mail::mail_remove_account,
