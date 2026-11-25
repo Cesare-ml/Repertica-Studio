@@ -810,9 +810,9 @@ mod tests {
             assert_eq!(session.review_pending(&conn,"a",&scope,&confirmed_revision,NOW).err().as_deref(),Some("auction_already_confirmed"));
             assert_eq!(serde_json::to_value(&confirmed).unwrap(),
                 json!({"tenantId":"tenant-test","auctionId":RESOURCE_ID,"slug":"artist--art"}));
-            assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
             session.clear_selection();
             assert_eq!(session.review_new(&conn,"a",&scope,&confirmed_revision,RESOURCE_BODY,NOW).err().as_deref(),Some("auction_access_denied"));
+            assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
         });
         let listener=worker.join().unwrap();
         assert_eq!(listener.accept().err().unwrap().kind(),std::io::ErrorKind::WouldBlock);
