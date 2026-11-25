@@ -766,7 +766,7 @@ mod tests {
             assert!(uuid::Uuid::parse_str(value["pending"]["idempotencyKey"].as_str().unwrap()).is_ok());
             assert!(value.get("receipt").is_none());
             assert_eq!(session.review_new(&conn,"a",&scope,&next,RESOURCE_BODY,NOW).err().as_deref(),Some("pending_preview_unresolved"));
-            assert_eq!(stored(&conn),(actual,record));
+            assert_eq!(stored(&conn),(actual.clone(),record.clone()));
             key_tx.send(value["pending"]["idempotencyKey"].as_str().unwrap().to_owned()).unwrap();
             let review = session.review_pending(&conn,"a",&scope,&next,NOW).unwrap();
             assert_eq!(review.public_body, RESOURCE_BODY);
