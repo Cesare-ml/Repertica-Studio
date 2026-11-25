@@ -61,3 +61,26 @@ test('read-only preflight failure leaves no session; stopped review cannot write
   t.preflight=async()=>plan();await s.start('/chosen');await s.reviewNext();s.stop();
   assert.equal(s.preview,null);await assert.rejects(s.commitReviewed(),/batch_phase/);
 });
+
+test('desktop batch import wires explicit native selection, review and confirmation', async () => {
+  const {readFileSync} = await import('node:fs');
+  const source = path => readFileSync(new URL('../'+path, import.meta.url), 'utf8');
+  const host = source('src-tauri/src/lib.rs');
+  const api = source('src/app/api.ts');
+  const ui = source('src/app/app.component.ts');
+  const html = source('src/app/app.component.html');
+  const i18n = source('src/app/i18n.ts');
+  for (const command of ['preflight_archive_batches','review_archive_batch','commit_archive_batch']) {
+    assert.ok(host.includes('archive_import::batches::'+command));
+    assert.ok(api.includes("'"+command+"'"));
+  }
+  assert.ok(ui.includes('directory:true, multiple:false'));
+  assert.ok(ui.includes('await this.batchSession.commitReviewed()'));
+  assert.ok(ui.includes("phase === 'unknown' && !window.confirm"));
+  assert.ok(ui.includes('this.batchState || !this.restoreCandidate'));
+  assert.ok(html.includes('batchPreview || metadataImport'));
+  assert.ok(html.includes("(click)=\"confirmReviewedBatch()\""));
+  for (const key of ["Scegli cartella di migrazione","Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.","Pacchetti confermati:","Pacchetto corrente:","Importazione della cartella completata.","Importazione interrotta. Le opere confermate restano nell’archivio.","Esito incerto: il pacchetto potrebbe essere già stato importato. Controlla l’archivio prima di proseguire.","Verifica il prossimo pacchetto","Interrompi importazione","Chiudi sessione di importazione","Importa pacchetto selezionato","Verifica del pacchetto non riuscita. Controlla la cartella e l’archivio.","Importare solo il pacchetto in anteprima? I pacchetti già importati non saranno annullati.","Ho controllato manualmente l’archivio e non ripeterò alla cieca il pacchetto incerto."]) {
+    assert.equal(i18n.split(JSON.stringify(key)+':').length-1,4, key);
+  }
+});
