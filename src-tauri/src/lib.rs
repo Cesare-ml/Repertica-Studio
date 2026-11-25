@@ -2,6 +2,7 @@ mod allocations;
 mod archive_code;
 mod auto_backup;
 mod auction_archive_schema;
+mod auction_drafts;
 #[path = "auction_settlement_ledger.rs"]
 mod settlement_ledger;
 #[path = "auction_settlement_store.rs"]
@@ -53,6 +54,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            auction_drafts::list_auction_drafts,
+            auction_drafts::read_auction_draft,
+            auction_drafts::write_auction_draft,
+            auction_drafts::remove_auction_draft,
             business_mail::mail_list_accounts,
             business_mail::mail_save_account,
             business_mail::mail_remove_account,

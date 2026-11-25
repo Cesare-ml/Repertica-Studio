@@ -1,13 +1,32 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { invoke } from '@tauri-apps/api/core';
+import { previewLegacyDraft } from './auction-legacy-import';
 import { AUCTION_API_CONNECTED, AUCTION_CONTRACT_VERSION } from './auction-contract';
-import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, removeDraft, saveDraft, slugify,
+import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, slugify,
   utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
-import { newAuctionDraft, reviewRows, type AuctionDraft, type ReviewRow } from './auction-preview';
+import { newAuctionDraft, reviewRows, decodeNativeDraft, saveNativeAuctionDraft, type AuctionDraft, type ReviewRow, type NativeDraftPort, type NativeDraftSnapshot } from './auction-preview';
 import type { AppLanguage } from './i18n';
 import { translate } from './i18n';
 import type { Artwork } from './models';
+
+interface DraftSummary {
+  artworkId: string;
+  title: string;
+  artworkStatus: string | null;
+  state: 'draft' | 'pending' | 'receipt';
+}
+interface DraftPage {
+  scope: string;
+  rows: DraftSummary[];
+  nextAfter: string | null;
+}
+
+const nativeDrafts: NativeDraftPort = {
+  read: artworkId => invoke<NativeDraftSnapshot>('read_auction_draft', { artworkId }),
+  write: input => invoke<NativeDraftSnapshot>('write_auction_draft', { input }),
+};
 
 const ERRORS: Record<string, string> = {
   artwork_not_available: 'Solo un’opera disponibile può avere un’asta',
@@ -48,31 +67,48 @@ const ERRORS: Record<string, string> = {
   <section class="auctions-card" aria-labelledby="auctions-drafts" *ngIf="!editing">
     <div class="auctions-row">
       <h3 id="auctions-drafts">{{ tr('Bozze locali') }}</h3>
-      <button type="button" (click)="startNew()" [disabled]="!available.length">{{ tr('+ Nuova bozza') }}</button>
+      <button type="button" (click)="reloadList()" [disabled]="busy">{{ tr('Ricarica bozze') }}</button>
+      <select [(ngModel)]="selectedArtworkId" [disabled]="busy || !scope" [attr.aria-label]="tr('Opera')">
+        <option value="">{{ tr('Scegli l’opera dell’asta') }}</option>
+        <option *ngFor="let a of available" [value]="a.id">{{ a.title }} ({{ a.code }})</option>
+      </select>
+      <button type="button" (click)="startNew()" [disabled]="busy || !scope || !selectedArtworkId">{{ tr('+ Nuova bozza') }}</button>
     </div>
+    <div class="auctions-alert" role="alert" *ngIf="error">{{ error }}</div>
+    <p class="auctions-muted" role="status" *ngIf="busy">{{ tr('Caricamento bozze…') }}</p>
     <p class="auctions-muted" *ngIf="!available.length">{{ tr('Nessuna opera disponibile: solo le opere disponibili possono avere un’asta.') }}</p>
     <p class="auctions-muted" *ngIf="available.length && !drafts.length">{{ tr('Le bozze appariranno qui. Restano sul computer.') }}</p>
     <ul class="auctions-list" *ngIf="drafts.length">
       <li *ngFor="let d of drafts">
         <div><strong>{{ d.title }}</strong>
-          <span class="auctions-badge">{{ tr('Bozza locale') }}</span>
-          <small>{{ artworkTitle(d.artworkId) }} · {{ tr('aggiornata') }} {{ d.updatedAt | date:'short' }}</small></div>
+          <span class="auctions-badge">{{ tr(d.state === 'draft' ? 'Bozza locale' : d.state === 'pending' ? 'Conferma in sospeso' : 'Ricevuta locale') }}</span>
+          <small>{{ artworkTitle(d.artworkId) }}</small></div>
         <div>
-          <button type="button" (click)="edit(d)">{{ tr('Modifica') }}</button>
-          <button type="button" class="danger" (click)="discard(d)">{{ tr('Elimina') }}</button>
+          <button type="button" (click)="edit(d)" [disabled]="busy">{{ tr('Modifica') }}</button>
+          <button type="button" class="danger" (click)="discard(d)" [disabled]="busy || d.state !== 'draft'">{{ tr('Elimina') }}</button>
         </div>
       </li>
     </ul>
+    <section *ngIf="legacyDrafts.length" aria-labelledby="legacy-auctions">
+      <h4 id="legacy-auctions">{{ tr('Bozze precedenti') }}</h4>
+      <p class="auctions-muted">{{ tr('Le vecchie bozze non sono associate a un archivio. Verifica una sola opera e salva esplicitamente nell’archivio corrente. Gli originali restano intatti.') }}</p>
+      <ul class="auctions-list">
+        <li *ngFor="let d of legacyDrafts">
+          <div><strong>{{ d.title }}</strong><small>{{ artworkTitle(d.artworkId) }}</small></div>
+          <button type="button" [disabled]="busy || !canImport(d)" (click)="reviewLegacy(d)">{{ tr('Rivedi vecchia bozza') }}</button>
+        </li>
+      </ul>
+    </section>
   </section>
 
   <section class="auctions-card" *ngIf="editing" aria-labelledby="auctions-editor">
-    <h3 id="auctions-editor">{{ tr('Bozza di asta') }} <span class="auctions-badge">{{ tr('Bozza locale') }}</span></h3>
+    <h3 id="auctions-editor">{{ tr('Bozza di asta') }} <span class="auctions-badge">{{ tr(editorState === 'draft' ? 'Bozza locale' : editorState === 'pending' ? 'Conferma in sospeso' : 'Ricevuta locale') }}</span></h3>
+    <p class="auctions-muted" *ngIf="editorState !== 'draft'">{{ tr('I dati della richiesta precedente restano intatti. Le modifiche alla bozza non inviano né sostituiscono una richiesta.') }}</p>
     <div class="auctions-alert" role="alert" *ngIf="error">{{ error }}</div>
-    <div class="auctions-form">
+    <p class="auctions-muted" *ngIf="importingLegacy">{{ tr('Importazione locale da confermare: controlla opera e dati prima di salvare.') }}</p>
+    <fieldset class="auctions-form" [disabled]="busy">
       <label>{{ tr('Opera') }}
-        <select [ngModel]="editing.artworkId" (ngModelChange)="pickArtwork($event)" [disabled]="existingDraft(editing.artworkId)">
-          <option *ngFor="let a of available" [value]="a.id">{{ a.title }} ({{ a.code }})</option>
-        </select></label>
+        <span>{{ artworkTitle(editing.artworkId) }}</span></label>
       <label>{{ tr('Titolo pubblico') }}
         <input type="text" maxlength="160" [(ngModel)]="editing.title" (ngModelChange)="reviewed = false"></label>
       <label>{{ tr('Indirizzo della pagina') }}
@@ -95,11 +131,11 @@ const ERRORS: Record<string, string> = {
           <input type="text" inputmode="decimal" [(ngModel)]="incrementText" (ngModelChange)="reviewed = false"></label>
       </div>
       <p class="auctions-muted">{{ tr('Le immagini non sono ancora incluse: l’invio delle foto sarà disponibile con l’interfaccia online verificata.') }}</p>
-    </div>
+    </fieldset>
     <div class="auctions-row">
-      <button type="button" (click)="cancelEdit()">{{ tr('Annulla') }}</button>
-      <button type="button" (click)="save()">{{ tr('Salva bozza') }}</button>
-      <button type="button" (click)="review()">{{ tr('Rivedi i dati da inviare') }}</button>
+      <button type="button" (click)="cancelEdit()" [disabled]="busy">{{ tr('Annulla') }}</button>
+      <button type="button" (click)="save()" [disabled]="busy">{{ tr('Salva bozza') }}</button>
+      <button type="button" (click)="review()" [disabled]="busy">{{ tr('Rivedi i dati da inviare') }}</button>
     </div>
 
     <div *ngIf="reviewed" class="auctions-review" role="region" [attr.aria-label]="tr('Dati da inviare')">
@@ -128,7 +164,7 @@ const ERRORS: Record<string, string> = {
 .auctions-list li{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px;border:1px solid #edf0ee;border-radius:8px}
 .auctions-list small{display:block;color:#657b6e}
 .auctions-badge{margin-left:6px;padding:2px 7px;border-radius:999px;background:#eef2ef;color:#4b5d52;font-size:11px;font-weight:600}
-.auctions-form{display:grid;gap:12px}
+.auctions-form{display:grid;gap:12px;border:0;padding:0;margin:0;min-width:0}
 .auctions-form label{display:grid;gap:4px;font-size:13px}
 .auctions-form small{color:#657b6e}
 .auctions-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -154,7 +190,15 @@ export class AuctionsComponent implements OnInit, OnChanges {
   readonly contractVersion = AUCTION_CONTRACT_VERSION;
   readonly notSent = NOT_SENT;
   readonly timeZone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'UTC'; } })();
-  drafts: LocalAuctionDraft[] = [];
+  drafts: DraftSummary[] = [];
+  legacyDrafts: LocalAuctionDraft[] = [];
+  scope: string | null = null;
+  busy = false;
+  importingLegacy = false;
+  editorState: DraftSummary['state'] = 'draft';
+  selectedArtworkId = '';
+  private initialized = false;
+  private snapshot: NativeDraftSnapshot | null = null;
   editing: AuctionDraft | null = null;
   startsLocal = '';
   endsLocal = '';
@@ -170,30 +214,94 @@ export class AuctionsComponent implements OnInit, OnChanges {
   }
   get available(): Artwork[] { return this.artworks.filter(a => a.status === 'available'); }
 
-  ngOnInit(): void { this.refresh(); this.openPreselected(); }
-  ngOnChanges(changes: SimpleChanges): void { if (changes['preselectedArtworkId']) this.openPreselected(); }
+  ngOnInit(): void {
+    this.initialized = true;
+    void this.reloadList();
+  }
+  ngOnChanges(changes: SimpleChanges): void {
+    if (this.initialized && changes['preselectedArtworkId'] && !this.busy && !this.editing) {
+      void this.openPreselected();
+    }
+  }
 
-  private refresh(): void { const s = this.store; this.drafts = s ? loadDrafts(s) : []; }
-  private openPreselected(): void {
+  private async refresh(): Promise<void> {
+    const rows: DraftSummary[] = [];
+    let scope: string | null = null, after: string | null = null;
+    const seen = new Set<string>();
+    for (let n = 0; n < 200; n++) {
+      const page: DraftPage = await invoke<DraftPage>('list_auction_drafts', { expectedScope: scope, after });
+      if (!page.scope || (scope !== null && page.scope !== scope)) throw new Error('auction_draft_conflict');
+      scope = page.scope;
+      for (const row of page.rows) {
+        if (seen.has(row.artworkId)) throw new Error('auction_draft_conflict');
+        seen.add(row.artworkId);
+        rows.push(row);
+      }
+      if (page.nextAfter === null) {
+        this.scope = scope;
+        this.drafts = rows;
+        const store = this.store;
+        this.legacyDrafts = store ? loadDrafts(store) : [];
+        return;
+      }
+      if (page.nextAfter === after || !seen.has(page.nextAfter)) throw new Error('auction_draft_conflict');
+      after = page.nextAfter;
+    }
+    throw new Error('auction_draft_conflict');
+  }
+
+  async reloadList(): Promise<void> {
+    if (this.busy || this.editing) return;
+    this.busy = true;
+    this.error = '';
+    try { await this.refresh(); }
+    catch { this.scope = null; this.drafts = []; this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
+    finally { this.busy = false; }
+    if (this.scope) await this.openPreselected();
+  }
+
+  private async openPreselected(): Promise<void> {
     const id = this.preselectedArtworkId;
-    if (!id) return;
-    const artwork = this.artworks.find(a => a.id === id);
+    if (!id || !this.scope || this.busy || this.editing) return;
     this.consumed.emit();
-    if (!artwork) return;
-    const existing = this.drafts.find(d => d.artworkId === id);
-    if (existing) this.edit(existing);
-    else if (artwork.status === 'available') this.begin(newAuctionDraft(artwork));
-    else this.error = this.tr(ERRORS['artwork_not_available']);
+    await this.open(id);
   }
 
   artworkTitle(id: string): string { return this.artworks.find(a => a.id === id)?.title ?? '—'; }
-  existingDraft(id: string): boolean { return this.drafts.some(d => d.artworkId === id) && this.editing?.artworkId === id; }
-
-  startNew(): void {
-    const free = this.available.find(a => !this.drafts.some(d => d.artworkId === a.id)) ?? this.available[0];
-    if (free) this.begin(newAuctionDraft(free));
+  canImport(d: LocalAuctionDraft): boolean {
+    return !!this.scope && this.available.some(a => a.id === d.artworkId) &&
+      !this.drafts.some(x => x.artworkId === d.artworkId);
   }
-  edit(d: LocalAuctionDraft): void { this.begin({ ...d }); }
+
+  async startNew(): Promise<void> {
+    if (this.available.some(a => a.id === this.selectedArtworkId)) await this.open(this.selectedArtworkId);
+  }
+  async edit(d: DraftSummary): Promise<void> { await this.open(d.artworkId, true); }
+  async reviewLegacy(d: LocalAuctionDraft): Promise<void> {
+    if (this.canImport(d)) await this.open(d.artworkId, false, d);
+  }
+  private async open(id: string, requireExisting = false, legacy?: LocalAuctionDraft): Promise<void> {
+    if (this.busy || this.editing || !this.scope) return;
+    const expected = this.scope;
+    this.busy = true; this.error = '';
+    try {
+      const snapshot = await nativeDrafts.read(id);
+      if (snapshot.scope !== expected) throw new Error('auction_draft_conflict');
+      const saved = decodeNativeDraft(snapshot, id);
+      if ((requireExisting && !saved) || (legacy && saved)) throw new Error('auction_draft_conflict');
+      const artwork = this.artworks.find(a => a.id === id);
+      if (!saved && (!artwork || artwork.status !== 'available')) throw new Error('artwork_not_available');
+      const draft = legacy ? previewLegacyDraft(legacy, artwork!, snapshot, expected)
+        : saved?.draft ?? newAuctionDraft(artwork!);
+      if (!legacy && !saved && draft.title.length > 160) draft.title = '';
+      this.snapshot = snapshot;
+      this.importingLegacy = !!legacy;
+      this.editorState = saved?.receipt ? 'receipt' : saved?.pending ? 'pending' : 'draft';
+      this.begin(draft);
+    } catch (e) {
+      this.error = this.draftError(e);
+    } finally { this.busy = false; }
+  }
   private begin(draft: AuctionDraft): void {
     this.editing = { ...draft };
     this.startsLocal = utcToLocalInput(draft.startsAt);
@@ -202,35 +310,63 @@ export class AuctionsComponent implements OnInit, OnChanges {
     this.incrementText = centsToEuro(draft.minimumIncrementAmount);
     this.reviewed = false; this.error = ''; this.rows = [];
   }
-  pickArtwork(id: string): void {
-    const a = this.artworks.find(x => x.id === id);
-    if (!a || !this.editing) return;
-    this.begin({ ...newAuctionDraft(a), ...this.drafts.find(d => d.artworkId === id) });
+  cancelEdit(): void {
+    if (this.busy) return;
+    this.editing = null; this.snapshot = null; this.importingLegacy = false;
+    this.reviewed = false; this.error = '';
   }
-  cancelEdit(): void { this.editing = null; this.reviewed = false; this.error = ''; }
+
+  private draftError(error: unknown): string {
+    const code = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    if (code === 'artwork_not_available') return this.tr(ERRORS['artwork_not_available']);
+    if (code === 'auction_draft_conflict') return this.tr('Bozza o archivio cambiati. Ricarica le bozze prima di riprovare.');
+    return this.tr('Impossibile salvare la bozza su questo computer');
+  }
 
   private collect(): AuctionDraft | null {
     const e = this.editing;
     if (!e) return null;
-    if (!e.slug.trim() && e.title.trim()) e.slug = slugify(e.title);
+    if (!this.importingLegacy && !e.slug.trim() && e.title.trim()) e.slug = slugify(e.title);
     return { artworkId: e.artworkId, title: e.title, description: e.description, slug: e.slug.trim(),
-      startsAt: localInputToUtc(this.startsLocal), endsAt: localInputToUtc(this.endsLocal),
-      startingAmount: euroToCents(this.startingText), minimumIncrementAmount: euroToCents(this.incrementText) };
+      startsAt: this.startsLocal === utcToLocalInput(e.startsAt) ? e.startsAt : localInputToUtc(this.startsLocal),
+      endsAt: this.endsLocal === utcToLocalInput(e.endsAt) ? e.endsAt : localInputToUtc(this.endsLocal),
+      startingAmount: this.startingText === centsToEuro(e.startingAmount) ? e.startingAmount : euroToCents(this.startingText),
+      minimumIncrementAmount: this.incrementText === centsToEuro(e.minimumIncrementAmount) ? e.minimumIncrementAmount : euroToCents(this.incrementText) };
   }
 
-  save(): void {
-    const draft = this.collect(), store = this.store;
+  async save(): Promise<void> {
+    if (this.busy || !this.snapshot) return;
+    const draft = this.collect(), snapshot = this.snapshot;
     if (!draft) return;
-    if (!store) { this.error = this.tr('Impossibile salvare la bozza su questo computer'); return; }
-    try { this.drafts = saveDraft(store, draft); this.error = ''; this.editing = null; this.reviewed = false; }
-    catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
+    this.busy = true; this.error = '';
+    try {
+      await saveNativeAuctionDraft(nativeDrafts, snapshot, draft);
+      this.editing = null; this.snapshot = null; this.importingLegacy = false; this.reviewed = false;
+      // Saved only after exact native readback. A failed refresh cannot silently
+      // turn the persisted draft into a new draft or cause an automatic retry.
+      try { await this.refresh(); }
+      catch { this.scope = null; this.drafts = []; this.error = this.tr('Bozza salvata. Impossibile ricaricare l’elenco.'); }
+    } catch (e) {
+      this.error = this.draftError(e);
+    } finally { this.busy = false; }
   }
-  discard(d: LocalAuctionDraft): void {
-    const store = this.store;
-    if (!store || !confirm(this.tr('Eliminare questa bozza? L’opera non verrà eliminata.'))) return;
-    try { this.drafts = removeDraft(store, d.artworkId); } catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
+  async discard(d: DraftSummary): Promise<void> {
+    if (this.busy || !this.scope || d.state !== 'draft') return;
+    this.busy = true; this.error = '';
+    try {
+      const snapshot = await nativeDrafts.read(d.artworkId);
+      if (snapshot.scope !== this.scope || !snapshot.revision) throw new Error('auction_draft_conflict');
+      const current = decodeNativeDraft(snapshot, d.artworkId);
+      if (!current || current.pending || current.receipt) throw new Error('pending_preview_unresolved');
+      if (!confirm(this.tr('Eliminare questa bozza? L’opera non verrà eliminata.') + '\n' + current.draft.title)) return;
+      await invoke('remove_auction_draft', { artworkId: d.artworkId, expectedScope: snapshot.scope, expectedRevision: snapshot.revision });
+      try { await this.refresh(); }
+      catch { this.scope = null; this.drafts = []; this.error = this.tr('Bozza eliminata. Impossibile ricaricare l’elenco.'); }
+    } catch (e) { this.scope = null; this.drafts = []; this.error = this.draftError(e); }
+    finally { this.busy = false; }
   }
   review(): void {
+    if (this.busy) return;
     const draft = this.collect();
     if (!draft) return;
     try { this.rows = reviewRows(draft); this.reviewed = true; this.error = ''; }
