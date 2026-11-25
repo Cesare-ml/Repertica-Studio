@@ -302,3 +302,112 @@ impl NativeAuctionsHttp {
         Ok(receipt)
     }
 }
+
+
+/// Native process owns the verified profile token and the current one-shot
+/// confirmation. The renderer-facing projection contains only the public body
+/// and an opaque confirmation ID; no token, URL or idempotency key.
+/// This module is compiled only in the isolated PKCE test target.
+pub(super) struct NativePreviewSession {
+    api: NativeAuctionsHttp,
+    token: NativeAccessToken,
+    reviewed: Option<ReviewedAction>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PublicReview {
+    pub(super) confirmation_id: String,
+    pub(super) public_body: String,
+    pub(super) action: &'static str,
+}
+
+struct ReviewedAction {
+    id: String,
+    artwork_id: String,
+    scope: String,
+    revision: String,
+    raw: String,
+    body: String,
+    reconcile: bool,
+}
+
+impl NativePreviewSession {
+    pub(super) fn new(api: NativeAuctionsHttp, token: NativeAccessToken,
+        now: u64) -> Result<Self, Failure> {
+        token.bearer_for(GrantClient::Auctions, now)?;
+        Ok(Self { api, token, reviewed: None })
+    }
+
+    pub(super) fn cancel_review(&mut self) { self.reviewed = None; }
+
+    fn stage(&mut self, artwork_id: &str, scope: &str, revision: &str,
+        raw: String, body: &str, reconcile: bool) -> PublicReview {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.reviewed = Some(ReviewedAction { id: id.clone(), artwork_id: artwork_id.into(),
+            scope: scope.into(), revision: revision.into(), raw, body: body.into(), reconcile });
+        PublicReview { confirmation_id: id, public_body: body.into(),
+            action: if reconcile { "reconcile" } else { "prepare" } }
+    }
+
+    /// Review is read-only and does not perform I/O beyond the local archive.
+    /// Any previous review is invalidated, including when a new review fails.
+    pub(super) fn review_new(&mut self, conn: &Connection, artwork_id: &str,
+        scope: &str, revision: &str, public_body: &str, now: u64) -> Result<PublicReview, String> {
+        self.cancel_review();
+        self.token.bearer_for(GrantClient::Auctions, now).map_err(str::to_owned)?;
+        check_new_schedule(public_body, now)?;
+        let raw = reviewable_record(conn, artwork_id, scope, revision, public_body)?;
+        Ok(self.stage(artwork_id, scope, revision, raw, public_body, false))
+    }
+
+    /// Review exactly the saved pending request, not the current editable fields.
+    /// Already confirmed receipts require no network or further confirmation.
+    pub(super) fn review_pending(&mut self, conn: &Connection, artwork_id: &str,
+        scope: &str, revision: &str, now: u64) -> Result<PublicReview, String> {
+        self.cancel_review();
+        self.token.bearer_for(GrantClient::Auctions, now).map_err(str::to_owned)?;
+        let attempt = reconciliation::load(conn, artwork_id, scope, revision)?;
+        if attempt.receipt.is_some() { return Err("auction_already_confirmed".into()); }
+        let raw: String = conn.query_row(
+            "SELECT record_json FROM auction_drafts WHERE artwork_id=?1 AND revision=?2",
+            params![artwork_id, revision], |r| r.get(0)).map_err(|_| "auction_draft_conflict".to_string())?;
+        Ok(self.stage(artwork_id, scope, revision, raw, &attempt.pending.body, true))
+    }
+
+    fn take(&mut self, id: &str, reconcile: bool) -> Result<ReviewedAction, String> {
+        let reviewed = self.reviewed.take().ok_or_else(|| "auction_review_required".to_string())?;
+        if reviewed.id != id || reviewed.reconcile != reconcile {
+            return Err("auction_review_required".into());
+        }
+        Ok(reviewed)
+    }
+
+    /// Confirmation consumes its capability before any await, even on failure.
+    /// Native preparation checks fresh tenant membership and generates the key.
+    pub(super) async fn confirm_prepare(&mut self, conn: &mut Connection, id: &str,
+        clock: impl Fn() -> Result<u64, Failure>) -> Result<String, String> {
+        let r = self.take(id, false)?;
+        let raw = reviewable_record(conn, &r.artwork_id, &r.scope, &r.revision, &r.body)?;
+        if raw != r.raw { return Err("auction_draft_conflict".into()); }
+        self.api.prepare_reviewed_preview(conn, &self.token, &r.artwork_id,
+            &r.scope, &r.revision, &r.body, clock).await
+    }
+
+    pub(super) async fn confirm_reconcile(&mut self, conn: &mut Connection, id: &str,
+        clock: impl Fn() -> Result<u64, Failure>) -> Result<StoredReceipt, String> {
+        let r = self.take(id, true)?;
+        self.token.bearer_for(GrantClient::Auctions, clock().map_err(str::to_owned)?)
+            .map_err(str::to_owned)?;
+        let attempt = reconciliation::load(conn, &r.artwork_id, &r.scope, &r.revision)?;
+        let raw: String = conn.query_row(
+            "SELECT record_json FROM auction_drafts WHERE artwork_id=?1 AND revision=?2",
+            params![r.artwork_id, r.revision], |row| row.get(0))
+            .map_err(|_| "auction_draft_conflict".to_string())?;
+        if raw != r.raw || attempt.pending.body != r.body || attempt.receipt.is_some() {
+            return Err("auction_draft_conflict".into());
+        }
+        self.api.reconcile_preview(conn, &self.token, &r.artwork_id, &r.scope,
+            &r.revision, clock).await
+    }
+}
