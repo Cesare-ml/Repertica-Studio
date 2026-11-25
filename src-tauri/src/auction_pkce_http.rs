@@ -638,6 +638,22 @@ mod tests {
             assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
                 request(),||Ok(NOW), |_| panic!("disconnected must not resolve"))
                 .await.unwrap_err(),"settlement_access_denied");
+
+            // Reconstitute the fixture token only from verified signed claims,
+            // like verified_resource_token above; do not contact the server.
+            let claims = verified_claims(signed,&keys,GrantClient::AuctionsSettlement,NOW).unwrap();
+            settlement = Some(NativeAccessToken { bearer:signed.to_owned(),
+                client:GrantClient::AuctionsSettlement, expires_at:claims.exp, subject:claims.sub });
+            active = Some(NativePreviewSession::new(
+                resource_http::NativeAuctionsHttp::new(addr).unwrap(),verified_resource_token(),NOW).unwrap());
+            let time = std::cell::Cell::new(NOW);
+            assert_eq!(dispatch_workspace_isolated(&mut active,&mut settlement,&mut db,
+                request(),||Ok(time.get()), |candidate| {
+                    verify(candidate)?;
+                    time.set(NOW+900);
+                    Ok(())
+                }).await.unwrap_err(),"settlement_access_denied");
+            assert!(active.is_none() && settlement.is_none());
         });
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
         assert_eq!(db.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
