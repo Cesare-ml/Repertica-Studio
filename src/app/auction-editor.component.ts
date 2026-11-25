@@ -2,9 +2,10 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, ElementRef, Input, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { translate, type AppLanguage } from './i18n';
-import { createNativeAuctionEditor, createNativeAuctionConnection, listNativeAuctionDrafts, type AuctionDraftPage, type AuctionDraftSummary } from './auction-native-api';
+import { createNativeAuctionEditor, createNativeAuctionConnection, createNativeSettlementReader, listNativeAuctionDrafts, type AuctionDraftPage, type AuctionDraftSummary } from './auction-native-api';
 import type { SelectedAuctionArtwork } from './auction-editor-session';
 import { publicPreviewFields } from './auction-preview';
+import { settlementPresentation } from './auction-settlement-summary';
 import { auctionDraftEdits, auctionEditorError, fieldsFromAuctionDraft, type AuctionEditorFields } from './auction-editor-fields';
 
 @Component({
@@ -18,6 +19,7 @@ export class AuctionEditorComponent {
   @ViewChild('dialog', { static: true }) private dialog!: ElementRef<HTMLDialogElement>;
   private readonly editor = createNativeAuctionEditor();
   readonly online = createNativeAuctionConnection();
+  readonly settlement = createNativeSettlementReader();
   private onlineUpdating = false;
   private baseline = '';
   form: AuctionEditorFields | null = null;
@@ -42,7 +44,7 @@ export class AuctionEditorComponent {
     })[this.language];
   }
   get view() { return this.editor.view; }
-  get busy(): boolean { return this.editor.busy || this.listLoading || this.online.busy || this.onlineUpdating; }
+  get busy(): boolean { return this.editor.busy || this.listLoading || this.online.busy || this.onlineUpdating || this.settlement.busy; }
   get dirty(): boolean {
     return !!this.form && (JSON.stringify(this.form) !== this.baseline || !!this.view?.dirty);
   }
@@ -87,6 +89,7 @@ export class AuctionEditorComponent {
   invalidateReview(): void {
     this.reviewed = null;
     this.reviewError = false;
+    this.settlement.clear();
   }
 
   get pendingDetails(): { tenantId: string; title: string; description: string; slug: string;
@@ -107,8 +110,33 @@ export class AuctionEditorComponent {
     return labels[this.language][key];
   }
 
+  settlementLabel(key: 'read' | 'empty' | 'unavailable' | 'loading'): string {
+    return ({
+      it: {read:'Leggi esito locale dell’asta',empty:'Nessun esito ricevuto per l’associazione verificata.',unavailable:'Esito non disponibile o accesso non autorizzato. Nessuna richiesta inviata.',loading:'Lettura esito locale…'},
+      en: {read:'Read local auction result',empty:'No result received for the verified association.',unavailable:'Result unavailable or access not authorized. No request sent.',loading:'Reading local result…'},
+      es: {read:'Leer resultado local de la subasta',empty:'No hay resultado para la asociación verificada.',unavailable:'Resultado no disponible o acceso no autorizado. No se ha enviado ninguna solicitud.',loading:'Leyendo resultado local…'},
+      fr: {read:'Lire le résultat local de l’enchère',empty:'Aucun résultat reçu pour l’association vérifiée.',unavailable:'Résultat indisponible ou accès non autorisé. Aucune requête envoyée.',loading:'Lecture du résultat local…'},
+      de: {read:'Lokales Auktionsergebnis lesen',empty:'Kein Ergebnis für die verifizierte Zuordnung erhalten.',unavailable:'Ergebnis nicht verfügbar oder Zugriff nicht autorisiert. Keine Anfrage gesendet.',loading:'Lokales Ergebnis wird gelesen…'}
+    })[this.language][key];
+  }
+
+  get settlementState() {
+    return this.settlement.current(this.online.state === 'connected' && !this.dirty ? this.editor.savedReference : null);
+  }
+  get settlementDetails() {
+    const state = this.settlementState;
+    return state.kind === 'ready' ? settlementPresentation(state.summary, this.language) : null;
+  }
+  async readSettlement(): Promise<void> {
+    const ref = this.editor.savedReference;
+    if (this.busy || this.dirty || this.online.review || this.online.state !== 'connected' || !ref) return;
+    await this.settlement.load(ref);
+    this.cdr.markForCheck();
+  }
+
   private async onlineAction(work: () => Promise<void>): Promise<void> {
     if (this.busy) return;
+    this.settlement.clear();
     this.onlineUpdating = true;
     this.error = ''; this.notice = '';
     try { await work(); }
@@ -205,6 +233,7 @@ export class AuctionEditorComponent {
   }
 
   private refreshForm(): void {
+    this.settlement.clear();
     this.invalidateReview();
     const view = this.editor.view;
     this.form = view ? fieldsFromAuctionDraft(view.draft) : null;
@@ -266,6 +295,7 @@ export class AuctionEditorComponent {
 
   async close(discard = false): Promise<void> {
     if (this.busy || (this.dirty && !discard)) return;
+    this.settlement.clear();
     if (this.online.state === 'connected' || this.online.review) {
       // No token survives an explicit UI logout; if the IPC fails the
       // controller resets to unknown, and the offline dialog can still close.

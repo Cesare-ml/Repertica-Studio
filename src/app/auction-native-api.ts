@@ -3,6 +3,7 @@ import type { NativeDraftPort, NativeDraftSnapshot } from './auction-preview';
 import { decodeNativeDraft, newAuctionDraft, saveNativeAuctionDraft } from './auction-preview';
 import { AuctionEditorSession } from './auction-editor-session';
 import { AuctionConnection } from './auction-connection';
+import { SettlementReader } from './auction-settlement-summary';
 
 export interface AuctionDraftSummary {
   readonly artworkId: string;
@@ -40,4 +41,9 @@ export function createNativeAuctionEditor(): AuctionEditorSession {
 /** Native capability gate. No renderer provider configuration or URL. */
 export function createNativeAuctionConnection(): AuctionConnection {
   return new AuctionConnection(request => invoke<unknown>('auction_preview_command', { request }));
+}
+
+/** Explicit local-only read. Release native IPC rejects this until an independent grant and binding resolver are wired. */
+export function createNativeSettlementReader(): SettlementReader {
+  return new SettlementReader(request => invoke<unknown>('auction_preview_command', { request }));
 }

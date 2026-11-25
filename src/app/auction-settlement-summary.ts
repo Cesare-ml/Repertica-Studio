@@ -52,3 +52,47 @@ export function settlementPresentation(raw: unknown, language: SettlementLanguag
     receipt: l[summary.acknowledgedAt === null ? 3 : 2], notice: l[4], amount: formatCents(summary.amount, language),
     fulfilledAt: summary.fulfilledAt, acknowledgedAt: summary.acknowledgedAt });
 }
+
+// A local selection is not an authorization. The native backend must resolve
+// the published association and independently verify the settlement grant.
+export type SettlementSelection = Readonly<{ artworkId: string; scope: string; revision: string }>;
+export type SettlementReadRequest = Readonly<{action: 'readSettlement'; artworkId: string; scope: string}>;
+export type SettlementReadState = Readonly<
+  {kind: 'idle' | 'loading' | 'empty' | 'unavailable'} |
+  {kind: 'ready'; summary: SettlementSummary}
+>;
+const sameSelection = (a: SettlementSelection | null, b: SettlementSelection | null): boolean =>
+  !!a && !!b && a.artworkId === b.artworkId && a.scope === b.scope && a.revision === b.revision;
+
+export class SettlementReader {
+  private selection: SettlementSelection | null = null;
+  private generation = 0;
+  private state: SettlementReadState = {kind:'idle'};
+  constructor(private readonly read: (request: SettlementReadRequest) => Promise<unknown>) {}
+
+  get busy(): boolean { return this.state.kind === 'loading'; }
+
+  clear(): void {
+    this.generation++;
+    this.selection = null;
+    this.state = {kind:'idle'};
+  }
+
+  current(selection: SettlementSelection | null): SettlementReadState {
+    return sameSelection(this.selection, selection) ? this.state : {kind:'idle'};
+  }
+
+  async load(selection: SettlementSelection): Promise<void> {
+    this.clear();
+    const generation = this.generation;
+    const {artworkId, scope, revision} = selection;
+    this.selection = {artworkId, scope, revision};
+    this.state = {kind:'loading'};
+    try {
+      const value = parseSettlementSummary(await this.read({action:'readSettlement', artworkId, scope}));
+      if (generation === this.generation) this.state = value ? {kind:'ready', summary:value} : {kind:'empty'};
+    } catch {
+      if (generation === this.generation) this.state = {kind:'unavailable'};
+    }
+  }
+}

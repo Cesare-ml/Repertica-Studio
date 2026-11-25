@@ -46,6 +46,20 @@
     <p *ngIf="view?.receipt as receipt" class="pending" role="status">
       {{ receiptLabel }}: <strong>{{ receipt.slug }}</strong> ({{ receipt.auctionId }})
     </p>
+    <section *ngIf="online.state === 'connected' && view?.saved" class="pending" aria-live="polite">
+      <button type="button" [disabled]="busy || dirty || !!online.review" (click)="readSettlement()">{{ settlementLabel('read') }}</button>
+      <ng-container [ngSwitch]="settlementState.kind">
+        <p *ngSwitchCase="'loading'" role="status">{{ settlementLabel('loading') }}</p>
+        <p *ngSwitchCase="'empty'" role="status">{{ settlementLabel('empty') }}</p>
+        <p *ngSwitchCase="'unavailable'" role="status">{{ settlementLabel('unavailable') }}</p>
+      </ng-container>
+      <ng-container *ngIf="settlementDetails as result">
+        <p><strong>{{ result.status }}</strong> · {{ result.amount }}</p>
+        <p>{{ result.receipt }}</p>
+        <p>{{ result.fulfilledAt }}<ng-container *ngIf="result.acknowledgedAt"> · {{ result.acknowledgedAt }}</ng-container></p>
+        <p>{{ result.notice }}</p>
+      </ng-container>
+    </section>
     <details *ngIf="pendingDetails as original" class="pending">
       <summary>{{ managementLabel('original') }}</summary>
       <dl class="request-details">
