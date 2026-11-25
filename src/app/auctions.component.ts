@@ -102,7 +102,8 @@ const ERRORS: Record<string, string> = {
   </section>
 
   <section class="auctions-card" *ngIf="editing" aria-labelledby="auctions-editor">
-    <h3 id="auctions-editor">{{ tr('Bozza di asta') }} <span class="auctions-badge">{{ tr('Bozza locale') }}</span></h3>
+    <h3 id="auctions-editor">{{ tr('Bozza di asta') }} <span class="auctions-badge">{{ tr(editorState === 'draft' ? 'Bozza locale' : editorState === 'pending' ? 'Conferma in sospeso' : 'Ricevuta locale') }}</span></h3>
+    <p class="auctions-muted" *ngIf="editorState !== 'draft'">{{ tr('I dati della richiesta precedente restano intatti. Le modifiche alla bozza non inviano né sostituiscono una richiesta.') }}</p>
     <div class="auctions-alert" role="alert" *ngIf="error">{{ error }}</div>
     <p class="auctions-muted" *ngIf="importingLegacy">{{ tr('Importazione locale da confermare: controlla opera e dati prima di salvare.') }}</p>
     <fieldset class="auctions-form" [disabled]="busy">
@@ -194,6 +195,7 @@ export class AuctionsComponent implements OnInit, OnChanges {
   scope: string | null = null;
   busy = false;
   importingLegacy = false;
+  editorState: DraftSummary['state'] = 'draft';
   selectedArtworkId = '';
   private initialized = false;
   private snapshot: NativeDraftSnapshot | null = null;
@@ -294,10 +296,10 @@ export class AuctionsComponent implements OnInit, OnChanges {
       if (!legacy && !saved && draft.title.length > 160) draft.title = '';
       this.snapshot = snapshot;
       this.importingLegacy = !!legacy;
+      this.editorState = saved?.receipt ? 'receipt' : saved?.pending ? 'pending' : 'draft';
       this.begin(draft);
     } catch (e) {
-      this.error = this.tr(e instanceof Error && e.message === 'artwork_not_available'
-        ? ERRORS['artwork_not_available'] : 'Impossibile salvare la bozza su questo computer');
+      this.error = this.draftError(e);
     } finally { this.busy = false; }
   }
   private begin(draft: AuctionDraft): void {
@@ -314,10 +316,17 @@ export class AuctionsComponent implements OnInit, OnChanges {
     this.reviewed = false; this.error = '';
   }
 
+  private draftError(error: unknown): string {
+    const code = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    if (code === 'artwork_not_available') return this.tr(ERRORS['artwork_not_available']);
+    if (code === 'auction_draft_conflict') return this.tr('Bozza o archivio cambiati. Ricarica le bozze prima di riprovare.');
+    return this.tr('Impossibile salvare la bozza su questo computer');
+  }
+
   private collect(): AuctionDraft | null {
     const e = this.editing;
     if (!e) return null;
-    if (!e.slug.trim() && e.title.trim()) e.slug = slugify(e.title);
+    if (!this.importingLegacy && !e.slug.trim() && e.title.trim()) e.slug = slugify(e.title);
     return { artworkId: e.artworkId, title: e.title, description: e.description, slug: e.slug.trim(),
       startsAt: this.startsLocal === utcToLocalInput(e.startsAt) ? e.startsAt : localInputToUtc(this.startsLocal),
       endsAt: this.endsLocal === utcToLocalInput(e.endsAt) ? e.endsAt : localInputToUtc(this.endsLocal),
@@ -335,10 +344,10 @@ export class AuctionsComponent implements OnInit, OnChanges {
       this.editing = null; this.snapshot = null; this.importingLegacy = false; this.reviewed = false;
       // Saved only after exact native readback. A failed refresh cannot silently
       // turn the persisted draft into a new draft or cause an automatic retry.
-      await this.refresh();
-    } catch {
-      if (!this.editing) { this.scope = null; this.drafts = []; }
-      this.error = this.tr('Impossibile salvare la bozza su questo computer');
+      try { await this.refresh(); }
+      catch { this.scope = null; this.drafts = []; this.error = this.tr('Bozza salvata. Impossibile ricaricare l’elenco.'); }
+    } catch (e) {
+      this.error = this.draftError(e);
     } finally { this.busy = false; }
   }
   async discard(d: DraftSummary): Promise<void> {
@@ -351,8 +360,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
       if (!current || current.pending || current.receipt) throw new Error('pending_preview_unresolved');
       if (!confirm(this.tr('Eliminare questa bozza? L’opera non verrà eliminata.') + '\n' + current.draft.title)) return;
       await invoke('remove_auction_draft', { artworkId: d.artworkId, expectedScope: snapshot.scope, expectedRevision: snapshot.revision });
-      await this.refresh();
-    } catch { this.scope = null; this.drafts = []; this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
+      try { await this.refresh(); }
+      catch { this.scope = null; this.drafts = []; this.error = this.tr('Bozza eliminata. Impossibile ricaricare l’elenco.'); }
+    } catch (e) { this.scope = null; this.drafts = []; this.error = this.draftError(e); }
     finally { this.busy = false; }
   }
   review(): void {
