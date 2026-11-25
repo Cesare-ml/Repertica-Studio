@@ -589,11 +589,27 @@ pub(super) async fn dispatch_workspace_isolated(
             *profile = None;
             return Err("settlement_access_denied".into());
         }
-        return super::settlement_http::read_selected_summary(
+        let outcome = super::settlement_http::read_selected_summary(
             conn, request, settlement.as_ref(), &clock,
             |db, scope, work, subject| super::settlement_store::resolve_selected(
                 db, scope, work, subject, verify_live),
-        ).map_err(str::to_owned);
+        );
+        // Never project a result if either grant expires while resolving it.
+        let after = clock();
+        if !profile.as_ref().is_some_and(|s|
+            after.is_ok_and(|t| s.token.bearer_for(GrantClient::Auctions, t).is_ok())) {
+            *profile = None;
+            *settlement = None;
+            return Err("settlement_access_denied".into());
+        }
+        if !settlement.as_ref().is_some_and(|s|
+            after.is_ok_and(|t| s.bearer_for(GrantClient::AuctionsSettlement, t).is_ok())) {
+            *settlement = None;
+            return Err("settlement_access_denied".into());
+        }
+        return outcome.map_err(str::to_owned);
     }
-    dispatch_isolated(profile, conn, request, clock).await
+    let outcome = dispatch_isolated(profile, conn, request, clock).await;
+    if profile.is_none() { *settlement = None; }
+    outcome
 }
