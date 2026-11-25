@@ -26,13 +26,14 @@ pub(super) struct NativeIdentityHttp {
 // Not Debug, Serialize or Clone. Never passed over IPC or stored in SQLite.
 pub(super) struct NativeAccessToken {
     bearer: String,
-    audience: &'static str,
+    client: GrantClient,
     expires_at: u64,
 }
 
 impl NativeAccessToken {
     pub(super) fn bearer_for(&self, client: GrantClient, now: u64) -> Result<&str, Failure> {
-        if self.audience != client.audience() || now >= self.expires_at {
+        // Audience alone is insufficient: profile and settlement share it.
+        if self.client.id() != client.id() || now >= self.expires_at {
             return Err("oauth_token_rejected");
         }
         Ok(&self.bearer)
@@ -254,7 +255,7 @@ impl NativeIdentityHttp {
         }
         let expires_at = verified_expiry(&reply.access_token, &keys, grant.expected_client, clock()?)?;
         remaining(deadline)?;
-        Ok(NativeAccessToken { bearer: reply.access_token, audience: grant.expected_audience(), expires_at })
+        Ok(NativeAccessToken { bearer: reply.access_token, client: grant.expected_client, expires_at })
     }
 }
 
@@ -364,6 +365,7 @@ mod tests {
         worker.join().unwrap();
         assert_eq!(result.bearer_for(GrantClient::Auctions, NOW).unwrap(), fixture()["valid"].as_str().unwrap());
         assert_eq!(result.bearer_for(GrantClient::StudioApi, NOW), Err("oauth_token_rejected"));
+        assert_eq!(result.bearer_for(GrantClient::AuctionsSettlement, NOW), Err("oauth_token_rejected"));
         assert_eq!(result.bearer_for(GrantClient::Auctions, NOW+900), Err("oauth_token_rejected"));
     }
 
@@ -377,12 +379,57 @@ mod tests {
         }
         let valid = f["valid"].as_str().unwrap();
         assert_eq!(verified_expiry(valid, &keys, GrantClient::Auctions, NOW), Ok(NOW+900));
+        assert_eq!(verified_expiry(valid, &keys, GrantClient::AuctionsSettlement, NOW), Err("oauth_claims_rejected"));
         let duplicate: Jwks = serde_json::from_value(json!({"keys":[f["jwks"]["keys"][0],f["jwks"]["keys"][0]]})).unwrap();
         assert_eq!(verified_expiry(valid, &duplicate, GrantClient::Auctions, NOW), Err("oauth_token_rejected"));
         let mut tampered = valid.to_owned();
         let index = tampered.rfind('.').unwrap()+1;
         tampered.replace_range(index..index+1, if valid.as_bytes()[index]==b'A' {"B"} else {"A"});
         assert_eq!(verified_expiry(&tampered, &keys, GrantClient::Auctions, NOW), Err("oauth_token_rejected"));
+    }
+
+    #[test]
+    fn native_http_settlement_grant_never_authorizes_profile_resource() {
+        // Independent synthetic RS256 key; only public key and signed token.
+        const FIXTURE: &str = r#"{"jwks":{"keys":[{"kty":"RSA","alg":"RS256","use":"sig","kid":"settlement-fixture","n":"om0wTl8ddUlbPbKvTeQmIC4wZZA_f2E7wjEKbXGEJ3zORDsUHLKDD28etvCsObBMvD1R-iPVK5GpeeSBksj2CrC6FxU3pUoX8kqF_C6d8HToj5E9TyK7ghW3QNR11rzhWUfa0rV4rJ7iVmdcaJnMibNtqrEhm4iPPMSz4fhYmbr583ZTuFmuxzaaFvJBTQZaTl7ARxoyQW60dZweXi3vOBlBydgaDiQaEUZvXRUdPwgFgok_IaFKeQhb0mfZod85IA3m8QXDSL-8GVbMc-6IUl2Onr0oUp1V6nnnQPjdAoDiiqFmp0pQt2z_nsX3r1fTEaNTIn96VFtXu0ci0A-P3w","e":"AQAB"}]},"valid":"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNldHRsZW1lbnQtZml4dHVyZSJ9.eyJpc3MiOiJodHRwczovL3N0dWRpby5leGFtcGxlLnRlc3QiLCJhdWQiOiJyZXBlcnRpY2EtYXVjdGlvbnMiLCJzdWIiOiJyZXBlcnRpY2E6NDIiLCJzY29wZSI6ImF1Y3Rpb25zOnNldHRsZW1lbnQtcmVhZCBhdWN0aW9uczpzZXR0bGVtZW50LWFjayIsInRva2VuX3VzZSI6ImFjY2VzcyIsInNlY3VyaXR5X3ZlcnNpb24iOjEsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAwOTAwLCJqdGkiOiJzZXR0bGVtZW50LWZpeHR1cmUiLCJzaWQiOiIxMjM0NTY3OC0xMjM0LTQyMzQtODIzNC0xMjM0NTY3ODlhYmMifQ.RYg_Dye2LXgqESNQWsByMR0wGEM-ywYCr3POsvkivPyrBgSKzfq-wMNW2dtuagRsbYwtucGJT1knnbYlzxdz7LZ3oHGdOZwtNjBtY5DLltwiWGbrwTbF2Vqm5fbBwOSt1sUMq3eM5aV_ShtrYFfmPpDAWnwsjXaIZRvwHQKu8QwQGZ-HlgeNKR0Vlw2g-hMSQs3eIhITffQuNpUcSHOInw-HuvDTauFQ0fM6RaylsgBSOIU3iOYyuJusxzsocczg0i6rdTgxZLodmUJSOB6I7XN9Sv4ypN6RxxJndzUPeHOhBLau5VGQMGp49RMt41NW1gsVLF68pWiVJwKUjEYsGg"}"#;
+        fn settlement_grant() -> TokenExchange {
+            PendingGrant::with_values(GrantClient::AuctionsSettlement, 49152, STATE.into(), VERIFIER.into())
+                .accept_callback(&format!("{CALLBACK_PATH}?code={CODE}&state={STATE}")).unwrap()
+        }
+        let f: Value = serde_json::from_str(FIXTURE).unwrap();
+        let keys: Jwks = serde_json::from_value(f["jwks"].clone()).unwrap();
+        let signed = f["valid"].as_str().unwrap();
+        assert_eq!(verified_expiry(signed, &keys, GrantClient::AuctionsSettlement, NOW), Ok(NOW+900));
+        assert_eq!(verified_expiry(signed, &keys, GrantClient::Auctions, NOW), Err("oauth_claims_rejected"));
+        let (listener, addr) = listen();
+        let worker = thread::spawn(move || {
+            let f: Value = serde_json::from_str(FIXTURE).unwrap();
+            for (path, body) in [(DISCOVERY, discovery()), (JWKS, f["jwks"].clone())] {
+                let mut s = accept(&listener);
+                assert!(read_request(&mut s, &format!("GET {path} HTTP/1.1")).is_empty());
+                reply(&mut s, "200 OK", &body);
+            }
+            let mut s = accept(&listener);
+            let body: Value = serde_json::from_slice(&read_request(&mut s, &format!("POST {TOKEN} HTTP/1.1"))).unwrap();
+            assert_eq!(body, serde_json::to_value(settlement_grant()).unwrap());
+            reply(&mut s, "200 OK", &json!({"access_token":f["valid"],"token_type":"Bearer","expires_in":900,"scope":GrantClient::AuctionsSettlement.scope()}));
+            listener
+        });
+        let result = tauri::async_runtime::block_on(async {
+            NativeIdentityHttp::new(IdentityProvider::IsolatedHttp(addr)).unwrap()
+                .exchange_with_clock(settlement_grant(), DEADLINE, || Ok(NOW)).await
+        }).unwrap();
+        let listener = worker.join().unwrap();
+        assert_eq!(result.bearer_for(GrantClient::AuctionsSettlement, NOW), Ok(signed));
+        assert_eq!(result.bearer_for(GrantClient::Auctions, NOW), Err("oauth_token_rejected"));
+        assert_eq!(result.bearer_for(GrantClient::StudioApi, NOW), Err("oauth_token_rejected"));
+        assert_eq!(result.bearer_for(GrantClient::AuctionsSettlement, NOW+900), Err("oauth_token_rejected"));
+        // Actual resource adapter rejects the same-audience settlement token
+        // before network I/O; no profile membership or preview request leaves.
+        let resource = resource_http::NativeAuctionsHttp::new(addr).unwrap();
+        let rejected = tauri::async_runtime::block_on(resource.list_tenants(&result, || Ok(NOW)));
+        assert_eq!(rejected.err(), Some("oauth_token_rejected"));
+        assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     }
 
     #[test]
@@ -434,7 +481,7 @@ mod tests {
         let keys: Jwks = serde_json::from_value(f["jwks"].clone()).unwrap();
         let bearer = f["valid"].as_str().unwrap().to_owned();
         let expires_at = verified_expiry(&bearer,&keys,GrantClient::Auctions,NOW).unwrap();
-        NativeAccessToken { bearer, audience: GrantClient::Auctions.audience(), expires_at }
+        NativeAccessToken { bearer, client: GrantClient::Auctions, expires_at }
     }
     fn tenants(role: &str) -> Value {
         json!({"month":"2027-01","monthlyPerArtistLimit":3,"globalMonthlyLimit":12,"tenants":[
