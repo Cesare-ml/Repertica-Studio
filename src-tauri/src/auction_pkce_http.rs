@@ -470,7 +470,7 @@ mod tests {
             [], |r| r.get(0)).unwrap();
         db.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES(?1,'FIX-1','Synthetic','available','2026-11-25','2026-11-25')",
             [&binding.local_work]).unwrap();
-        assert_eq!(db.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),21);
+        assert_eq!(db.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),22);
         let profile = verified_resource_token();
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW))),
             Err("settlement_binding_mismatch"));
@@ -574,7 +574,7 @@ mod tests {
         drop(db);
         let archive = repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
         let mut db = archive.conn.into_inner().unwrap();
-        assert_eq!(db.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),21);
+        assert_eq!(db.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),22);
         assert_eq!(db.pragma_query_value(None,"foreign_keys",|r|r.get::<_,i64>(0)).unwrap(),1);
         let resolve = |conn: &rusqlite::Connection, scope: &str, work: &str, subject: &str| {
             settlement_store::resolve_selected(conn,scope,work,subject,verify)

@@ -61,11 +61,9 @@ impl NativeSettlementHttp {
     pub(super) async fn history(&self, c: &mut Connection, b: &Binding,
         token: &NativeAccessToken, clock: impl Fn() -> Result<u64, Failure>) -> Result<u64, Failure> {
         self.authorize(token, b, &clock)?;
-        // Explicit history overlaps the last two committed deliveries so a
-        // lost ACK response can be recovered even after one newer poll.
-        // No renderer cursor, automatic ACK, or retry; a full page still
-        // advances by at least 48 new deliveries while catching up.
-        let after = ledger::cursor(c, b)?.saturating_sub(2);
+        // Native durable journal selects the recovery cursor. No renderer
+        // cursor, automatic ACK or retry; a single page per explicit action.
+        let after = ledger::history_cursor(c, b)?;
         let bytes = self.request(token, b, json!({"action":"history","auctionId":b.auction,
             "tenantId":b.tenant,"afterSequence":after}), &clock).await?;
         ledger::history(c, b, after, &bytes)
@@ -79,8 +77,7 @@ impl NativeSettlementHttp {
     async fn ack_reviewed(&self, c: &mut Connection, b: &Binding,
         token: &NativeAccessToken, expected: Option<u64>, clock: impl Fn() -> Result<u64, Failure>) -> Result<(), Failure> {
         self.authorize(token, b, &clock)?;
-        let target = ledger::ack_target(c, b)?;
-        if expected.is_some_and(|n| n != target.sequence) { return Err("settlement_stale_ack"); }
+        let target = ledger::begin_ack_attempt(c, b, expected)?;
         let bytes = self.request(token, b, json!({"action":"ack","auctionId":b.auction,
             "tenantId":b.tenant,"resultId":target.result_id,
             "deliverySequence":target.sequence}), &clock).await?;
