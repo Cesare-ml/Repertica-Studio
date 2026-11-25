@@ -730,7 +730,7 @@ mod tests {
                 assert!(recovered["acknowledgedAt"].is_null());
                 assert_eq!(recovered["ackPending"],0);
                 assert_eq!(recovered["ackScanned"],0);
-                assert_eq!(recovered["ackConfirmed"],1);
+                assert_eq!(recovered["ackConfirmed"],2);
                 assert_eq!(ledger::history_cursor(&mut db,&binding),Ok(5));
                 let stamp: Option<String> = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=4",[],|r|r.get(0)).unwrap();
                 assert_eq!(stamp.as_deref(),Some("2026-11-25T04:03:00.000Z"));
@@ -739,7 +739,7 @@ mod tests {
                 assert_eq!(reviewed_ack!(4).unwrap_err(),"settlement_stale_ack");
                 let ack = reviewed_ack!(7).unwrap();
                 assert_eq!(ack["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
-                assert_eq!(ack["ackConfirmed"],2);
+                assert_eq!(ack["ackConfirmed"],3);
                 assert_eq!(reviewed_ack!(7).unwrap(),ack);
             });
             worker.join().unwrap()
@@ -751,6 +751,12 @@ mod tests {
         assert_eq!(ledger::count(&db),7);
         assert_eq!(summary["sequence"],7);
         assert_eq!(summary["acknowledgedAt"],"2026-11-25T04:04:00.000Z");
+        assert_eq!(summary["ackPending"],0);
+        assert_eq!(summary["ackScanned"],0);
+        assert_eq!(summary["ackConfirmed"],3);
+        let sequences: Vec<i64> = db.prepare("SELECT sequence FROM auction_settlement_ack_attempts ORDER BY sequence")
+            .unwrap().query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        assert_eq!(sequences, vec![3,4,7]);
         let recovered: String = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=4",[],|r|r.get(0)).unwrap();
         assert_eq!(recovered,"2026-11-25T04:03:00.000Z");
         // Same typed workspace dispatch as the profile UI; the settlement
