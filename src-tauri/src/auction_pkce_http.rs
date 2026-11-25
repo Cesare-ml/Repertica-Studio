@@ -780,7 +780,7 @@ mod tests {
             assert_eq!(saved["pending"], value["pending"]);
             assert_eq!(saved["receipt"]["auctionId"], RESOURCE_ID);
             assert_eq!(session.review_pending(&conn,"a",&scope,&confirmed_revision,NOW).err().as_deref(),Some("auction_already_confirmed"));
-            assert_eq!(confirmed.auction_id, RESOURCE_ID);
+            assert_eq!(serde_json::to_value(&confirmed).unwrap()["auctionId"], RESOURCE_ID);
             assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
         });
         let listener=worker.join().unwrap();
