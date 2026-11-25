@@ -56,23 +56,41 @@ test('refuses symlinked blob or ancestor',{skip:process.platform==='win32'},asyn
   for(const path of ['alias.png','alias-dir/a.png']) await assert.rejects(attachLocalMedia(pkg,rows([{...cover,path}]),root));
 });
 
-test('batch mode uses real local media association and keeps files in independent v2 packages',async t=>{
-  const root=await fixture(t),output=join(root,'batch');
-  const artworks=Array.from({length:9},(_,i)=>({code:'WORK-'+i,title:'Example',status:'available'}));
-  const selection={...pkg,artworks};
-  const projected=artworks.map(a=>({code:a.code,photos:[cover]}));
-  const result=await publishArchiveMediaBatches(output,selection,projected,(p,r)=>attachLocalMedia(p,r,root));
-  assert.deepEqual(result.map(x=>x.photographs),[8,1]);
-  const imported=[];
-  for(const row of result) {
-    const data=await readFile(join(output,row.file));
-    assert.equal(createHash('sha256').update(data).digest('hex'),row.sha256);
-    const p=JSON.parse(data);
-    for(const c of p.covers) assert.deepEqual(Buffer.from(c.data_base64,'base64'),bytes);
-    imported.push(...p.artworks.map(a=>a.code));
-  }
-  assert.deepEqual(imported,artworks.map(a=>a.code));
-});
+for (const scenario of [
+  {label:'packs nine small images together',width:16,height:16,counts:[9]},
+  {label:'splits nine maximum-resolution images at the pixel budget',width:4000,height:4000,counts:[8,1]},
+]) {
+  test('batch mode '+scenario.label,async t=>{
+    const root=await fixture(t),output=join(root,'batch');
+    const image=pngHeader(scenario.width,scenario.height);
+    await writeFile(join(root,'blobs','a.png'),image);
+    const photo={...cover,sha256:createHash('sha256').update(image).digest('hex'),size:String(image.length)};
+    const artworks=Array.from({length:9},(_,i)=>({code:'WORK-'+i,title:'Example',status:'available'}));
+    const selection={...pkg,artworks};
+    const projected=artworks.map(a=>({code:a.code,photos:[photo]}));
+    const result=await publishArchiveMediaBatches(output,selection,projected,(p,r)=>attachLocalMedia(p,r,root));
+    assert.deepEqual(result.map(x=>x.photographs),scenario.counts);
+    const manifest=JSON.parse(await readFile(join(output,'manifest.json'),'utf8'));
+    assert.deepEqual(manifest.packages,result);
+    const imported=[];
+    for(const row of result) {
+      const data=await readFile(join(output,row.file));
+      assert.equal(createHash('sha256').update(data).digest('hex'),row.sha256);
+      assert.equal(data.length,row.bytes);
+      const p=JSON.parse(data);
+      assert.equal(p.covers.length,row.photographs);
+      assert.equal(p.artworks.length,row.artworks);
+      assert.ok(p.covers.length*scenario.width*scenario.height<=128_000_000);
+      assert.deepEqual(p.covers.map(c=>c.artwork_code),p.artworks.map(a=>a.code));
+      for(const c of p.covers) {
+        assert.equal(c.sha256,photo.sha256);
+        assert.deepEqual(Buffer.from(c.data_base64,'base64'),image);
+      }
+      imported.push(...p.artworks.map(a=>a.code));
+    }
+    assert.deepEqual(imported,artworks.map(a=>a.code));
+  });
+}
 
 test('rejects oversized headers and indivisible groups beyond the native pixel budget',async t=>{
   const root=await fixture(t),output=join(root,'batch');
