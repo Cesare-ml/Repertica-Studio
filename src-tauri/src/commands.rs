@@ -86,14 +86,37 @@ fn code_in_use(conn: &Connection, code: &str, except_id: &str) -> Result<bool, S
     conn.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE code=?1 COLLATE NOCASE AND id<>?2)",
         params![code, except_id], |r| r.get(0)).map_err(err)
 }
+pub(crate) const STALE_EDIT: &str = "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.";
+
+/// Keep RFC3339 revision timestamps distinct even with a stalled/backwards clock.
+pub(crate) fn next_edit_timestamp(previous: &str) -> Result<String, String> {
+    let now = Utc::now();
+    let next = match chrono::DateTime::parse_from_rfc3339(previous) {
+        Ok(old) if old.with_timezone(&Utc) >= now => old.with_timezone(&Utc)
+            .checked_add_signed(chrono::Duration::nanoseconds(1))
+            .ok_or_else(|| STALE_EDIT.to_string())?,
+        _ => now,
+    };
+    Ok(next.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+}
+
+#[cfg(test)]
 fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, String> {
+    save_artwork_versioned(db, None, input)
+}
+fn save_artwork_versioned(db: &Database, expected: Option<&str>, input: ArtworkInput) -> Result<Artwork, String> {
     let fields = normalize_artwork(&input)?;
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
     let editing = input.id.is_some();
     let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let existing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",params![id],|r|r.get(0)).map_err(err)?;
-    if editing && !existing { return Err("Opera da modificare non trovata".into()); }
+    let stored: Option<String> = tx.query_row(
+        "SELECT updated_at FROM artworks WHERE id=?1", params![id], |r| r.get(0)
+    ).optional().map_err(err)?;
+    if editing && stored.is_none() { return Err("Opera da modificare non trovata".into()); }
+    if editing && expected != stored.as_deref() { return Err(STALE_EDIT.into()); }
+    if !editing && stored.is_some() { return Err("Identificativo opera già utilizzato".into()); }
+    let existing = stored.is_some();
     let sale_exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE artwork_id=?1)",params![id],|r|r.get(0)).map_err(err)?;
     if fields.status == "sold" && !sale_exists { return Err("Registra una vendita per indicare l'opera come venduta".into()); }
     if fields.status != "sold" && sale_exists { return Err("L'opera ha una vendita registrata e deve restare venduta".into()); }
@@ -103,18 +126,20 @@ fn save_artwork_core(db: &Database, input: ArtworkInput) -> Result<Artwork, Stri
         None => crate::archive_code::allocate(&tx, fields.year.as_deref())?,
     };
     if code_in_use(&tx, &code, &id)? { return Err("Esiste già un'opera con questo codice".into()); }
-    let stamp = now();
+    let stamp = match stored.as_deref() { Some(previous) => next_edit_timestamp(previous)?, None => now() };
     let (title, year, technique, support, description, location) =
         (fields.title, fields.year, fields.technique, fields.support, fields.description, fields.location);
     if existing {
-        tx.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13,signed=?14,final_varnish=?15,framed=?16,artist_coefficient_override=?17,fixed_price_cents=?18 WHERE id=?1",
-            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed,fields.coefficient,fields.fixed_price]).map_err(err)?;
+        let changed = tx.execute("UPDATE artworks SET code=?2,title=?3,year=?4,technique=?5,support=?6,width_cm=?7,height_cm=?8,depth_cm=?9,description=?10,location=?11,status=?12,updated_at=?13,signed=?14,final_varnish=?15,framed=?16,artist_coefficient_override=?17,fixed_price_cents=?18 WHERE id=?1 AND updated_at=?19",
+            params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed,fields.coefficient,fields.fixed_price,expected]).map_err(err)?;
+        if changed != 1 { return Err(STALE_EDIT.into()); }
     } else {
         tx.execute("INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13,?14,?15,?16,?17,?18)",
             params![id,code,title,year,technique,support,fields.width,fields.height,fields.depth,description,location,fields.status,stamp,fields.signed,fields.final_varnish,fields.framed,fields.coefficient,fields.fixed_price]).map_err(err)?;
     }
     let saved = artwork_by_id(&tx, &id)?;
+    if saved.updated_at != stamp { return Err(STALE_EDIT.into()); }
     tx.commit().map_err(err)?;
     Ok(saved)
 }
@@ -276,8 +301,8 @@ pub async fn create_artwork_full(app: tauri::AppHandle, input: NewArtworkInput) 
     }).await.map_err(err)?
 }
 #[tauri::command]
-pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artwork, String> {
-    save_artwork_core(&db, input)
+pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput, expected_updated_at: Option<String>) -> Result<Artwork, String> {
+    save_artwork_versioned(&db, expected_updated_at.as_deref(), input)
 }
 #[tauri::command]
 pub fn delete_artwork(db: State<'_, Database>, id: String, cascade: Option<bool>) -> Result<(), String> {
@@ -819,18 +844,48 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().to_path_buf()).unwrap();
         let created = save_artwork_core(&db, artwork_edit_input(None, "Original")).unwrap();
-        let changed = save_artwork_core(&db,
+        let changed = save_artwork_versioned(&db, Some(&created.updated_at),
             artwork_edit_input(Some(created.id.clone()), "Edited")).unwrap();
         assert_eq!(changed.id, created.id);
         assert_eq!(changed.title, "Edited");
         db.conn.lock().unwrap().execute("DELETE FROM artworks WHERE id=?1",
             params![created.id]).unwrap();
-        let error = save_artwork_core(&db,
+        let error = save_artwork_versioned(&db, Some(&changed.updated_at),
             artwork_edit_input(Some(created.id.clone()), "Resurrected")).unwrap_err();
         assert!(error.contains("non trovata"));
         let count: i64 = db.conn.lock().unwrap().query_row(
             "SELECT count(*) FROM artworks", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0, "a stale editor must not silently insert an artwork");
+    }
+
+    #[test]
+    fn artwork_edit_rejects_stale_and_missing_tokens_and_keeps_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let first = save_artwork_core(&db, artwork_edit_input(None, "Original")).unwrap();
+        let mut edit = artwork_edit_input(Some(first.id.clone()), "New title");
+        edit.fixed_price_cents = Some(42_000);
+        edit.signed = true;
+        let current = save_artwork_versioned(&db, Some(&first.updated_at), edit).unwrap();
+        assert_ne!(first.updated_at, current.updated_at);
+        for expected in [Some(first.updated_at.as_str()), None] {
+            assert_eq!(save_artwork_versioned(&db, expected,
+                artwork_edit_input(Some(first.id.clone()), "Stale")).unwrap_err(), STALE_EDIT);
+        }
+        let conn = db.conn.lock().unwrap();
+        let kept = artwork_by_id(&conn, &first.id).unwrap();
+        assert_eq!(kept.title, "New title");
+        assert_eq!(kept.fixed_price_cents, Some(42_000));
+        assert!(kept.signed);
+        assert_eq!(kept.updated_at, current.updated_at);
+    }
+
+    #[test]
+    fn edit_timestamp_advances_even_with_future_previous_value() {
+        let previous = "2099-01-01T00:00:00.000000000Z";
+        let next = next_edit_timestamp(previous).unwrap();
+        assert_eq!(next, "2099-01-01T00:00:00.000000001Z");
+        assert_ne!(next_edit_timestamp(&next).unwrap(), next);
     }
 
     fn sale_fixture() -> (tempfile::TempDir, Database, String, String) {
@@ -860,11 +915,37 @@ mod tests {
         let other = save_artwork_core(&db, other).unwrap();
         let mut clash = artwork_edit_input(Some(other.id.clone()), "Altra");
         clash.code = Some(first.code.to_lowercase());
-        assert!(save_artwork_core(&db, clash).unwrap_err().contains("codice"));
+        assert!(save_artwork_versioned(&db, Some(&other.updated_at), clash).unwrap_err().contains("codice"));
         // Re-saving a record with its own code is not a conflict.
         let mut same = artwork_edit_input(Some(first.id.clone()), "Prima modificata");
         same.code = Some(first.code.clone());
-        assert_eq!(save_artwork_core(&db, same).unwrap().title, "Prima modificata");
+        assert_eq!(save_artwork_versioned(&db, Some(&first.updated_at), same).unwrap().title, "Prima modificata");
+    }
+
+    #[test]
+    fn cascading_collector_deletion_advances_artwork_revision_even_with_future_clock() {
+        let (_dir, db, artwork, collector) = sale_fixture();
+        record_sale_core(&db, sale_input(&artwork, &collector, "2026-11-21")).unwrap();
+        let before = "2099-01-01T00:00:00.000000000Z";
+        db.conn.lock().unwrap().execute("UPDATE artworks SET updated_at=?2 WHERE id=?1",
+            params![artwork, before]).unwrap();
+        crate::collectors::delete_collector_core(&db, &collector, true).unwrap();
+        let current = {
+            let conn = db.conn.lock().unwrap();
+            let result = artwork_by_id(&conn, &artwork).unwrap();
+            let remaining: i64 = conn.query_row("SELECT count(*) FROM sales WHERE artwork_id=?1",
+                params![artwork], |row| row.get(0)).unwrap();
+            assert_eq!(remaining, 0);
+            result
+        };
+        assert_eq!(current.status, "available");
+        assert_eq!(current.updated_at, "2099-01-01T00:00:00.000000001Z");
+        let stale = artwork_edit_input(Some(artwork.clone()), "Stale edit");
+        assert_eq!(save_artwork_versioned(&db, Some(before), stale).unwrap_err(), STALE_EDIT);
+        let conn = db.conn.lock().unwrap();
+        let kept = artwork_by_id(&conn, &artwork).unwrap();
+        assert_eq!(kept.title, current.title);
+        assert_eq!(kept.updated_at, current.updated_at);
     }
 
     #[test]
@@ -967,19 +1048,19 @@ mod tests {
         let mut edit = artwork_edit_input(Some(created.id.clone()), "Con coefficiente");
         edit.code = None;
         edit.fixed_price_cents = Some(250_000);
-        let fixed = save_artwork_core(&db, edit).unwrap();
+        let fixed = save_artwork_versioned(&db, Some(&created.updated_at), edit).unwrap();
         assert_eq!((fixed.artist_coefficient_override, fixed.fixed_price_cents), (None, Some(250_000)), "saving replaces both settings");
         for bad in [Some(0.0), Some(-1.0), Some(f64::NAN), Some(1e9)] {
             let mut e = artwork_edit_input(Some(created.id.clone()), "x");
             e.code = None; e.artist_coefficient_override = bad;
-            assert!(save_artwork_core(&db, e).is_err(), "{bad:?}");
+            assert!(save_artwork_versioned(&db, Some(&fixed.updated_at), e).is_err(), "{bad:?}");
         }
         let mut negative = artwork_edit_input(Some(created.id.clone()), "x");
         negative.code = None; negative.fixed_price_cents = Some(-5);
-        assert!(save_artwork_core(&db, negative).is_err());
+        assert!(save_artwork_versioned(&db, Some(&fixed.updated_at), negative).is_err());
         let mut free = artwork_edit_input(Some(created.id.clone()), "x");
         free.code = None; free.fixed_price_cents = Some(0);
-        assert_eq!(save_artwork_core(&db, free).unwrap().fixed_price_cents, Some(0), "a price of zero is allowed");
+        assert_eq!(save_artwork_versioned(&db, Some(&fixed.updated_at), free).unwrap().fixed_price_cents, Some(0), "a price of zero is allowed");
     }
 
     #[test]
@@ -1006,7 +1087,7 @@ mod tests {
         let mut edit = artwork_edit_input(Some(created.id.clone()), "Con");
         edit.code = None;
         edit.final_varnish = true;
-        let saved = save_artwork_core(&db, edit).unwrap();
+        let saved = save_artwork_versioned(&db, Some(&created.updated_at), edit).unwrap();
         assert!(saved.final_varnish && !saved.signed && !saved.framed);
 
         // An unknown kind is rejected and leaves nothing behind.
@@ -1026,7 +1107,7 @@ mod tests {
         assert_eq!((first.code.as_str(), second.code.as_str()), ("ART-0001", "ART-0002"));
         let mut edit = artwork_edit_input(Some(second.id.clone()), "Due modificata");
         edit.code = None;
-        assert_eq!(save_artwork_core(&db, edit).unwrap().code, "ART-0002", "editing keeps the assigned code");
+        assert_eq!(save_artwork_versioned(&db, Some(&second.updated_at), edit).unwrap().code, "ART-0002", "editing keeps the assigned code");
         let mut manual = new_artwork("Manuale", None);
         manual.artwork.code = Some("art-0001".into());
         assert!(create_artwork_full_core(&db, manual).unwrap_err().contains("codice"));
@@ -1319,13 +1400,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().to_path_buf()).unwrap();
         let created = crate::collectors::save_collector_core(&db, collector_edit_input(None, "Original")).unwrap();
-        let changed = crate::collectors::save_collector_core(&db,
+        let changed = crate::collectors::save_collector_versioned(&db, Some(&created.updated_at),
             collector_edit_input(Some(created.id.clone()), "Edited")).unwrap();
         assert_eq!(changed.id, created.id);
         assert_eq!(changed.name, "Edited");
         db.conn.lock().unwrap().execute("DELETE FROM collectors WHERE id=?1",
             params![created.id]).unwrap();
-        let error = crate::collectors::save_collector_core(&db,
+        let error = crate::collectors::save_collector_versioned(&db, Some(&changed.updated_at),
             collector_edit_input(Some(created.id.clone()), "Resurrected")).unwrap_err();
         assert!(error.contains("non trovato"));
         let count: i64 = db.conn.lock().unwrap().query_row(

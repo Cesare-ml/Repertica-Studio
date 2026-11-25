@@ -1,17 +1,11 @@
 # Sicurezza della modifica di opere e collezionisti
 
-Incremento backend locale (schema SQLite v5 invariato).
+Concorrenza ottimistica locale, senza migrazioni.
 
-I comandi Tauri `save_artwork` e `save_collector` distinguono esplicitamente **creazione** e **modifica**:
+- Creazione: nessun token, UUID nuovo; i flussi create-full restano invariati.
+- Modifica: il renderer conserva updated_at della scheda aperta e lo passa come expectedUpdatedAt ai comandi save_artwork/save_collector.
+- Il backend verifica il token nel mutex SQLite e nella transazione; UPDATE include WHERE id=? AND updated_at=?, richiede una riga modificata e verifica la revisione letta prima del commit.
+- Ogni salvataggio di scheda e il ritorno a disponibile dopo una cancellazione a cascata avanzano il timestamp RFC3339 anche quando l'orologio non avanza.
+- In caso di conflitto la bozza rimane aperta, con messaggio localizzato e lista aggiornata; per modificare il dato corrente bisogna chiudere e riaprire la scheda. Nessun retry automatico.
 
-- `id` assente: si crea un nuovo UUID e si inserisce un nuovo record, con le validazioni esistenti.
-- `id` presente: l'identificativo deve già esistere in SQLite; se è stato eliminato dopo l'apertura della finestra di modifica, il salvataggio viene rifiutato senza creare un nuovo record.
-- La modifica di un record esistente mantiene lo stesso UUID. Non cambiano i vincoli di relazione con vendite, certificati e gallerie.
-
-Il controllo è effettuato mentre l'app possiede il mutex del database, immediatamente prima della scrittura. È utile anche se in futuro più finestre o importazioni renderanno una scheda obsoleta.
-
-Due test Rust esercitano ciascuno: inserimento, modifica con ID stabile, eliminazione e tentativo di salvataggio della scheda obsoleta. Non sono state introdotte migrazioni né comunicazioni esterne.
-
-## Limite
-
-Questa protezione evita le **ricreazioni accidentali**. Non è ancora un controllo di concorrenza ottimistica sulle modifiche di un record tuttora esistente (che richiederebbe, per esempio, confrontare `updated_at` con quello caricato dalla finestra).
+Non è un registro revisioni o un sistema di sincronizzazione: non rileva scritture SQLite esterne che omettono updated_at, né garantisce revisioni globali per altri comandi media/vendite o dopo il ripristino di un backup. Nessuna rete o account richiesti.

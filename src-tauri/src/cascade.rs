@@ -4,7 +4,7 @@
 //! a collector carries the sales made to them. The interface first asks for the impact, shows it, and only
 //! then asks for the deletion with `cascade` set: without it nothing that has dependents is ever removed.
 use crate::db::Database;
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
@@ -91,8 +91,15 @@ pub(crate) fn remove_sales(tx: &Transaction, column: &str, id: &str) -> Result<V
         tx.execute("DELETE FROM sale_receipt_attachments WHERE receipt_id IN (SELECT id FROM sale_receipts WHERE sale_id=?1)", params![sale]).map_err(err)?;
         tx.execute("DELETE FROM sale_receipts WHERE sale_id=?1", params![sale]).map_err(err)?;
         tx.execute("DELETE FROM sales WHERE id=?1", params![sale]).map_err(err)?;
-        tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1 AND status='sold'",
-            params![artwork, chrono::Utc::now().to_rfc3339()]).map_err(err)?;
+        let previous: Option<String> = tx.query_row(
+            "SELECT updated_at FROM artworks WHERE id=?1 AND status='sold'",
+            params![artwork], |row| row.get(0)).optional().map_err(err)?;
+        if let Some(previous) = previous {
+            let stamp = crate::commands::next_edit_timestamp(&previous)?;
+            let changed = tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1 AND status='sold'",
+                params![artwork, stamp]).map_err(err)?;
+            if changed != 1 { return Err(crate::commands::STALE_EDIT.into()); }
+        }
     }
     Ok(files)
 }
