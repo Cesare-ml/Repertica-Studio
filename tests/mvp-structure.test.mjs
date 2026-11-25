@@ -18,6 +18,17 @@ test('no cloud or Sites dependency in runtime', () => {
   assert.doesNotMatch(get('src-tauri/src/lib.rs'), /auction_pkce|auction_pkce_http/);
   assert.match(get('src-tauri/src/auction_pkce.rs'), /#\[cfg\(test\)\]\s*#\[path = "auction_pkce_http\.rs"\]\s*mod native_http;/);
 });
+test('optional Auctions release IPC is typed and fail-closed', () => {
+  const native = get('src-tauri/src/lib.rs');
+  const boundary = get('src-tauri/src/auction_preview_ipc.rs');
+  const ui = get('src/app/auctions.component.ts');
+  assert.match(native, /^mod auction_preview_ipc;$/m);
+  assert.match(native, /auction_preview_ipc::auction_preview_command,/);
+  assert.match(boundary, /#\[tauri::command\]\s*pub fn auction_preview_command\(request: Request\) -> Result<Value, String> \{\s*request\.disabled\(\)\s*\}/);
+  assert.match(boundary, /deny_unknown_fields/);
+  assert.doesNotMatch(boundary, /reqwest|NativeIdentityHttp|TokenExchange|std::net|tauri::State/);
+  assert.match(ui, /invoke<unknown>\('auction_preview_command', \{ request \}\)/);
+});
 test('four MVP modules available via typed native IPC', () => {
   const native = get('src-tauri/src/lib.rs');
   for (const name of ['list_artworks','list_collectors','list_sales','list_certificates','issue_certificate']) {
