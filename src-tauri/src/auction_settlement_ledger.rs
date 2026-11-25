@@ -11,7 +11,7 @@ type Error = &'static str;
 const MAX_SAFE:u64 = 9_007_199_254_740_991;
 #[cfg(test)]
 const SCHEMA:&str = r#"
-CREATE TABLE settlement_fixture_receipts (
+CREATE TABLE auction_settlement_receipts (
   scope TEXT NOT NULL, auction TEXT NOT NULL, tenant TEXT NOT NULL,
   association TEXT NOT NULL, cloud_work TEXT NOT NULL, local_work TEXT NOT NULL,
   owner TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence>0),
@@ -21,7 +21,7 @@ CREATE TABLE settlement_fixture_receipts (
 "#;
 
 // Trusted native fixture, not constructed from the response or renderer.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Binding {
     pub(crate) scope:String, pub(crate) auction:String, pub(crate) tenant:String, pub(crate) association:String,
     pub(crate) cloud_work:String, pub(crate) local_work:String, pub(crate) owner:String,
@@ -33,7 +33,7 @@ fn uuid(s:&str)->bool { uuid::Uuid::parse_str(s).is_ok_and(|u|u.to_string()==s) 
 fn positive(n:u64)->bool { n>0 && n<=MAX_SAFE }
 fn date(s:&str)->bool { s.len()<=40 && DateTime::parse_from_rfc3339(s).is_ok() }
 impl Binding {
-    fn valid(&self)->bool {
+    pub(crate) fn valid(&self)->bool {
         uuid(&self.scope)&&uuid(&self.local_work)&&id(&self.auction,128)&&id(&self.tenant,80)&&
         id(&self.association,128)&&id(&self.cloud_work,128)&&
         self.owner.strip_prefix("repertica:").and_then(|s|s.parse::<i32>().ok())
@@ -91,11 +91,11 @@ fn latest(t:&Transaction<'_>,b:&Binding)->Result<u64,Error>{
     let scope:String=t.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",[],|r|r.get(0)).map_err(db)?;
     let work:bool=t.query_row("SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1)",[&b.local_work],|r|r.get(0)).map_err(db)?;
     if scope!=b.scope||!work{return Err("settlement_binding_mismatch")}
-    let conflict:bool=t.query_row("SELECT EXISTS(SELECT 1 FROM settlement_fixture_receipts WHERE scope=?1 AND auction=?2
+    let conflict:bool=t.query_row("SELECT EXISTS(SELECT 1 FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2
         AND (tenant<>?3 OR association<>?4 OR cloud_work<>?5 OR local_work<>?6 OR owner<>?7))",
         params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner],|r|r.get(0)).map_err(db)?;
     if conflict{return Err("settlement_binding_mismatch")}
-    t.query_row("SELECT COALESCE(MAX(sequence),0) FROM settlement_fixture_receipts WHERE scope=?1 AND auction=?2",
+    t.query_row("SELECT COALESCE(MAX(sequence),0) FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2",
         params![b.scope,b.auction],|r|r.get(0)).map_err(db)
 }
 // Keep immutable snapshot bytes separate from monotonic acknowledgement evidence.
@@ -106,19 +106,19 @@ fn store(t:&Transaction<'_>,b:&Binding,mut d:Delivery,cursor:&mut u64)->Result<(
     let raw=serde_json::to_string(&d).map_err(|_|"settlement_invalid_delivery")?;
     if n<=*cursor {
         let old:Option<(String,Option<String>)>=t.query_row(
-            "SELECT snapshot,acknowledged_at FROM settlement_fixture_receipts WHERE scope=?1 AND auction=?2 AND sequence=?3",
+            "SELECT snapshot,acknowledged_at FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2 AND sequence=?3",
             params![b.scope,b.auction,n],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(db)?;
         let (old_raw,old_ack)=old.ok_or("settlement_history_gap")?;
         if old_raw!=raw||matches!((old_ack.as_deref(),ack.as_deref()),(Some(a),Some(c)) if a!=c){
             return Err("settlement_delivery_conflict")
         }
         if old_ack.is_none()&&ack.is_some(){
-            t.execute("UPDATE settlement_fixture_receipts SET acknowledged_at=?4 WHERE scope=?1 AND auction=?2 AND sequence=?3",
+            t.execute("UPDATE auction_settlement_receipts SET acknowledged_at=?4 WHERE scope=?1 AND auction=?2 AND sequence=?3",
                 params![b.scope,b.auction,n,ack]).map_err(db)?;
         }
     }else{
         if n!=*cursor+1{return Err("settlement_history_gap")}
-        t.execute("INSERT INTO settlement_fixture_receipts(scope,auction,tenant,association,cloud_work,local_work,owner,sequence,snapshot,acknowledged_at)
+        t.execute("INSERT INTO auction_settlement_receipts(scope,auction,tenant,association,cloud_work,local_work,owner,sequence,snapshot,acknowledged_at)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![b.scope,b.auction,b.tenant,b.association,b.cloud_work,b.local_work,b.owner,n,raw,ack]).map_err(db)?;
         *cursor=n;
@@ -166,7 +166,7 @@ pub(crate) struct AckTarget{pub(crate) result_id:String,pub(crate) sequence:u64}
 fn stored_target(t:&Transaction<'_>,b:&Binding)->Result<AckTarget,Error>{
     let n=latest(t,b)?;
     if n==0{return Err("settlement_not_ingested")}
-    let raw:String=t.query_row("SELECT snapshot FROM settlement_fixture_receipts WHERE scope=?1 AND auction=?2 AND sequence=?3",
+    let raw:String=t.query_row("SELECT snapshot FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2 AND sequence=?3",
         params![b.scope,b.auction,n],|r|r.get(0)).map_err(db)?;
     let d:Delivery=decode(raw.as_bytes())?;
     if !d.valid(b)||d.delivery_sequence!=n{return Err("settlement_delivery_conflict")}
@@ -213,11 +213,11 @@ pub(crate) fn summary(c:&mut Connection,b:&Binding)->Result<Option<SettlementSum
     let n=latest(&t,b)?;
     if n==0 { t.commit().map_err(db)?; return Ok(None) }
     let (count,min):(u64,u64)=t.query_row(
-        "SELECT COUNT(*),MIN(sequence) FROM settlement_fixture_receipts WHERE scope=?1 AND auction=?2",
+        "SELECT COUNT(*),MIN(sequence) FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2",
         params![b.scope,b.auction],|r|Ok((r.get(0)?,r.get(1)?))).map_err(db)?;
     if !positive(n)||count!=n||min!=1{return Err("settlement_history_gap")}
     let (raw,ack):(String,Option<String>)=t.query_row(
-        "SELECT snapshot,acknowledged_at FROM settlement_fixture_receipts WHERE scope=?1 AND auction=?2 AND sequence=?3",
+        "SELECT snapshot,acknowledged_at FROM auction_settlement_receipts WHERE scope=?1 AND auction=?2 AND sequence=?3",
         params![b.scope,b.auction,n],|r|Ok((r.get(0)?,r.get(1)?))).map_err(db)?;
     let d:Delivery=decode(raw.as_bytes())?;
     if !d.valid(b)||d.delivery_sequence!=n||d.acknowledged_at.is_some()||
@@ -254,7 +254,7 @@ mod fixtures {
     pub(crate) fn page(items:Vec<Value>,last:u64,next:Option<u64>)->Value{json!({"ok":true,"artworkId":"fixture-cloud-work","associationId":"fixture-published-link",
         "history":{"latestSequence":last,"items":items,"nextAfterSequence":next}})}
     fn bytes(v:Value)->Vec<u8>{serde_json::to_vec(&v).unwrap()}
-    pub(crate) fn count(c:&Connection)->u64{c.query_row("SELECT COUNT(*) FROM settlement_fixture_receipts",[],|r|r.get(0)).unwrap()}
+    pub(crate) fn count(c:&Connection)->u64{c.query_row("SELECT COUNT(*) FROM auction_settlement_receipts",[],|r|r.get(0)).unwrap()}
     #[test]
     fn replay_gap_and_review_restoration(){
         let mut c=database();let b=binding();
@@ -309,7 +309,7 @@ mod fixtures {
         response["replayed"]=json!(true);
         assert_eq!(ack(&mut c,&b,&target,&bytes(response)),Ok(()));
         poll(&mut c,&b,&bytes(reply(d2))).unwrap();
-        let stamp:String=c.query_row("SELECT acknowledged_at FROM settlement_fixture_receipts WHERE sequence=2",[],|r|r.get(0)).unwrap();
+        let stamp:String=c.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=2",[],|r|r.get(0)).unwrap();
         assert_eq!(stamp,"2026-11-25T04:02:00.000Z");
         confirmed["acknowledged_at"]=json!("2026-11-25T04:03:00.000Z");
         let mut conflict=reply(confirmed);conflict["replayed"]=json!(true);
@@ -353,7 +353,7 @@ mod fixtures {
         assert_eq!(count(&c),2);
         assert_eq!(c.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
         assert_eq!(c.query_row("SELECT status FROM artworks WHERE id=?1",[WORK],|r|r.get::<_,String>(0)).unwrap(),"available");
-        c.execute("DELETE FROM settlement_fixture_receipts WHERE sequence=1",[]).unwrap();
+        c.execute("DELETE FROM auction_settlement_receipts WHERE sequence=1",[]).unwrap();
         assert_eq!(summary(&mut c,&b),Err("settlement_history_gap"));
     }
     #[test]
@@ -361,7 +361,7 @@ mod fixtures {
         let mut c=database();let b=binding();
         poll(&mut c,&b,&bytes(reply(delivery(1,"fulfilled")))).unwrap();
         assert_eq!(summary(&mut c,&b).unwrap().unwrap().acknowledged_at,None);
-        c.execute("UPDATE settlement_fixture_receipts SET acknowledged_at='invalid'",[]).unwrap();
+        c.execute("UPDATE auction_settlement_receipts SET acknowledged_at='invalid'",[]).unwrap();
         assert_eq!(summary(&mut c,&b),Err("settlement_delivery_conflict"));
         c.execute("UPDATE auction_archive_scope SET scope='different'",[]).unwrap();
         assert_eq!(summary(&mut c,&b),Err("settlement_binding_mismatch"));

@@ -223,6 +223,8 @@ mod resource_http;
 #[cfg(test)]
 #[path = "auction_settlement_ledger.rs"]
 mod settlement_ledger;
+#[path = "auction_settlement_store.rs"]
+mod settlement_store;
 
 #[cfg(test)]
 #[path = "auction_settlement_http.rs"]
@@ -458,12 +460,34 @@ mod tests {
         // owner from a renderer, and only an explicitly bound local artwork.
         use super::settlement_ledger as ledger;
         let client = settlement_http::NativeSettlementHttp::new(addr).unwrap();
-        let mut db = ledger::database();
+        // Use the real application's v19 archive creation, then the proposed
+        // migration explicitly. No production entrypoint or provider is mounted.
+        let dir = tempfile::tempdir().unwrap();
+        let archive = repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
+        let mut db = archive.conn.into_inner().unwrap();
         let mut binding = ledger::binding();
+        binding.scope = db.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",
+            [], |r| r.get(0)).unwrap();
+        db.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES(?1,'FIX-1','Synthetic','available','2026-11-25','2026-11-25')",
+            [&binding.local_work]).unwrap();
+        settlement_store::migrate(&mut db).unwrap();
         let profile = verified_resource_token();
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW))),
             Err("settlement_binding_mismatch"));
         binding.owner = "repertica:42".into();
+        let published = settlement_store::PublishedBinding {
+            binding: binding.clone(),
+            request_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
+            selection_digest: "a".repeat(64),
+            published_at: "2026-11-24T03:00:00.000Z".into(),
+        };
+        let verify = |candidate: &settlement_store::PublishedBinding| {
+            if candidate == &published { Ok(()) } else { Err("settlement_access_denied") }
+        };
+        assert_eq!(settlement_store::record(&mut db,&published,&result.subject,
+            |_| Err("settlement_access_denied")),Err("settlement_access_denied"));
+        settlement_store::record(&mut db,&published,&result.subject,verify).unwrap();
+        settlement_store::record(&mut db,&published,&result.subject,verify).unwrap();
         let mut wrong_archive = binding.clone();
         wrong_archive.scope = "cccccccc-cccc-4ccc-8ccc-cccccccccccc".into();
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&wrong_archive,&result,||Ok(NOW))),
@@ -525,7 +549,7 @@ mod tests {
             assert_eq!(ledger::count(&db),0);
             assert_eq!(client.history(&mut db,&binding,&result,||Ok(NOW)).await,Ok(3));
             assert_eq!(client.ack(&mut db,&binding,&result,||Ok(NOW)).await,Err("settlement_unavailable"));
-            let stamp:Option<String> = db.query_row("SELECT acknowledged_at FROM settlement_fixture_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
+            let stamp:Option<String> = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
             assert!(stamp.is_none());
             // An explicit second attempt uses the same committed target.
             assert_eq!(client.ack(&mut db,&binding,&result,||Ok(NOW)).await,Ok(()));
@@ -541,12 +565,17 @@ mod tests {
         // The synthetic resolver is native-only and cannot be supplied over IPC.
         let request = || serde_json::from_value(json!({"action":"readSettlement",
             "artworkId":binding.local_work,"scope":binding.scope})).unwrap();
-        let resolve = |_: &rusqlite::Connection, scope: &str, work: &str, subject: &str| {
-            assert_eq!(scope,binding.scope);
-            assert_eq!(work,binding.local_work);
-            assert_eq!(subject,binding.owner);
-            Ok(Some(binding.clone()))
+        // Reopen the actual on-disk archive with the explicit proposed schema.
+        // db::open v19 cannot yet reopen v20 until core approves the mount.
+        drop(db);
+        let mut db = rusqlite::Connection::open(dir.path().join("repertica.sqlite")).unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        let resolve = |conn: &rusqlite::Connection, scope: &str, work: &str, subject: &str| {
+            settlement_store::resolve_selected(conn,scope,work,subject,verify)
         };
+        assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),
+            |conn,scope,work,subject| settlement_store::resolve_selected(conn,scope,work,subject,
+                |_| Err("settlement_access_denied"))),Err("settlement_access_denied"));
         let summary = settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),resolve).unwrap();
         assert_eq!(summary,json!({"sequence":3,"status":"review_required","amount":25000,"currency":"EUR",
             "fulfilledAt":"2026-11-25T04:00:00.000Z","acknowledgedAt":"2026-11-25T04:02:00.000Z"}));
@@ -560,12 +589,12 @@ mod tests {
         foreign.owner = "repertica:1".into();
         assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),
             |_,_,_,_| Ok(Some(foreign))),Err("settlement_binding_mismatch"));
-        db.execute("UPDATE auction_archive_scope SET scope='other'",[]).unwrap();
+        db.execute("UPDATE auction_archive_scope SET scope='cccccccc-cccc-4ccc-8ccc-cccccccccccc'",[]).unwrap();
         assert_eq!(settlement_http::read_selected_summary(&mut db,request(),Some(&result),||Ok(NOW),
             |_,_,_,_| panic!("restored archive must not resolve")),Err("settlement_binding_mismatch"));
         db.execute("UPDATE auction_archive_scope SET scope=?1",[&binding.scope]).unwrap();
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
-        let stamp:String = db.query_row("SELECT acknowledged_at FROM settlement_fixture_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
+        let stamp:String = db.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=3",[],|r|r.get(0)).unwrap();
         assert_eq!(stamp,"2026-11-25T04:02:00.000Z");
         assert_eq!(db.query_row("SELECT COUNT(*) FROM sales",[],|r|r.get::<_,u64>(0)).unwrap(),0);
     }
