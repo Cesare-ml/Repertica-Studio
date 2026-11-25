@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { previewLegacyDraft } from '../src/app/auction-legacy-import.ts';
 import { newAuctionDraft, preparePreview, decodeNativeDraft, saveNativeAuctionDraft } from '../src/app/auction-preview.ts';
 
 const draft = { ...newAuctionDraft({id:'a',title:'Art',status:'available'}),
@@ -64,4 +65,28 @@ test('native receipt is read-only in editor saves, bound to the pending tenant a
     assert.throws(()=>decodeNativeDraft({...confirmed,recordJson:JSON.stringify({...record,receipt:bad})},'a'),/invalid_stored_draft/);
   }
   assert.throws(()=>decodeNativeDraft({...confirmed,recordJson:JSON.stringify({...record,pending:null,receipt})},'a'),/invalid_stored_draft/);
+});
+
+
+test('legacy review never writes or overwrites a native draft created while the artist reviews', async () => {
+  const native = port(), loaded = await native.read('a');
+  const legacy = Object.freeze({ ...draft, local: true, updatedAt: '2026-11-25T10:00:00.000Z', token: 'synthetic' });
+  const reviewed = previewLegacyDraft(legacy, { id: 'a', status: 'available' }, loaded, loaded.scope);
+  assert.deepEqual(await native.read('a'), loaded);
+  const other = await saveNativeAuctionDraft(native, loaded, { ...draft, title: 'Native edit' });
+  await assert.rejects(saveNativeAuctionDraft(native, loaded, reviewed), /auction_draft_conflict/);
+  assert.deepEqual(await native.read('a'), other);
+  assert.equal(legacy.title, draft.title);
+  assert.throws(() => previewLegacyDraft(legacy, { id: 'a', status: 'available' }, other, loaded.scope), /auction_draft_conflict/);
+});
+
+test('explicitly saving an approved legacy draft uses the pinned archive and only its draft fields', async () => {
+  const native = port(), loaded = await native.read('a');
+  const legacy = Object.freeze({ ...draft, local: true, updatedAt: '2026-11-25T10:00:00.000Z', token: 'synthetic' });
+  const reviewed = previewLegacyDraft(legacy, { id: 'a', status: 'available' }, loaded, loaded.scope);
+  const saved = await saveNativeAuctionDraft(native, loaded, reviewed);
+  assert.deepEqual(decodeNativeDraft(saved, 'a'), { draft, pending: null });
+  assert.equal(saved.scope, loaded.scope);
+  assert.doesNotMatch(saved.recordJson, /updatedAt|token|synthetic/);
+  assert.equal(legacy.local, true);
 });
