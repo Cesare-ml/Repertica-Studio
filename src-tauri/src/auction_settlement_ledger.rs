@@ -1,6 +1,6 @@
 //! Native settlement parser and ledger, independent of transport and renderer.
-//! The table is provisioned only in synthetic tests pending schema ownership.
-//! No release provider, production migration or accounting.
+//! v20 provisions historical evidence in the local archive.
+//! No release provider or accounting.
 //! Binding must eventually come from the trusted immutable published resolver;
 //! private staging and preview receipts do not authorize settlement.
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};

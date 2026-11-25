@@ -460,8 +460,8 @@ mod tests {
         // owner from a renderer, and only an explicitly bound local artwork.
         use super::settlement_ledger as ledger;
         let client = settlement_http::NativeSettlementHttp::new(addr).unwrap();
-        // Use the real application's v19 archive creation, then the proposed
-        // migration explicitly. No production entrypoint or provider is mounted.
+        // Use ordinary archive creation with the local v20 migration.
+        // The remote provider remains an isolated fixture only.
         let dir = tempfile::tempdir().unwrap();
         let archive = repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
         let mut db = archive.conn.into_inner().unwrap();
@@ -470,7 +470,7 @@ mod tests {
             [], |r| r.get(0)).unwrap();
         db.execute("INSERT INTO artworks(id,code,title,status,created_at,updated_at) VALUES(?1,'FIX-1','Synthetic','available','2026-11-25','2026-11-25')",
             [&binding.local_work]).unwrap();
-        settlement_store::migrate(&mut db).unwrap();
+        assert_eq!(db.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),20);
         let profile = verified_resource_token();
         assert_eq!(tauri::async_runtime::block_on(client.poll(&mut db,&binding,&result,||Ok(NOW))),
             Err("settlement_binding_mismatch"));

@@ -3,6 +3,13 @@ mod archive_code;
 mod auto_backup;
 mod auction_drafts;
 mod auction_preview_ipc;
+#[path = "auction_settlement_ledger.rs"]
+mod settlement_ledger;
+#[path = "auction_settlement_store.rs"]
+mod settlement_store;
+// The same synthetic store tests are also compiled by the standalone PKCE target.
+#[cfg(test)]
+extern crate self as repertica_studio_lib;
 mod backup;
 mod brochures;
 mod business_mail;

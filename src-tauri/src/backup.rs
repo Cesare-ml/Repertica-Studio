@@ -334,6 +334,9 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
     if !(1..=crate::db::SCHEMA_VERSION).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    // Historical settlement receipts must be internally consistent even if the
+    // manifest was recomputed. Older snapshots have no v20 ledger yet.
+    if schema >= 20 { crate::settlement_store::inspect_snapshot(&conn)?; }
     // Sale dates are present even in the original v1 schema.
     validate_sale_dates(&conn)?;
     validate_sale_amounts(&conn)?;
@@ -766,6 +769,55 @@ mod tests {
         let record_to_update = manifest.files.iter_mut().find(|item| item.path == relative).unwrap();
         *record_to_update = record(folder, relative).unwrap();
         fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    }
+    #[test]
+    fn auction_history_survives_real_backup_restore_and_corruption_is_refused() {
+        use crate::{settlement_ledger as ledger, settlement_store as store};
+        let tmp=tempfile::tempdir().unwrap();
+        let db=db::open(tmp.path().join("active")).unwrap();
+        let mut b=ledger::binding();
+        {
+            let mut c=db.conn.lock().unwrap();
+            b.scope=c.query_row("SELECT scope FROM auction_archive_scope",[],|r|r.get(0)).unwrap();
+            c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES(?1,'FIX-1','Synthetic','t','t')",[&b.local_work]).unwrap();
+            let binding=store::PublishedBinding{binding:b.clone(),request_id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
+                selection_digest:"a".repeat(64),published_at:"2026-11-24T03:00:00.000Z".into()};
+            store::record(&mut c,&binding,&b.owner,|_|Ok(())).unwrap();
+            let page=ledger::page(vec![ledger::delivery(1,"fulfilled"),ledger::delivery(2,"review_required")],2,None);
+            ledger::history(&mut c,&b,0,&serde_json::to_vec(&page).unwrap()).unwrap();
+            let target=ledger::ack_target(&mut c,&b).unwrap();
+            let mut d=ledger::delivery(2,"review_required");
+            d["acknowledged_at"]=serde_json::json!("2026-11-25T04:02:00.000Z");
+            let mut a=ledger::reply(d); a["replayed"]=serde_json::json!(false);
+            ledger::ack(&mut c,&b,&target,&serde_json::to_vec(&a).unwrap()).unwrap();
+            c.execute("DELETE FROM artworks WHERE id=?1",[&b.local_work]).unwrap();
+        }
+        let destination=tmp.path().join("backups"); fs::create_dir(&destination).unwrap();
+        let backup=create_backup_core(&db,&destination).unwrap();
+        let folder=Path::new(&backup.directory);
+        assert_eq!(backup.schema_version,20);
+        assert!(inspect_backup_core(folder).unwrap().verified);
+        db.conn.lock().unwrap().execute("INSERT INTO collectors(id,name,created_at,updated_at) VALUES('later','Later','t','t')",[]).unwrap();
+        restore_backup_core(&db,folder).unwrap();
+        {
+            let c=db.conn.lock().unwrap();
+            assert_eq!(ledger::count(&c),2);
+            assert_eq!(c.query_row("SELECT acknowledged_at FROM auction_settlement_receipts WHERE sequence=2",[],|r|r.get::<_,String>(0)).unwrap(),"2026-11-25T04:02:00.000Z");
+            assert_eq!(c.query_row("SELECT count(*) FROM sales",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+            assert_eq!(c.query_row("SELECT count(*) FROM artworks",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+            assert_eq!(c.query_row("SELECT count(*) FROM collectors",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        }
+        // Rehash a deliberately corrupted backup; hashes alone cannot prove semantic integrity.
+        {
+            let c=Connection::open(folder.join(DB_FILE)).unwrap();
+            c.execute_batch("DROP TRIGGER auction_settlement_receipts_ack_only; UPDATE auction_settlement_receipts SET snapshot='{}' WHERE sequence=1;").unwrap();
+        }
+        refresh_manifest_record(folder,DB_FILE);
+        assert!(inspect_backup_core(folder).is_err());
+        assert!(restore_backup_core(&db,folder).is_err());
+        let c=db.conn.lock().unwrap();
+        assert_eq!(ledger::count(&c),2);
+        store::inspect_snapshot(&c).unwrap();
     }
     #[test]
     fn creates_in_arbitrary_external_folder_and_restores_with_safety_copy() {

@@ -1,4 +1,4 @@
-//! Explicit, not yet mounted, v20 migration and native published-binding store.
+//! Local v20 migration and native published-binding store. No remote provider.
 //! Historical rows never confer authorization. The caller must supply a live,
 //! exact publication-authority verifier owned by the native backend.
 use super::settlement_ledger::Binding;
@@ -14,6 +14,8 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<(), Error> {
     if v != 19 { return Err("settlement_schema_unavailable"); }
     tx.execute_batch(SCHEMA).map_err(db)?;
     tx.pragma_update(None, "user_version", 20).map_err(db)?;
+    // Validate before commit so a malformed legacy scope cannot leave a v20 archive.
+    inspect_snapshot(&tx)?;
     tx.commit().map_err(db)
 }
 
@@ -105,7 +107,7 @@ pub(crate) fn resolve_selected(conn: &Connection, scope: &str, work: &str, subje
 }
 
 // Read-only inspection of a disposable backup snapshot (no live authority and
-// no network). Not mounted in backup.rs until core ownership is confirmed.
+// no network). Also called by core archive opening and backup validation.
 // Historical bindings for deleted artworks are valid evidence; do not recreate
 // a deleted work, infer authorization, or replay any request after restoration.
 pub(crate) fn inspect_snapshot(conn: &Connection) -> Result<(), Error> {
@@ -139,12 +141,12 @@ mod tests {
     fn open() -> (tempfile::TempDir, Connection, PublishedBinding) {
         let dir=tempfile::tempdir().unwrap();
         let archive=repertica_studio_lib::db::open(dir.path().to_path_buf()).unwrap();
-        let mut conn=archive.conn.into_inner().unwrap();
+        let conn=archive.conn.into_inner().unwrap();
         let mut binding=super::super::settlement_ledger::binding();
         binding.scope=conn.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",[],|r|r.get(0)).unwrap();
         conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES(?1,'FIX-1','Synthetic','t','t')",
             [&binding.local_work]).unwrap();
-        migrate(&mut conn).unwrap();
+        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),20);
         let value=PublishedBinding{binding,request_id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
             selection_digest:"a".repeat(64),published_at:"2026-11-24T03:00:00.000Z".into()};
         (dir,conn,value)

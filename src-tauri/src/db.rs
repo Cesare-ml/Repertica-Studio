@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::{error::Error, fs, path::PathBuf, sync::{atomic::AtomicU64, Mutex}};
 
 /// Version written by this build (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 19;
+pub const SCHEMA_VERSION: i64 = 20;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
@@ -16,7 +16,7 @@ pub struct Database {
 pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     fs::create_dir_all(&directory)?;
     fs::create_dir_all(directory.join("media"))?;
-    let conn = Connection::open(directory.join("repertica.sqlite"))?;
+    let mut conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version > SCHEMA_VERSION {
@@ -569,6 +569,12 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     if version < 19 {
         crate::auction_drafts::migrate(&conn)?;
     }
+    // v20 is local historical evidence only: no provider, session or replay.
+    if version < 20 {
+        crate::settlement_store::migrate(&mut conn).map_err(std::io::Error::other)?;
+    } else {
+        crate::settlement_store::inspect_snapshot(&conn).map_err(std::io::Error::other)?;
+    }
     // An archive edited with PRAGMA foreign_keys=OFF can contain orphaned sales,
     // collector photographs, or gallery items even after a successful migration.
     // Do not open it as a healthy workspace: normal CRUD operations could then
@@ -596,6 +602,56 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn drop_settlement_for_old_schema_test(conn: &Connection) {
+        conn.execute_batch("DROP TABLE auction_settlement_receipts; DROP TABLE auction_published_bindings;").unwrap();
+    }
+    #[test]
+    fn v18_and_v19_upgrade_to_v20_preserving_local_archive() {
+        for version in [18_i64,19] {
+            let dir=tempfile::tempdir().unwrap();
+            let db=open(dir.path().into()).unwrap();
+            let old_scope;
+            {
+                let c=db.conn.lock().unwrap();
+                c.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES('local','A-1','Local','t','t')",[]).unwrap();
+                old_scope=c.query_row("SELECT scope FROM auction_archive_scope",[],|r|r.get::<_,String>(0)).unwrap();
+                drop_settlement_for_old_schema_test(&c);
+                if version==18 { c.execute_batch("DROP TABLE auction_drafts; DROP TABLE auction_archive_scope;").unwrap(); }
+                c.pragma_update(None,"user_version",version).unwrap();
+            }
+            drop(db);
+            let upgraded=open(dir.path().into()).unwrap();
+            let c=upgraded.conn.lock().unwrap();
+            assert_eq!(c.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),20);
+            let scope:String=c.query_row("SELECT scope FROM auction_archive_scope",[],|r|r.get(0)).unwrap();
+            if version==19 { assert_eq!(scope,old_scope); }
+            assert_eq!(c.query_row("SELECT title FROM artworks WHERE id='local'",[],|r|r.get::<_,String>(0)).unwrap(),"Local");
+            assert_eq!(c.query_row("SELECT count(*) FROM auction_settlement_receipts",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+            assert_eq!(c.query_row("SELECT count(*) FROM sales",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        }
+    }
+    #[test]
+    fn v20_migration_rolls_back_on_conflicting_schema_or_invalid_scope() {
+        for invalid_scope in [false,true] {
+            let dir=tempfile::tempdir().unwrap();
+            let db=open(dir.path().into()).unwrap();
+            {
+                let c=db.conn.lock().unwrap();
+                drop_settlement_for_old_schema_test(&c);
+                c.pragma_update(None,"user_version",19).unwrap();
+                if invalid_scope {
+                    c.execute("UPDATE auction_archive_scope SET scope=?1",["x".repeat(36)]).unwrap();
+                } else {
+                    c.execute_batch("CREATE TABLE auction_settlement_receipts(unexpected TEXT);").unwrap();
+                }
+            }
+            drop(db);
+            assert!(open(dir.path().into()).is_err());
+            let c=Connection::open(dir.path().join("repertica.sqlite")).unwrap();
+            assert_eq!(c.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),19);
+            assert_eq!(c.query_row("SELECT count(*) FROM sqlite_master WHERE name='auction_published_bindings'",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        }
+    }
     #[test]
     fn creates_schema_and_reopens_without_resetting_data() {
         let dir = tempfile::tempdir().unwrap();
@@ -622,6 +678,7 @@ mod tests {
             c.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at) VALUES('g','a','media/g.jpg','t')", []).unwrap();
             c.execute_batch("ALTER TABLE artworks DROP COLUMN signed; ALTER TABLE artworks DROP COLUMN final_varnish;
                 ALTER TABLE artworks DROP COLUMN framed; ALTER TABLE artwork_images DROP COLUMN kind;").unwrap();
+            drop_settlement_for_old_schema_test(&c);
             c.pragma_update(None, "user_version", 13).unwrap();
         }
         drop(db);
@@ -687,6 +744,7 @@ mod tests {
             c.execute("DROP TABLE studio_settings",[]).unwrap();
             c.execute("DROP TABLE artwork_images",[]).unwrap();
             drop_receipts_for_old_schema_test(&c);
+            drop_settlement_for_old_schema_test(&c);
             c.pragma_update(None,"user_version",1).unwrap();
         }
         drop(db);
@@ -715,6 +773,7 @@ mod tests {
                 VALUES('a','A','Original','media/primary.jpg','t','t')", []).unwrap();
             conn.execute("DROP TABLE artwork_images",[]).unwrap();
             drop_receipts_for_old_schema_test(&conn);
+            drop_settlement_for_old_schema_test(&conn);
             conn.pragma_update(None,"user_version",2).unwrap();
         }
         drop(db);
@@ -748,6 +807,7 @@ mod tests {
                     VALUES(?1,?2,?3,?4)",
                     rusqlite::params![id,art,format!("media/{id}.png"),created]).unwrap();
             }
+            drop_settlement_for_old_schema_test(&c);
             c.execute_batch("DROP INDEX idx_artwork_images_position;
                 ALTER TABLE artwork_images DROP COLUMN sort_order;
                 PRAGMA user_version=4;").unwrap();
@@ -780,6 +840,7 @@ mod tests {
                 VALUES('s','a','c',1000,'2026-11-21','t')", []).unwrap();
             c.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
                 VALUES('r','s','2026-11-21',400,'cash','t')", []).unwrap();
+            drop_settlement_for_old_schema_test(&c);
             c.execute_batch("DROP TABLE sale_receipt_attachments; PRAGMA user_version=5;").unwrap();
         }
         drop(db);
@@ -802,6 +863,7 @@ mod tests {
         {
             let c = db.conn.lock().unwrap();
             c.execute("INSERT INTO collectors(id,name,email,created_at,updated_at) VALUES('old','Mario Bianchi','m@example.org','t','t')", []).unwrap();
+            drop_settlement_for_old_schema_test(&c);
             c.execute_batch("DROP TABLE collector_images;
                 DROP INDEX IF EXISTS idx_collector_profile_photo;
                 ALTER TABLE collectors DROP COLUMN first_name;
