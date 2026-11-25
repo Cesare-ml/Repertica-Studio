@@ -88,12 +88,9 @@ pub(crate) fn upgrade(c:&mut Connection)->Result<()>{
     let v=version(&tx)?;
     if !(18..=20).contains(&v) { return Err("auction_archive_schema_invalid".into()); }
     let l=layout(&tx,v)?;
-    // A legacy v20 ledger must be validated before writing anything.
-    // v18 development fixtures can carry a complete newer schema; validate
-    // their ledger after setting the version within this same transaction.
-    if l.mail { validate_mail(&tx)?; }
-    if l.drafts { validate_drafts(&tx)?; }
-    if l.ledger && v==20 { crate::settlement_store::inspect_snapshot(&tx).map_err(str::to_owned)?; }
+    // Validate every present capability before writing, irrespective of the
+    // historical number. The layout gate separately constrains v19/v20/v21.
+    validate(&tx,l)?;
     if !l.mail { tx.execute_batch(MAIL_SQL).map_err(error)?; }
     if !l.drafts {
         tx.execute_batch(DRAFT_SQL).map_err(error)?;
@@ -140,7 +137,7 @@ mod tests {
         (scalar(c,"SELECT snapshot FROM auction_settlement_receipts"),scalar(c,"SELECT acknowledged_at FROM auction_settlement_receipts"))
     }
     #[test]
-    fn upgrades_four_real_layouts_without_rekeying_or_resetting_mail(){
+    fn upgrades_five_legacy_layouts_without_rekeying_or_resetting_mail(){
         for (old,mail,has_draft,has_ledger) in [(18,None,false,false),(19,Some(0_i64),false,false),(19,Some(1),false,false),(19,None,true,false),(20,None,true,true)] {
             let dir=tempfile::tempdir().unwrap();
             let (old_scope,raw,ack)={
@@ -198,8 +195,7 @@ mod tests {
         drop_ledger(&c);drop_mail(&c);
         let raw=pending(&c);let old_scope=scope(&c);
         c.pragma_update(None,"user_version",19).unwrap();
-        // Conflicting unrelated index on the would-be trigger name is detected
-        // before DDL. An orphan created with FK off tests failure AFTER DDL.
+        // An orphan created with FK off tests failure AFTER DDL.
         c.execute_batch("PRAGMA foreign_keys=OFF; INSERT INTO artwork_images(id,artwork_id,image_path,created_at) VALUES('x','missing','media/x.jpg','t'); PRAGMA foreign_keys=ON;").unwrap();
         assert!(upgrade(&mut c).is_err());
         assert_eq!(version(&c).unwrap(),19);
@@ -209,7 +205,7 @@ mod tests {
     #[test]
     fn application_backup_restore_preserves_mail_draft_and_ack(){
         let dir=tempfile::tempdir().unwrap();let destination=tempfile::tempdir().unwrap();
-        let db=db::open(dir.path().into()).unwrap();
+        let db=db::open(dir.path().join("archive")).unwrap();
         let (raw,old_scope,ack)={
             let mut c=db.conn.lock().unwrap();c.execute("UPDATE studio_settings SET mail_notifications=0",[]).unwrap();
             (pending(&c),scope(&c),legacy_ack(&mut c))

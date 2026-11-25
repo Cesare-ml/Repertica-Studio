@@ -98,8 +98,8 @@ pub(crate) fn resolve_selected(conn: &Connection, scope: &str, work: &str, subje
 // Historical bindings for deleted artworks are valid evidence; do not recreate
 // a deleted work, infer authorization, or replay any request after restoration.
 pub(crate) fn inspect_snapshot(conn: &Connection) -> Result<(), Error> {
-    let version:i64=conn.pragma_query_value(None,"user_version",|r|r.get(0)).map_err(db)?;
-    if !matches!(version,20|21){return Err("settlement_schema_unavailable")}
+    // The archive schema composition validates the version and complete table
+    // layout. This semantic validator works for any proven ledger capability.
     let scope:String=conn.query_row("SELECT scope FROM auction_archive_scope WHERE singleton=1",[],|r|r.get(0)).map_err(db)?;
     if !uuid::Uuid::parse_str(&scope).is_ok_and(|u|u.to_string()==scope){return Err("settlement_binding_mismatch")}
     // Explicit join checks orphaned rows even when a rehashed backup was
