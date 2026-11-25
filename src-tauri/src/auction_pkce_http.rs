@@ -639,7 +639,7 @@ mod tests {
 
     #[test]
     fn native_pkce_preparation_and_explicit_reconciliation_preserve_exact_bytes() {
-        use super::resource_http::NativeAuctionsHttp;
+        use super::resource_http::{NativeAuctionsHttp, NativePreviewSession};
         use rusqlite::{Connection,params};
         let (listener,addr)=listen();
         // Simulate the browser only at the injected opener boundary. The native
@@ -733,7 +733,30 @@ mod tests {
             assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"auction_draft_write_failed");
             assert_eq!(stored(&conn),(revision.clone(),raw.clone()));
             conn.execute_batch("DROP TRIGGER ignore_preview").unwrap();
-            let next=api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&revision,RESOURCE_BODY,||Ok(NOW)).await.unwrap();
+            // The orchestration owns the verified profile token and one-shot review.
+            let mut session = NativePreviewSession::new(api, token, NOW).unwrap();
+            assert_eq!(session.confirm_prepare(&mut conn,"unreviewed",||Ok(NOW)).await.unwrap_err(),"auction_review_required");
+            let review = session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).unwrap();
+            assert_eq!(review.public_body, RESOURCE_BODY);
+            assert_eq!(review.action, "prepare");
+            assert_eq!(stored(&conn),(revision.clone(),raw.clone()));
+            let projection = serde_json::to_value(&review).unwrap();
+            assert_eq!(projection.as_object().unwrap().len(),3);
+            assert!(projection.get("idempotencyKey").is_none());
+            // A confirmation of a different operation invalidates the review.
+            assert_eq!(session.confirm_reconcile(&mut conn,&review.confirmation_id,||Ok(NOW)).await.err().as_deref(),Some("auction_review_required"));
+            assert_eq!(session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap_err(),"auction_review_required");
+            let review = session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).unwrap();
+            session.cancel_review();
+            assert_eq!(session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap_err(),"auction_review_required");
+            let review = session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).unwrap();
+            let changed_revision=uuid::Uuid::new_v4().to_string();
+            conn.execute("UPDATE auction_drafts SET revision=?1 WHERE artwork_id='a'",[&changed_revision]).unwrap();
+            assert_eq!(session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap_err(),"auction_draft_conflict");
+            conn.execute("UPDATE auction_drafts SET revision=?1 WHERE artwork_id='a'",[&revision]).unwrap();
+            let review = session.review_new(&conn,"a",&scope,&revision,RESOURCE_BODY,NOW).unwrap();
+            let next=session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap();
+            assert_eq!(session.confirm_prepare(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap_err(),"auction_review_required");
             let (actual,record)=stored(&conn);
             assert_ne!(revision,next);
             assert_eq!(actual,next);
@@ -742,16 +765,22 @@ mod tests {
             assert_eq!(value["pending"]["artworkId"],"a");
             assert!(uuid::Uuid::parse_str(value["pending"]["idempotencyKey"].as_str().unwrap()).is_ok());
             assert!(value.get("receipt").is_none());
-            assert_eq!(api.prepare_reviewed_preview(&mut conn,&token,"a",&scope,&next,RESOURCE_BODY,||Ok(NOW)).await.unwrap_err(),"pending_preview_unresolved");
+            assert_eq!(session.review_new(&conn,"a",&scope,&next,RESOURCE_BODY,NOW).err().as_deref(),Some("pending_preview_unresolved"));
             assert_eq!(stored(&conn),(actual,record));
             key_tx.send(value["pending"]["idempotencyKey"].as_str().unwrap().to_owned()).unwrap();
-            let confirmed = api.reconcile_preview(&mut conn,&token,"a",&scope,&next,||Ok(NOW)).await.unwrap();
+            let review = session.review_pending(&conn,"a",&scope,&next,NOW).unwrap();
+            assert_eq!(review.public_body, RESOURCE_BODY);
+            assert_eq!(review.action, "reconcile");
+            assert_eq!(stored(&conn),(actual.clone(),record.clone()));
+            let confirmed = session.confirm_reconcile(&mut conn,&review.confirmation_id,||Ok(NOW)).await.unwrap();
+            assert_eq!(session.confirm_reconcile(&mut conn,&review.confirmation_id,||Ok(NOW)).await.err().as_deref(),Some("auction_review_required"));
             let (confirmed_revision, confirmed_record) = stored(&conn);
             assert_ne!(confirmed_revision, next);
             let saved: Value = serde_json::from_str(&confirmed_record).unwrap();
             assert_eq!(saved["pending"], value["pending"]);
             assert_eq!(saved["receipt"]["auctionId"], RESOURCE_ID);
-            assert_eq!(api.reconcile_preview(&mut conn,&token,"a",&scope,&confirmed_revision,||Ok(NOW)).await.unwrap(),confirmed);
+            assert_eq!(session.review_pending(&conn,"a",&scope,&confirmed_revision,NOW).err().as_deref(),Some("auction_already_confirmed"));
+            assert_eq!(confirmed.auction_id, RESOURCE_ID);
             assert_eq!(stored(&conn),(confirmed_revision,confirmed_record));
         });
         let listener=worker.join().unwrap();
