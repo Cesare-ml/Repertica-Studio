@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newAuctionDraft, preparePreview } from '../src/app/auction-preview.ts';
+import { newAuctionDraft, preparePreview , publicArtworkFrom } from '../src/app/auction-preview.ts';
 
 const now = Date.parse('2027-03-01T00:00:00.000Z');
 const key = 'preview-0123456789';
@@ -75,4 +75,19 @@ test('amounts are explicit positive integer cents within the beta bounds', () =>
 test('checks the encoded JSON size, not just the description character count', () => {
   assert.throws(() => prepare({ ...draft(), description: '\u0000'.repeat(1500) }), /payload_too_large/);
   assert.doesNotThrow(() => prepare({ ...draft(), description: '作品'.repeat(500) }));
+});
+
+test('the publication names the staged main image and only the public artwork details (Gestionale Opere)', () => {
+  const archive = { ...artwork, year: ' 2024 ', technique: 'Olio', support: 'Tela', width_cm: 30.456, height_cm: 40, depth_cm: null };
+  const details = publicArtworkFrom(archive);
+  assert.deepEqual(details, { year: 2024, technique: 'Olio', support: 'Tela', widthCm: 30.46, heightCm: 40, depthCm: null });
+  assert.deepEqual(publicArtworkFrom({ year: 'circa 1990', technique: 'x', support: '<b>', width_cm: -1 }),
+    { year: null, technique: null, support: null, widthCm: null, heightCm: null, depthCm: null });
+  const image = 'f'.repeat(64);
+  const body = JSON.parse(preparePreview(draft(), 'tenant-test', key, now, { mainImageId: image, artwork: details }).body);
+  assert.deepEqual(body.images, { main: image });
+  assert.deepEqual(body.artwork, { year: 2024, technique: 'Olio', support: 'Tela', widthCm: 30.46, heightCm: 40 });
+  assert.doesNotMatch(JSON.stringify(body), /private|media\/|collector|fixed_price/);
+  assert.throws(() => preparePreview(draft(), 'tenant-test', key, now, { mainImageId: 'not-an-id', artwork: null }), /image_required/);
+  assert.equal('artwork' in JSON.parse(preparePreview(draft(), 'tenant-test', key, now, { mainImageId: image, artwork: null }).body), false);
 });

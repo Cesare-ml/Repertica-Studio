@@ -173,7 +173,8 @@ pub fn run() {
             auction_online::auction_connection_status,
             auction_online::auction_sign_in,
             auction_online::auction_sign_out,
-            auction_online::auction_api_request
+            auction_online::auction_api_request,
+            auction_online::auction_upload_artwork_image
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");

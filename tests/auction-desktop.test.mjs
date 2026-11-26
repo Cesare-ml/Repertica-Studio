@@ -128,7 +128,7 @@ test('review lists only the public fields and reports validation codes', () => {
   const rows = reviewRows(d, now);
   assert.deepEqual(rows.map(r => r.field), ['title', 'slug', 'description', 'startsAt', 'endsAt',
     'startingAmount', 'minimumIncrementAmount', 'currency', 'italyShippingCost', 'bankBeneficiary', 'bankIban', 'bankBicSwift',
-    'bankNameAndAddress']);
+    'bankNameAndAddress', 'mainImage']);
   assert.equal(rows.find(r => r.field === 'startsAt').value, '2027-03-04T10:00:00.000Z');
   assert.throws(() => reviewRows({ ...d, endsAt: d.startsAt }, now), /invalid_schedule/);
   assert.throws(() => reviewRows({ ...d, startingAmount: null }, now), /invalid_amount/);

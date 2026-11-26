@@ -51,6 +51,17 @@ export function createNativeConnection(invoke: Invoke) {
     async signOut(): Promise<ConnectionStatus> {
       try { return parseStatus(await invoke('auction_sign_out')); } catch { return OFFLINE; }
     },
+    /** Uploads the main image of an archive artwork, re-encoded natively without metadata (staged on the server
+     * for 24 hours). A native error (string) is thrown as is: no image, invalid image, network. */
+    async uploadArtworkImage(artworkId: string): Promise<{ status: number; imageId: string | null; error: string | null }> {
+      const result = await invoke('auction_upload_artwork_image', { artworkId }) as { status?: unknown; body?: unknown } | null;
+      if (!result || typeof result.status !== 'number' || !Number.isInteger(result.status)) throw new Error('invalid_response');
+      const body = result.body !== null && typeof result.body === 'object' && !Array.isArray(result.body) ? result.body as Record<string, unknown> : {};
+      const id = body['imageId'];
+      const imageId = result.status === 201 && typeof id === 'string' && /^[a-f0-9]{64}$/.test(id) ? id : null;
+      const code = body['error'];
+      return { status: result.status, imageId, error: typeof code === 'string' && /^[a-z_]{3,64}$/.test(code) ? code : null };
+    },
     /** HttpPort for createArtistV1Transport. A native error means the answer is lost or never sent. */
     port: (async (request: HttpRequest): Promise<HttpResponse> => {
       const result = await invoke('auction_api_request', {

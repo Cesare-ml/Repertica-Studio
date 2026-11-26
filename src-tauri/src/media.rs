@@ -373,7 +373,7 @@ fn regular_media_path(directory: &Path, relative: &str) -> Result<std::path::Pat
     Ok(full)
 }
 
-fn read_media_file(directory: &Path, relative: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn read_media_file(directory: &Path, relative: &str) -> Result<Vec<u8>, String> {
     fs::read(regular_media_path(directory, relative)?).map_err(err)
 }
 

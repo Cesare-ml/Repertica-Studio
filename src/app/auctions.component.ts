@@ -9,7 +9,7 @@ import type { PendingPublication } from './auction-publications';
 import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, loadPaymentDefaults, localInputToUtc, removeDraft, saveDraft,
   savePaymentDefaults, slugify,
   utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
-import { newAuctionDraft, reviewRows, type AuctionDraft, type ReviewRow } from './auction-preview';
+import { newAuctionDraft, publicArtworkFrom, reviewRows, type AuctionDraft, type ReviewRow } from './auction-preview';
 import type { AppLanguage } from './i18n';
 import { translate } from './i18n';
 import type { Artwork } from './models';
@@ -24,6 +24,17 @@ const ERRORS: Record<string, string> = {
   invalid_amount: 'Inserisci importi validi per prezzo di partenza e rilancio minimo',
   payload_too_large: 'I dati sono troppo lunghi',
   invalid_shipping: 'Indica le spese di spedizione in Italia (anche 0)',
+  artwork_image_missing: 'Serve la fotografia principale dell’opera: aggiungila nell’archivio prima di pubblicare',
+  artwork_image_invalid: 'La fotografia principale dell’opera non è leggibile',
+  artwork_image_too_large: 'La fotografia principale è troppo grande anche dopo la riduzione',
+  image_upload_failed: 'Caricamento della fotografia non riuscito: riprova',
+  image_capacity_reached: 'Troppe fotografie in attesa di pubblicazione: riprova più tardi',
+  unsupported_image_format: 'Formato della fotografia non supportato',
+  invalid_image: 'La fotografia non è valida',
+  image_required: 'Serve la fotografia principale dell’opera',
+  image_not_found: 'La fotografia caricata è scaduta: pubblica di nuovo',
+  sign_in_required: 'Sessione scaduta: accedi di nuovo.',
+  network_unavailable: 'Server non raggiungibile. Controlla la connessione e riprova.',
   invalid_iban: 'IBAN non valido: controlla le cifre',
   invalid_bic: 'BIC/SWIFT non valido (8 o 11 caratteri)',
   invalid_terms: 'Completa beneficiario e banca per il bonifico del vincitore',
@@ -157,7 +168,7 @@ const REFUSALS: Record<string, string> = {
     <div *ngIf="reviewed" class="auctions-review" role="region" [attr.aria-label]="tr('Dati da inviare')">
       <h4>{{ tr('Dati che verrebbero inviati') }}</h4>
       <table>
-        <tbody><tr *ngFor="let row of rows"><th scope="row">{{ fieldLabel(row.field) }}</th><td>{{ row.value }}</td></tr></tbody>
+        <tbody><tr *ngFor="let row of rows"><th scope="row">{{ fieldLabel(row.field) }}</th><td>{{ row.field === 'mainImage' ? tr('Dall’archivio, ridotta a 2400 px e senza metadati (EXIF, GPS)') : row.value }}</td></tr></tbody>
       </table>
       <h4>{{ tr('Non vengono inviati') }}</h4>
       <ul><li *ngFor="let item of notSent">{{ tr(item) }}</li></ul>
@@ -318,7 +329,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
   review(): void {
     const draft = this.collect();
     if (!draft) return;
-    try { this.rows = reviewRows(draft); this.reviewed = true; this.error = ''; }
+    const artwork = this.artworks.find(a => a.id === draft.artworkId);
+    if (!artwork?.image_path) { this.reviewed = false; this.error = this.tr(ERRORS['artwork_image_missing']); return; }
+    try { this.rows = reviewRows(draft, Date.now(), publicArtworkFrom(artwork)); this.reviewed = true; this.error = ''; }
     catch (e) {
       this.reviewed = false;
       const code = e instanceof Error ? e.message : '';
@@ -352,11 +365,13 @@ export class AuctionsComponent implements OnInit, OnChanges {
     if (!(await confirmed(this.tr('Pubblicare l’asta su Repertica Auctions? Verranno inviati solo i dati mostrati nella revisione.')))) return;
     this.publishing = true; this.publishMessage = this.tr('Invio in corso…');
     try {
-      const { operation, needsSignIn } = await this.online.publish(draft, draft.title.trim());
+      const { operation, needsSignIn } = await this.online.publish(draft, draft.title.trim(),
+        this.artworks.find(a => a.id === draft.artworkId) ?? null);
       if (operation.state === 'confirmed') await this.published(draft.artworkId);
       this.publishMessage = needsSignIn ? this.tr('Sessione scaduta: accedi di nuovo.') : this.outcomeMessage(operation.state, operation.reason);
     } catch (e) {
-      const code = e instanceof Error ? e.message : '';
+      // Native errors arrive as strings (no image, network), service errors as Error codes.
+      const code = typeof e === 'string' ? e : e instanceof Error ? e.message : '';
       this.publishMessage = this.tr(ERRORS[code] ?? 'Pubblicazione non avviata.');
     } finally { this.publishing = false; }
   }
@@ -389,7 +404,8 @@ export class AuctionsComponent implements OnInit, OnChanges {
       startsAt: 'Inizio (UTC)', endsAt: 'Fine (UTC)', startingAmount: 'Prezzo di partenza (centesimi)',
       minimumIncrementAmount: 'Rilancio minimo (centesimi)', currency: 'Valuta', reserveAmount: 'Prezzo di riserva (centesimi)',
       italyShippingCost: 'Spedizione in Italia (centesimi)', bankBeneficiary: 'Beneficiario', bankIban: 'IBAN', bankBicSwift: 'BIC/SWIFT',
-      bankNameAndAddress: 'Banca e indirizzo' };
+      bankNameAndAddress: 'Banca e indirizzo', mainImage: 'Fotografia principale', year: 'Anno', technique: 'Tecnica',
+      support: 'Supporto', dimensions: 'Misure' };
     return this.tr(labels[field] ?? field);
   }
 }

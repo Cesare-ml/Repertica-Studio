@@ -18,6 +18,33 @@ export interface AuctionDraft {
   bankNameAndAddress?: string;
 }
 
+/** Public artwork details shown on the auction page (Gestionale Opere), taken from the archive. */
+export interface PublicArtwork {
+  readonly year: number | null;
+  readonly technique: string | null;
+  readonly support: string | null;
+  readonly widthCm: number | null;
+  readonly heightCm: number | null;
+  readonly depthCm: number | null;
+}
+
+/** Only these archive fields become public; text that the server would refuse is left out. */
+export function publicArtworkFrom(artwork: { year?: string | null; technique?: string | null; support?: string | null;
+  width_cm?: number | null; height_cm?: number | null; depth_cm?: number | null } | null | undefined): PublicArtwork | null {
+  if (!artwork) return null;
+  const text = (v: string | null | undefined) => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    return t.length >= 2 && t.length <= 120 && !/[\u0000-\u001f\u007f<>]/.test(t) ? t : null;
+  };
+  const cm = (v: number | null | undefined) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 100_000 ? Math.round(v * 100) / 100 : null;
+  const year = typeof artwork.year === 'string' && /^\d{4}$/.test(artwork.year.trim()) ? Number(artwork.year.trim()) : null;
+  return { year: year !== null && year >= 1000 && year <= 2200 ? year : null, technique: text(artwork.technique),
+    support: text(artwork.support), widthCm: cm(artwork.width_cm), heightCm: cm(artwork.height_cm), depthCm: cm(artwork.depth_cm) };
+}
+
+/** What goes with the publication besides the draft: the staged main image and the public artwork details. */
+export interface PublicationMedia { readonly mainImageId: string; readonly artwork: PublicArtwork | null }
+
 export interface PreparedPreview {
   readonly artworkId: string;
   /** Server auction id, derived from the idempotency key so that every retry names the same auction. */
@@ -87,7 +114,7 @@ export function paymentTerms(draft: AuctionDraft) {
  * A changed payload is a new attempt, not a retry. Never queue automatic publication.
  */
 export function preparePreview(draft: AuctionDraft, tenantId: string, idempotencyKey: string,
-  now: number = Date.now()): PreparedPreview {
+  now: number = Date.now(), media?: PublicationMedia): PreparedPreview {
   if (!draft.artworkId) throw new Error('artwork_not_selected');
   if (!/^[A-Za-z0-9_-]{3,80}$/.test(tenantId)) throw new Error('invalid_tenant');
   if (!/^[A-Za-z0-9_-]{16,96}$/.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
@@ -101,6 +128,8 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   const startingAmount = cents(draft.startingAmount);
   const reserve = draft.reserveAmount === null || draft.reserveAmount === undefined ? null : cents(draft.reserveAmount);
   const terms = paymentTerms(draft);
+  if (media && !/^[a-f0-9]{64}$/.test(media.mainImageId)) throw new Error('image_required');
+  const artwork = media?.artwork ? Object.fromEntries(Object.entries(media.artwork).filter(([, v]) => v !== null)) : null;
   const auctionId = `auc-${idempotencyKey}`;
   // Explicit allowlist: never spread the draft or the artwork into a network payload.
   // In this endpoint the server expects epoch milliseconds (UTC) and cents; currency is always EUR.
@@ -110,6 +139,7 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
       startingAmount, incrementAmount: cents(draft.minimumIncrementAmount), ...(reserve === null ? {} : { reserveAmount: reserve }) },
     details: { slug: draft.slug, title: draft.title.trim(), description: draft.description.trim() },
     terms,
+    ...(media ? { images: { main: media.mainImageId }, ...(artwork && Object.keys(artwork).length ? { artwork } : {}) } : {}),
   });
   if (new TextEncoder().encode(body).length > 8192) throw new Error('payload_too_large');
   return Object.freeze({ artworkId: draft.artworkId, auctionId, idempotencyKey, body });
@@ -122,7 +152,7 @@ export interface ReviewRow { readonly field: string; readonly value: string }
  * The tenant is a placeholder (assigned by the server after sign-in) and is not listed.
  * Nothing is persisted or transmitted. Throws the validation error code of preparePreview.
  */
-export function reviewRows(draft: AuctionDraft, now: number = Date.now()): ReviewRow[] {
+export function reviewRows(draft: AuctionDraft, now: number = Date.now(), artwork: PublicArtwork | null = null): ReviewRow[] {
   const prepared = preparePreview(draft, 'review-offline', 'review-offline-0123456789', now);
   const body = JSON.parse(prepared.body) as { auction: Record<string, number | string>; details: Record<string, string>;
     terms: { italyShippingCostAmount: number; bankTransfer: Record<string, string> } };
@@ -142,5 +172,12 @@ export function reviewRows(draft: AuctionDraft, now: number = Date.now()): Revie
     { field: 'bankIban', value: body.terms.bankTransfer['iban'] },
     { field: 'bankBicSwift', value: body.terms.bankTransfer['bicSwift'] },
     { field: 'bankNameAndAddress', value: body.terms.bankTransfer['bankNameAndAddress'] },
+    // Gestionale Opere: the main image is required; it is re-encoded on this computer when publishing.
+    { field: 'mainImage', value: 'main' },
+    ...(artwork?.year ? [{ field: 'year', value: String(artwork.year) }] : []),
+    ...(artwork?.technique ? [{ field: 'technique', value: artwork.technique }] : []),
+    ...(artwork?.support ? [{ field: 'support', value: artwork.support }] : []),
+    ...(artwork && (artwork.widthCm || artwork.heightCm || artwork.depthCm)
+      ? [{ field: 'dimensions', value: [artwork.widthCm, artwork.heightCm, artwork.depthCm].filter(v => v !== null).join(' × ') + ' cm' }] : []),
   ];
 }

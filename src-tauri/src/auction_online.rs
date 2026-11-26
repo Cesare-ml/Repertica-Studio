@@ -31,6 +31,9 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE: usize = 262_144;
 const MAX_BODY: usize = 8_192;
 const MAX_TOKEN_SECONDS: u64 = 900;
+/// Artwork image sent for an auction: re-encoded here (JPEG, longest side 2400 px, no metadata).
+const IMAGE_MAX_SIDE: u32 = 2400;
+const MAX_IMAGE_UPLOAD: usize = 10 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Endpoints {
@@ -501,6 +504,47 @@ pub(crate) async fn send_api(client: &reqwest::Client, endpoints: &Endpoints, be
     Ok(ApiResponse { status, body })
 }
 
+/// The artwork's main image from the local archive, re-encoded on this computer so that only pixels leave it:
+/// JPEG, longest side at most 2400 px, without EXIF/GPS or other metadata. The original stays in the archive.
+pub(crate) fn artwork_image_for_upload(db: &crate::db::Database, artwork_id: &str) -> Result<Vec<u8>, String> {
+    if artwork_id.is_empty() || artwork_id.len() > 96 || !artwork_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return Err("artwork_not_found".into());
+    }
+    let relative: Option<String> = {
+        let conn = db.conn.lock().map_err(|_| "archive_unavailable".to_string())?;
+        match conn.query_row("SELECT image_path FROM artworks WHERE id = ?1", [artwork_id], |row| row.get::<_, Option<String>>(0)) {
+            Ok(path) => path,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Err("artwork_not_found".into()),
+            Err(_) => return Err("archive_unavailable".into()),
+        }
+    };
+    let relative = relative.filter(|p| !p.is_empty()).ok_or_else(|| "artwork_image_missing".to_string())?;
+    let original = crate::media::read_media_file(&db.directory, &relative).map_err(|_| "artwork_image_missing".to_string())?;
+    let encoded = crate::imaging::export(&original, false, 90, Some(IMAGE_MAX_SIDE), Some(IMAGE_MAX_SIDE))
+        .map_err(|_| "artwork_image_invalid".to_string())?;
+    if encoded.bytes.len() > MAX_IMAGE_UPLOAD {
+        return Err("artwork_image_too_large".into());
+    }
+    Ok(encoded.bytes)
+}
+
+/// Uploads one image to the artist's private staging area (POST /api/artist/images).
+pub(crate) async fn send_image(client: &reqwest::Client, endpoints: &Endpoints, bearer: &str, jpeg: Vec<u8>) -> Result<ApiResponse, String> {
+    if jpeg.is_empty() || jpeg.len() > MAX_IMAGE_UPLOAD {
+        return Err("artwork_image_too_large".into());
+    }
+    let response = client.post(format!("{}/api/artist/images", endpoints.auctions))
+        .header("Content-Type", "image/jpeg")
+        .header("Accept", "application/json")
+        .header("Authorization", format!("Bearer {bearer}"))
+        .body(jpeg)
+        .send().await.map_err(|_| "network_unavailable".to_string())?;
+    let status = response.status().as_u16();
+    let bytes = bounded_body(response).await?;
+    let body = if bytes.is_empty() { serde_json::Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null) };
+    Ok(ApiResponse { status, body })
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // Commands
 
@@ -556,6 +600,23 @@ pub async fn auction_sign_in(session: tauri::State<'_, AuctionSession>) -> Resul
     let endpoints = Endpoints::current().ok_or_else(|| "auctions_not_available".to_string())?;
     sign_in_flow(&session, &endpoints, &open_login, LOGIN_TIMEOUT).await?;
     Ok(status_of(&session))
+}
+
+/// Uploads the main image of one archive artwork for an auction; the answer carries the staged image id.
+#[tauri::command]
+pub async fn auction_upload_artwork_image(session: tauri::State<'_, AuctionSession>, db: tauri::State<'_, crate::db::Database>,
+    artwork_id: String) -> Result<ApiResponse, String> {
+    let endpoints = Endpoints::current().ok_or_else(|| "auctions_not_available".to_string())?;
+    let Some(bearer) = session.bearer() else {
+        return Ok(ApiResponse { status: 401, body: serde_json::json!({ "error": "sign_in_required" }) });
+    };
+    let jpeg = artwork_image_for_upload(&db, &artwork_id)?;
+    let client = http_client(&endpoints)?;
+    let response = send_image(&client, &endpoints, &bearer, jpeg).await?;
+    if response.status == 401 {
+        session.forget();
+    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -915,5 +976,71 @@ mod tests {
         });
         closer.join().unwrap();
         assert_eq!(result.unwrap_err(), "network_unavailable");
+    }
+    #[test]
+    fn artwork_image_is_reencoded_locally_without_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("archive")).unwrap();
+        let picture = image::RgbImage::from_pixel(3000, 1500, image::Rgb([120, 80, 40]));
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90).encode_image(&picture).unwrap();
+        // An EXIF segment right after SOI, as cameras and phones write it (here with a fake GPS marker).
+        let exif: &[u8] = b"Exif\0\0GPS-SECRET-COORDINATES";
+        let mut original = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        original.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+        original.extend_from_slice(exif);
+        original.extend_from_slice(&jpeg[2..]);
+        std::fs::write(dir.path().join("archive").join("media").join("opera.jpg"), &original).unwrap();
+        db.conn.lock().unwrap().execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+            VALUES('art-1','A-1','Opera','media/opera.jpg','t','t')", []).unwrap();
+        let sent = artwork_image_for_upload(&db, "art-1").unwrap();
+        let decoded = image::load_from_memory(&sent).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (2400, 1200), "longest side 2400 px");
+        assert!(!sent.windows(10).any(|w| w == b"GPS-SECRET"), "no metadata leaves the computer");
+        assert_eq!(std::fs::read(dir.path().join("archive").join("media").join("opera.jpg")).unwrap(), original, "the original is untouched");
+        assert_eq!(artwork_image_for_upload(&db, "missing").unwrap_err(), "artwork_not_found");
+        assert_eq!(artwork_image_for_upload(&db, "../art-1").unwrap_err(), "artwork_not_found");
+        db.conn.lock().unwrap().execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+            VALUES('art-2','A-2','Senza foto','t','t')", []).unwrap();
+        assert_eq!(artwork_image_for_upload(&db, "art-2").unwrap_err(), "artwork_image_missing");
+    }
+
+    #[test]
+    fn image_upload_posts_the_jpeg_bytes_with_the_bearer() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let read = stream.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..read]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                    let length = head.lines().find_map(|l| l.strip_prefix("content-length: ").map(|v| v.trim().parse::<usize>().unwrap())).unwrap_or(0);
+                    if request.len() >= end + 4 + length { break; }
+                }
+                if read == 0 { break; }
+            }
+            let body = format!("{{\"imageId\":\"{}\",\"width\":4,\"height\":3}}", "a".repeat(64));
+            stream.write_all(format!("HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
+            request
+        });
+        let endpoints = Endpoints { studio: format!("http://127.0.0.1:{port}"), auctions: format!("http://127.0.0.1:{port}") };
+        let client = http_client(&endpoints).unwrap();
+        let jpeg = vec![0xFF, 0xD8, 0xFF, 0x00, 0x01, 0x02, 0xFF, 0xD9];
+        let response = tauri::async_runtime::block_on(send_image(&client, &endpoints, "aaa.bbb.ccc", jpeg.clone())).unwrap();
+        assert_eq!(response.status, 201);
+        assert_eq!(response.body["imageId"], "a".repeat(64));
+        let request = server.join().unwrap();
+        let end = request.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let head = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+        assert!(head.starts_with("post /api/artist/images http/1.1"));
+        assert!(head.contains("content-type: image/jpeg"));
+        assert!(head.contains("authorization: bearer aaa.bbb.ccc"));
+        assert_eq!(&request[end + 4..], &jpeg[..]);
+        assert_eq!(tauri::async_runtime::block_on(send_image(&client, &endpoints, "aaa.bbb.ccc", Vec::new())).unwrap_err(), "artwork_image_too_large");
     }
 }

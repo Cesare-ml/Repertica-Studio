@@ -9,7 +9,7 @@ import { parseTenants, type ArtistTenant } from './auction-contract';
 import { createArtistV1Transport } from './auction-http-transport';
 import { createAuctionManager, type AuctionManager, type OperationOutcome } from './auction-manager';
 import { createNativeConnection, type ConnectionStatus, type NativeConnection } from './auction-native';
-import { preparePreview, type AuctionDraft } from './auction-preview';
+import { preparePreview, publicArtworkFrom, type AuctionDraft } from './auction-preview';
 import { dropPublication, loadPublications, newIdempotencyKey, recordPublication, type KeyValueStore,
   type PendingPublication } from './auction-publications';
 
@@ -69,10 +69,16 @@ export class AuctionOnlineService {
    * Freezes the reviewed draft into the exact request, journals it, then sends it. The journal entry is kept
    * until the server list shows the auction, so a later retry (even after a restart) reuses key and body.
    */
-  async publish(draft: AuctionDraft, title: string): Promise<OperationOutcome> {
+  async publish(draft: AuctionDraft, title: string, artwork: Parameters<typeof publicArtworkFrom>[0] = null): Promise<OperationOutcome> {
     const tenantId = this.tenantId;
     if (!this.canPublish || !tenantId) throw new Error('tenant_not_selected');
-    const prepared = preparePreview(draft, tenantId, newIdempotencyKey());
+    // Gestionale Opere: a main image is required. It is uploaded first (re-encoded natively, staged 24 hours);
+    // the publication then names it, and a retry of the same publication reuses the same request.
+    const upload = await this.native.uploadArtworkImage(draft.artworkId);
+    if (upload.status === 401) { await this.refreshStatus(); throw new Error('sign_in_required'); }
+    if (!upload.imageId) throw new Error(upload.error ?? 'image_upload_failed');
+    const prepared = preparePreview(draft, tenantId, newIdempotencyKey(), Date.now(),
+      { mainImageId: upload.imageId, artwork: publicArtworkFrom(artwork) });
     return this.send({ artworkId: draft.artworkId, tenantId, title, prepared, operation: null });
   }
 

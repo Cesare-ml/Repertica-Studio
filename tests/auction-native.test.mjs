@@ -87,3 +87,19 @@ test('unconfirmed publications survive a restart with the same key and body, and
   store.setItem('repertica-auction-publications-v1', 'not json');
   assert.deepEqual(loadPublications(store), []);
 });
+
+test('the main image is uploaded by the native side; only a staged id comes back', async () => {
+  const calls = [];
+  const answers = [
+    { status: 201, body: { imageId: 'c'.repeat(64), width: 2400, height: 1600 } },
+    { status: 400, body: { error: 'invalid_image' } },
+    { status: 201, body: { imageId: 'not-an-id' } },
+  ];
+  const connection = createNativeConnection(async (command, args) => { calls.push([command, args]); return answers.shift(); });
+  assert.deepEqual(await connection.uploadArtworkImage('art-1'), { status: 201, imageId: 'c'.repeat(64), error: null });
+  assert.deepEqual(calls[0], ['auction_upload_artwork_image', { artworkId: 'art-1' }], 'the webview never handles the image bytes or the token');
+  assert.deepEqual(await connection.uploadArtworkImage('art-1'), { status: 400, imageId: null, error: 'invalid_image' });
+  assert.equal((await connection.uploadArtworkImage('art-1')).imageId, null, 'a malformed id is never used');
+  const failing = createNativeConnection(async () => { throw 'artwork_image_missing'; });
+  await assert.rejects(failing.uploadArtworkImage('art-2'), error => error === 'artwork_image_missing');
+});
