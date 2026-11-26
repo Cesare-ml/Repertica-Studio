@@ -56,7 +56,10 @@ export function createArtistV1Transport(port: HttpPort, tenantId: () => string |
       if (!KEY.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
       const response = answered(await port({ method: 'POST', path: '/api/artist/publications',
         headers: { ...json, 'Idempotency-Key': idempotencyKey }, body }));
-      return { status: response.status };
+      // A refusal carries the server's code (for example public_details_exist), shown to the artist.
+      const code = response.status >= 400 && response.body !== null && typeof response.body === 'object' && !Array.isArray(response.body)
+        ? (response.body as Record<string, unknown>)['error'] : null;
+      return { status: response.status, error: typeof code === 'string' && /^[a-z][a-z0-9_]{2,63}$/.test(code) ? code : null };
     },
 
     /** All pages of the selected profile's auctions, as the manager expects: { items }. */

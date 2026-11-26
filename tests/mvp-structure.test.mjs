@@ -20,6 +20,8 @@ test('no cloud or Sites dependency in runtime', () => {
   assert.match(online, /const STUDIO_ORIGIN: &str = "https:\/\/studio\.repertica\.com";/);
   assert.match(online, /const AUCTIONS_ORIGIN: &str = "https:\/\/auctions\.repertica\.com";/);
   assert.match(online, /if !cfg!\(debug_assertions\) \{\s*return None;/, 'development origins exist only in debug builds');
+  assert.match(online, /if cfg!\(debug_assertions\) \{\s*if let Some\(file\) = std::env::var_os\("REPERTICA_DEV_LOGIN_URL_FILE"\)/,
+    'the test-browser hand-off of the login page exists only in debug builds');
   for (const file of readdirSync(new URL('../src/app/', import.meta.url)).filter(file => file.endsWith('.ts'))) {
     assert.doesNotMatch(get('src/app/' + file), /\bfetch\(|XMLHttpRequest|new WebSocket/, file);
   }

@@ -9,7 +9,8 @@
 //! written to disk, and it is forgotten on sign-out, expiry, a 401 answer or restart. Nothing is reachable
 //! until `ONLINE_ENABLED` is switched on (production provider and service deployed) or, in debug builds
 //! only, loopback development origins are configured (`REPERTICA_DEV_STUDIO_ORIGIN`,
-//! `REPERTICA_DEV_AUCTIONS_ORIGIN`).
+//! `REPERTICA_DEV_AUCTIONS_ORIGIN`). Debug builds can also hand the login page to a test browser through
+//! `REPERTICA_DEV_LOGIN_URL_FILE` instead of the system browser (manual end-to-end runs).
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -215,6 +216,17 @@ fn open_browser(url: &str) -> Result<(), String> {
         c
     };
     command.spawn().map(|_| ()).map_err(|_| "browser_unavailable".to_string())
+}
+
+/// The system browser. Debug builds only: when `REPERTICA_DEV_LOGIN_URL_FILE` names a file, the login page
+/// address is written there for a test browser instead (it carries only the public PKCE challenge and state).
+fn open_login(url: &str) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        if let Some(file) = std::env::var_os("REPERTICA_DEV_LOGIN_URL_FILE").filter(|v| !v.is_empty()) {
+            return std::fs::write(file, url).map_err(|_| "browser_unavailable".to_string());
+        }
+    }
+    open_browser(url)
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -542,7 +554,7 @@ pub(crate) async fn sign_in_flow(session: &AuctionSession, endpoints: &Endpoints
 #[tauri::command]
 pub async fn auction_sign_in(session: tauri::State<'_, AuctionSession>) -> Result<ConnectionStatus, String> {
     let endpoints = Endpoints::current().ok_or_else(|| "auctions_not_available".to_string())?;
-    sign_in_flow(&session, &endpoints, &open_browser, LOGIN_TIMEOUT).await?;
+    sign_in_flow(&session, &endpoints, &open_login, LOGIN_TIMEOUT).await?;
     Ok(status_of(&session))
 }
 

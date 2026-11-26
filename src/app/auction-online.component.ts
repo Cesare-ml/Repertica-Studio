@@ -3,6 +3,7 @@ import { Component, Input, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { leadingConsistency, type AuctionBid, type AuctionState, type AuctionSummary } from './auction-contract';
 import { AuctionOnlineService } from './auction-online.service';
+import { confirmed } from './confirm-dialog';
 import type { Operation } from './auction-operations';
 import { newIdempotencyKey } from './auction-publications';
 import type { AppLanguage } from './i18n';
@@ -71,7 +72,7 @@ const ERROR_LABELS: Record<string, string> = {
       <tbody><tr *ngFor="let a of auctions" [class.selected]="a.auctionId === selected?.auctionId">
         <td><strong>{{ a.title }}</strong></td><td>{{ tr(stateLabel(a.state)) }}</td>
         <td>{{ a.currentAmount === null ? tr('Nessuna offerta') : euro(a.currentAmount) }}</td><td>{{ a.bidCount }}</td>
-        <td>{{ a.endsAt | date:'short' }}</td>
+        <td>{{ when(a.endsAt, 'short') }}</td>
         <td><button type="button" (click)="open(a)" [attr.aria-label]="tr('Gestisci') + ': ' + a.title">{{ tr('Gestisci') }}</button></td>
       </tr></tbody>
     </table>
@@ -84,9 +85,9 @@ const ERROR_LABELS: Record<string, string> = {
         <div><dt>{{ tr('Offerta guida') }}</dt><dd>{{ a.currentAmount === null ? tr('Nessuna offerta') : euro(a.currentAmount) }}</dd></div>
         <div *ngIf="a.state === 'upcoming' || a.state === 'live'"><dt>{{ tr('Prossima offerta minima') }}</dt><dd>{{ euro(a.minimumNextBidAmount) }}</dd></div>
         <div><dt>{{ tr('Prezzo di riserva') }}</dt><dd>{{ a.reserveAmount === null ? tr('Nessuno') : euro(a.reserveAmount) + ' · ' + tr(a.reserveMet ? 'raggiunto' : 'non raggiunto') }}</dd></div>
-        <div><dt>{{ tr('Inizio') }}</dt><dd>{{ a.startsAt | date:'medium' }} <small>{{ timeZone }} · UTC {{ a.startsAt.slice(0, 16).replace('T', ' ') }}</small></dd></div>
-        <div><dt>{{ tr('Chiusura') }}</dt><dd>{{ a.endsAt | date:'medium' }} <small>{{ timeZone }} · UTC {{ a.endsAt.slice(0, 16).replace('T', ' ') }}</small></dd></div>
-        <div *ngIf="a.maxEndsAt !== a.endsAt"><dt>{{ tr('Chiusura massima con proroghe') }}</dt><dd>{{ a.maxEndsAt | date:'medium' }}</dd></div>
+        <div><dt>{{ tr('Inizio') }}</dt><dd>{{ when(a.startsAt, 'medium') }} <small>{{ timeZone }} · UTC {{ a.startsAt.slice(0, 16).replace('T', ' ') }}</small></dd></div>
+        <div><dt>{{ tr('Chiusura') }}</dt><dd>{{ when(a.endsAt, 'medium') }} <small>{{ timeZone }} · UTC {{ a.endsAt.slice(0, 16).replace('T', ' ') }}</small></dd></div>
+        <div *ngIf="a.maxEndsAt !== a.endsAt"><dt>{{ tr('Chiusura massima con proroghe') }}</dt><dd>{{ when(a.maxEndsAt, 'medium') }}</dd></div>
         <div><dt>{{ tr('Offerte valide') }}</dt><dd>{{ a.bidCount }}<span *ngIf="a.cancelledBidCount"> · {{ a.cancelledBidCount }} {{ tr('annullate') }}</span></dd></div>
         <div *ngIf="a.winningAmount !== null"><dt>{{ tr('Offerta vincente') }}</dt><dd>{{ euro(a.winningAmount) }}</dd></div>
       </dl>
@@ -100,10 +101,10 @@ const ERROR_LABELS: Record<string, string> = {
         <caption class="sr-only">{{ tr('Offerte ricevute, dalla prima all’ultima') }}</caption>
         <thead><tr><th>{{ tr('Ora') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Offerente') }}</th><th>{{ tr('Email') }}</th><th>{{ tr('Stato') }}</th><th><span class="sr-only">{{ tr('Azione') }}</span></th></tr></thead>
         <tbody><tr *ngFor="let b of bids" [class.cancelled]="b.state === 'cancelled'">
-          <td>{{ b.placedAt | date:'medium' }}</td><td class="amount">{{ euro(b.amount) }}</td><td>{{ b.bidderLabel }}</td>
+          <td>{{ when(b.placedAt, 'medium') }}</td><td class="amount">{{ euro(b.amount) }}</td><td>{{ b.bidderLabel }}</td>
           <td>{{ b.bidderEmail ?? tr('non disponibile') }}</td>
           <td>{{ b.state === 'cancelled' ? tr('Annullata') : (b.isLeading ? tr('Guida') : tr('Valida')) }}
-            <small *ngIf="b.state === 'cancelled'">{{ b.cancelledAt | date:'short' }} · {{ b.cancelReason }}</small></td>
+            <small *ngIf="b.state === 'cancelled'">{{ when(b.cancelledAt, 'short') }} · {{ b.cancelReason }}</small></td>
           <td><button type="button" *ngIf="canCancel(b)" (click)="askCancel(b)"
             [attr.aria-label]="tr('Annulla offerta') + ': ' + euro(b.amount) + ' ' + b.bidderLabel">{{ tr('Annulla offerta') }}</button></td>
         </tr></tbody>
@@ -138,6 +139,7 @@ const ERROR_LABELS: Record<string, string> = {
 .online-table{border-collapse:collapse;font-size:13px;width:100%}
 .online-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#4b5d52;padding:6px;border-bottom:1px solid #dfe5e1}
 .online-table td{padding:6px;border-bottom:1px solid #edf0ee;vertical-align:top}
+.online-table td:first-child,.online-table td.amount,.online-table td button{white-space:nowrap}
 .online-table tr.selected td{background:#f4f7f5}
 .online-table tr.cancelled td{color:#8a8f8d}.online-table tr.cancelled td.amount{text-decoration:line-through}
 .online-table small{display:block;color:#657b6e}
@@ -147,8 +149,12 @@ const ERROR_LABELS: Record<string, string> = {
 .online-detail dd small{display:block;color:#657b6e;font-size:11px}
 .online-cancel{display:grid;gap:8px;border:1px solid #e8cfcf;border-radius:8px;padding:12px;background:#fffafa}
 .online-cancel p{margin:0;font-size:13px}.online-cancel label{display:grid;gap:4px;font-size:13px}
-button.link{border:0;background:none;text-decoration:underline;cursor:pointer}
-button.danger{color:#8a2b2b}
+.online button{font:inherit;font-size:12px;padding:7px 12px;border:1px solid #d9ddd5;border-radius:8px;background:#fff;color:#33433b;cursor:pointer}
+.online button.primary{background:#263f3c;color:#fff;border-color:#263f3c}
+.online button.danger{color:#8a2b2b;border-color:#e8cfcf}
+.online button.link{border:0;background:none;padding:4px 2px;text-decoration:underline}
+.online button:disabled{opacity:.55;cursor:not-allowed}
+.online select,.online textarea{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #d9ddd5;border-radius:8px;background:#fff}
 .sr-only{position:absolute;clip:rect(0,0,0,0);width:1px;height:1px;overflow:hidden;white-space:nowrap}
 `],
 })
@@ -221,7 +227,7 @@ export class AuctionOnlineComponent implements OnInit {
     this.loaded = true;
     const keep = this.selected && this.auctions.find(a => a.auctionId === this.selected!.auctionId);
     if (keep) await this.loadBids(keep); else { this.selected = null; this.bids = []; }
-    this.notice = this.tr('Aggiornato dal server alle') + ' ' + new Date().toLocaleTimeString();
+    this.notice = this.tr('Aggiornato dal server alle') + ' ' + new Date().toLocaleTimeString(this.language);
   }
 
   private async loadBids(auction: AuctionSummary): Promise<void> {
@@ -233,6 +239,13 @@ export class AuctionOnlineComponent implements OnInit {
   async open(auction: AuctionSummary): Promise<void> {
     this.cancelling = null;
     await this.run(() => this.loadBids(auction));
+  }
+
+/** Dates in the interface language (Angular's DatePipe would use its default en-US locale). */
+  when(value: string | null, style: 'short' | 'medium'): string {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString(this.language, { dateStyle: style, timeStyle: style });
   }
 
   canCancel(bid: AuctionBid): boolean {
@@ -251,7 +264,7 @@ export class AuctionOnlineComponent implements OnInit {
     if (!c || !auction) return;
     const reason = c.reason.trim();
     if (reason.length < 3 || reason.length > 500) { this.error = this.tr(ERROR_LABELS['invalid_reason']); return; }
-    if (!confirm(this.tr('Confermi l’annullamento dell’offerta? L’operazione è registrata dal server.'))) return;
+    if (!(await confirmed(this.tr('Confermi l’annullamento dell’offerta? L’operazione è registrata dal server.')))) return;
     await this.run(async () => {
       const { outcome, bids } = await this.online.manager.cancelBid(auction.auctionId, c.bid.bidId, reason, c.key, c.operation ?? undefined);
       if (bids) { this.bids = bids; }

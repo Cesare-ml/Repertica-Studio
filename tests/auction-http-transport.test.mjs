@@ -53,7 +53,11 @@ test('transport maps artist-v1 endpoints, headers and bodies exactly', async () 
   assert.equal(cancel.path, `/api/artist/auctions/synthetic-lot/bids/${bidId}/cancellation`);
   assert.equal(cancel.headers['Idempotency-Key'], KEY);
   assert.deepEqual(JSON.parse(cancel.body), { reason: 'Offerente fittizio duplicato' });
-  assert.equal((await transport.publish('{"auction":{},"details":{}}', KEY)).status, 201);
+  assert.deepEqual(await transport.publish('{"auction":{},"details":{}}', KEY), { status: 201, error: null });
+  const refusing = createArtistV1Transport(async () => ({ status: 409, body: { error: 'public_details_exist' } }), () => 'synthetic-artist');
+  assert.deepEqual(await refusing.publish('{}', KEY), { status: 409, error: 'public_details_exist' });
+  const odd = createArtistV1Transport(async () => ({ status: 409, body: { error: '<script>' } }), () => 'synthetic-artist');
+  assert.deepEqual(await odd.publish('{}', KEY), { status: 409, error: null });
   assert.ok(calls.every(c => c.path.startsWith('/api/artist/')), 'only artist API paths, never a full URL');
   assert.ok(calls.every(c => !('Authorization' in c.headers)), 'the token is added by the native port, not the webview');
   await assert.rejects(transport.cancelBid('synthetic-lot', '../x', 'reason', KEY), /invalid_bid/);

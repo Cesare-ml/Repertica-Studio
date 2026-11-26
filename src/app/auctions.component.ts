@@ -1,9 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AUCTION_CONTRACT_VERSION } from './auction-contract';
 import { AuctionOnlineComponent } from './auction-online.component';
 import { AuctionOnlineService } from './auction-online.service';
+import { confirmed } from './confirm-dialog';
 import type { PendingPublication } from './auction-publications';
 import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, removeDraft, saveDraft, slugify,
   utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
@@ -21,6 +22,13 @@ const ERRORS: Record<string, string> = {
   invalid_schedule: 'Date non valide: l’inizio deve essere futuro, la fine successiva e la durata al massimo 7 giorni',
   invalid_amount: 'Inserisci importi validi per prezzo di partenza e rilancio minimo',
   payload_too_large: 'I dati sono troppo lunghi',
+};
+/** Server refusals of a publication (artist-v1 error codes). */
+const REFUSALS: Record<string, string> = {
+  public_details_exist: 'Esiste già un’asta con questo indirizzo della pagina: se l’hai già pubblicata la trovi tra le aste online, altrimenti cambia l’indirizzo.',
+  auction_exists: 'Questa richiesta è già stata usata per un’altra asta.',
+  idempotency_conflict: 'Questa richiesta è già stata usata con dati diversi.',
+  tenant_access_denied: 'Non sei autorizzato a pubblicare per questo profilo artista.',
 };
 
 /**
@@ -57,7 +65,7 @@ const ERRORS: Record<string, string> = {
       <li *ngFor="let p of online.publications">
         <div><strong>{{ p.title }}</strong>
           <span class="auctions-badge">{{ tr(p.operation.state === 'rejected' ? 'Rifiutata dal server' : 'Conferma in sospeso') }}</span>
-          <small *ngIf="p.operation.reason">{{ p.operation.reason }}</small></div>
+          <small *ngIf="p.operation.reason">{{ refusal(p.operation.reason) }}</small></div>
         <div>
           <button type="button" *ngIf="p.operation.state !== 'rejected'" (click)="retryPublication(p)" [disabled]="publishing || !online.status.signedIn">{{ tr('Riprova') }}</button>
           <button type="button" class="danger" (click)="forgetPublication(p)" [disabled]="publishing">{{ tr('Rimuovi dall’elenco') }}</button>
@@ -69,15 +77,16 @@ const ERRORS: Record<string, string> = {
   <section class="auctions-card" aria-labelledby="auctions-drafts" *ngIf="!editing">
     <div class="auctions-row">
       <h3 id="auctions-drafts">{{ tr('Bozze locali') }}</h3>
-      <button type="button" (click)="startNew()" [disabled]="!available.length">{{ tr('+ Nuova bozza') }}</button>
+      <button type="button" class="primary" (click)="startNew()" [disabled]="!available.length">{{ tr('+ Nuova bozza') }}</button>
     </div>
     <p class="auctions-muted" *ngIf="!available.length">{{ tr('Nessuna opera disponibile: solo le opere disponibili possono avere un’asta.') }}</p>
+    <p class="auctions-muted" role="status" *ngIf="publishMessage">{{ publishMessage }}</p>
     <p class="auctions-muted" *ngIf="available.length && !drafts.length">{{ tr('Le bozze appariranno qui. Restano sul computer.') }}</p>
     <ul class="auctions-list" *ngIf="drafts.length">
       <li *ngFor="let d of drafts">
         <div><strong>{{ d.title }}</strong>
           <span class="auctions-badge">{{ tr('Bozza locale') }}</span>
-          <small>{{ artworkTitle(d.artworkId) }} · {{ tr('aggiornata') }} {{ d.updatedAt | date:'short' }}</small></div>
+          <small>{{ artworkTitle(d.artworkId) }} · {{ tr('aggiornata') }} {{ when(d.updatedAt, 'short') }}</small></div>
         <div>
           <button type="button" (click)="edit(d)">{{ tr('Modifica') }}</button>
           <button type="button" class="danger" (click)="discard(d)">{{ tr('Elimina') }}</button>
@@ -130,7 +139,7 @@ const ERRORS: Record<string, string> = {
       </table>
       <h4>{{ tr('Non vengono inviati') }}</h4>
       <ul><li *ngFor="let item of notSent">{{ tr(item) }}</li></ul>
-      <button type="button" (click)="publish()" [disabled]="!online.canPublish || publishing" [attr.aria-describedby]="'auctions-publish-reason'">{{ tr('Pubblica asta') }}</button>
+      <button type="button" class="primary" (click)="publish()" [disabled]="!online.canPublish || publishing" [attr.aria-describedby]="'auctions-publish-reason'">{{ tr('Pubblica asta') }}</button>
       <p id="auctions-publish-reason" class="auctions-muted" *ngIf="!online.canPublish">{{ tr(publishHint) }}</p>
       <p class="auctions-muted" role="status" *ngIf="publishMessage">{{ publishMessage }}</p>
     </div>
@@ -161,7 +170,13 @@ const ERRORS: Record<string, string> = {
 .auctions-review td{padding:4px 0;word-break:break-word}
 .auctions-review ul{margin:0;padding-left:18px;font-size:13px;color:#4b5d52}
 .auctions-foot{font-size:11px}
-.danger{color:#8a2b2b}
+.auctions button{font:inherit;font-size:12px;padding:7px 12px;border:1px solid #d9ddd5;border-radius:8px;background:#fff;color:#33433b;cursor:pointer}
+.auctions button.primary{background:#263f3c;color:#fff;border-color:#263f3c}
+.auctions button.danger{color:#8a2b2b;border-color:#e8cfcf}
+.auctions button:disabled{opacity:.55;cursor:not-allowed}
+.auctions-list li > div:last-child{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.auctions-list button{white-space:nowrap}
+.auctions-form input,.auctions-form select,.auctions-form textarea{font:inherit;font-size:13px;padding:8px 10px;border:1px solid #d9ddd5;border-radius:8px;background:#fff;width:100%;box-sizing:border-box}
 @media (max-width:640px){.auctions-two{grid-template-columns:1fr}}
 `],
 })
@@ -173,6 +188,8 @@ export class AuctionsComponent implements OnInit, OnChanges {
   @Output() readonly consumed = new EventEmitter<void>();
 
   readonly contractVersion = AUCTION_CONTRACT_VERSION;
+  /** The signed-in panel: reloaded from the server once a publication is confirmed, so the new auction shows. */
+  @ViewChild(AuctionOnlineComponent) private onlinePanel?: AuctionOnlineComponent;
   publishing = false;
   publishMessage = '';
 
@@ -227,7 +244,7 @@ export class AuctionsComponent implements OnInit, OnChanges {
     const free = this.available.find(a => !this.drafts.some(d => d.artworkId === a.id)) ?? this.available[0];
     if (free) this.begin(newAuctionDraft(free));
   }
-  edit(d: LocalAuctionDraft): void { this.begin({ ...d }); }
+  edit(d: LocalAuctionDraft): void { this.publishMessage = ''; this.begin({ ...d }); }
   private begin(draft: AuctionDraft): void {
     this.editing = { ...draft };
     this.startsLocal = utcToLocalInput(draft.startsAt);
@@ -259,9 +276,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
     try { this.drafts = saveDraft(store, draft); this.error = ''; this.editing = null; this.reviewed = false; }
     catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
   }
-  discard(d: LocalAuctionDraft): void {
+  async discard(d: LocalAuctionDraft): Promise<void> {
     const store = this.store;
-    if (!store || !confirm(this.tr('Eliminare questa bozza? L’opera non verrà eliminata.'))) return;
+    if (!store || !(await confirmed(this.tr('Eliminare questa bozza? L’opera non verrà eliminata.')))) return;
     try { this.drafts = removeDraft(store, d.artworkId); } catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
   }
   review(): void {
@@ -275,19 +292,34 @@ export class AuctionsComponent implements OnInit, OnChanges {
     }
   }
   private outcomeMessage(state: string, reason: string | null): string {
-    if (state === 'confirmed') return this.tr('Asta pubblicata: confermata dal server.');
-    if (state === 'rejected') return this.tr('Pubblicazione rifiutata dal server') + (reason ? ` (${reason})` : '') + '.';
+    if (state === 'confirmed') return this.tr('Asta pubblicata: confermata dal server. La bozza locale è chiusa: l’asta è tra le aste online.');
+    if (state === 'rejected') return this.tr('Pubblicazione rifiutata dal server') + (reason ? ': ' + this.refusal(reason) : '.');
     return this.tr('Conferma in sospeso: la risposta del server non è arrivata. Riprova dall’elenco delle pubblicazioni da confermare.');
+  }
+
+  refusal(reason: string): string { return REFUSALS[reason] ? this.tr(REFUSALS[reason]) : reason; }
+
+  /** Once the server shows the auction, the local draft is closed: publishing it again would only be refused. */
+  private async published(artworkId: string): Promise<void> {
+    const store = this.store;
+    if (store) { try { this.drafts = removeDraft(store, artworkId); } catch { /* the draft simply stays */ } }
+    if (this.editing?.artworkId === artworkId) { this.editing = null; this.reviewed = false; }
+    // Earlier refused requests for the same artwork are now moot.
+    for (const entry of this.online.publications.filter(p => p.artworkId === artworkId && p.operation.state === 'rejected')) {
+      this.online.discardPublication(entry);
+    }
+    await this.onlinePanel?.reload();
   }
 
   /** Sends exactly the reviewed request, after an explicit confirmation. */
   async publish(): Promise<void> {
     const draft = this.collect();
     if (!draft || !this.reviewed || !this.online.canPublish) return;
-    if (!confirm(this.tr('Pubblicare l’asta su Repertica Auctions? Verranno inviati solo i dati mostrati nella revisione.'))) return;
+    if (!(await confirmed(this.tr('Pubblicare l’asta su Repertica Auctions? Verranno inviati solo i dati mostrati nella revisione.')))) return;
     this.publishing = true; this.publishMessage = this.tr('Invio in corso…');
     try {
       const { operation, needsSignIn } = await this.online.publish(draft, draft.title.trim());
+      if (operation.state === 'confirmed') await this.published(draft.artworkId);
       this.publishMessage = needsSignIn ? this.tr('Sessione scaduta: accedi di nuovo.') : this.outcomeMessage(operation.state, operation.reason);
     } catch (e) {
       const code = e instanceof Error ? e.message : '';
@@ -299,15 +331,23 @@ export class AuctionsComponent implements OnInit, OnChanges {
     this.publishing = true;
     try {
       const { operation } = await this.online.retryPublication(entry);
+      if (operation.state === 'confirmed') await this.published(entry.artworkId);
       this.publishMessage = this.outcomeMessage(operation.state, operation.reason);
     } catch { this.publishMessage = this.tr('Riprova non riuscita: controlla il profilo artista selezionato e la connessione.'); }
     finally { this.publishing = false; }
   }
 
-  forgetPublication(entry: PendingPublication): void {
-    if (confirm(this.tr('Rimuovere questa richiesta dall’elenco? Se il server l’aveva ricevuta, l’asta resta pubblicata e la trovi tra le aste online.'))) {
+  async forgetPublication(entry: PendingPublication): Promise<void> {
+    if (await confirmed(this.tr('Rimuovere questa richiesta dall’elenco? Se il server l’aveva ricevuta, l’asta resta pubblicata e la trovi tra le aste online.'))) {
       this.online.discardPublication(entry);
     }
+  }
+
+/** Dates in the interface language (Angular's DatePipe would use its default en-US locale). */
+  when(value: string | null, style: 'short' | 'medium'): string {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString(this.language, { dateStyle: style, timeStyle: style });
   }
 
   fieldLabel(field: string): string {

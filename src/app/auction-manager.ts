@@ -12,7 +12,7 @@ import type { PreparedPreview } from './auction-preview';
 
 export interface AuctionTransport {
   /** Throws (or rejects) when the response is lost. */
-  publish(body: string, idempotencyKey: string): Promise<{ status: number }>;
+  publish(body: string, idempotencyKey: string): Promise<{ status: number; error?: string | null }>;
   listAuctions(): Promise<unknown>;
   listBids(auctionId: string, cursor: string | null): Promise<unknown>;
   /** `body` is the contract answer already mapped by the transport (see auction-http-transport.ts). */
@@ -61,7 +61,8 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
       const { bids, nextCursor } = parseBidPage(await transport.listBids(auctionId, cursor));
       for (const bid of bids) all.set(bid.bidId, bid);
       if (nextCursor === null) {
-        return [...all.values()].sort((a, b) => a.placedAt.localeCompare(b.placedAt) || a.bidId.localeCompare(b.bidId));
+        // The server lists bids in the order it accepted them; a stable sort keeps that order for equal times.
+        return [...all.values()].sort((a, b) => a.placedAt.localeCompare(b.placedAt));
       }
       if (nextCursor === cursor) throw new Error('invalid_response');
       cursor = nextCursor;
@@ -79,8 +80,9 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
     let op = previous ? retry(previous) : beginOperation('publish', slug, prepared.idempotencyKey, prepared.body);
     let status = 0;
     try {
-      status = (await transport.publish(prepared.body, prepared.idempotencyKey)).status;
-      op = afterTransport(op, { kind: 'response', status });
+      const answer = await transport.publish(prepared.body, prepared.idempotencyKey);
+      status = answer.status;
+      op = afterTransport(op, { kind: 'response', status, error: answer.error ?? null });
     } catch { op = afterTransport(op, { kind: 'lost' }); }
     if (op.state === 'pending_confirmation') {
       try { op = confirmPublication(op, await loadAuctions()); } catch { /* stays pending */ }

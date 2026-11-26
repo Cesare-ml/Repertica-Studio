@@ -71,6 +71,12 @@ test('refusals and expired sessions are never reported as success', async () => 
   assert.equal(out.operation.state, 'rejected');
   const server = fake({ async publish() { return { status: 503 }; } });
   assert.equal((await manager(server).publish(prepared)).operation.state, 'pending_confirmation');
+  // Seen in the Desktop window: the server's own code is kept as the reason (not just the HTTP status).
+  const taken = fake({ async publish() { return { status: 409, error: 'public_details_exist' }; } });
+  assert.deepEqual([(await manager(taken).publish(prepared)).operation.state, (await manager(taken).publish(prepared)).operation.reason],
+    ['rejected', 'public_details_exist']);
+  const bare = fake({ async publish() { return { status: 409 }; } });
+  assert.equal((await manager(bare).publish(prepared)).operation.reason, 'http_409');
 });
 
 test('bid history follows cursors and rejects a cursor loop', async () => {
@@ -78,6 +84,14 @@ test('bid history follows cursors and rejects a cursor loop', async () => {
   assert.deepEqual((await manager(t).loadBids('auc_1')).map(b => b.bidId), ['bid_a', 'bid_b']);
   const loop = fake({ async listBids() { return { items: [], nextCursor: 'same' }; } });
   await assert.rejects(manager(loop).loadBids('auc_1'), /invalid_response/);
+});
+
+test('bids placed at the same instant keep the order in which the server accepted them', async () => {
+  // Seen in the Desktop window: equal timestamps were reordered by their random ids.
+  const at = '2027-03-04T12:00:00.000Z';
+  const t = fake({ async listBids() {
+    return { items: [bid('f-first', at), bid('a-second', at), bid('c-third', '2027-03-04T11:59:59.000Z')], nextCursor: null }; } });
+  assert.deepEqual((await manager(t).loadBids('auc_1')).map(b => b.bidId), ['c-third', 'f-first', 'a-second']);
 });
 
 test('cancellation is confirmed by the reloaded history; refusals and unreachable stay honest', async () => {
