@@ -375,3 +375,52 @@ test('collector lookup uses current metadata only from genuinely purchased works
   assert.deepEqual(found('vecchio titolo'), ['a']); // Historical sale name still works.
   assert.deepEqual(filterCollectors(people, 'vecchio titolo', indexes).map(c => c.id), ['a']);
 });
+
+test('dimensions search accepts centimetres repeated on each axis in artworks and acquired works', () => {
+  const works = [
+    artwork('a', { width_cm: 30.5, height_cm: 40, depth_cm: 5, status: 'sold' }),
+    artwork('b', { width_cm: 30.5, height_cm: 45, depth_cm: 5, status: 'sold' }),
+    artwork('c', { width_cm: 30.5, height_cm: 40, depth_cm: 6 })
+  ];
+  const contacts = [collector('one'), collector('two'), collector('three')];
+  const indexes = buildSaleIndexes([
+    sale('a', 'one', 'First', 'One'),
+    sale('b', 'two', 'Second', 'Two')
+  ]);
+  const artIds = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+  const collectorIds = query => filterCollectors(contacts, query, indexes, 'all', works).map(c => c.id);
+  for (const query of ['30,5 cm × 40 cm', '30.5cm X 40CM', '"30,5 cm × 40 cm"']) {
+    assert.deepEqual(artIds(query), ['a', 'c']);
+    assert.deepEqual(collectorIds(query), ['one']);
+  }
+  for (const query of ['30,5 cm × 40 cm × 5 cm', '30.5cm x40cm x5cm']) {
+    assert.deepEqual(artIds(query), ['a']);
+    assert.deepEqual(collectorIds(query), ['one']);
+  }
+  assert.deepEqual(artIds('30,5 cm × 41 cm'), []);
+  assert.deepEqual(collectorIds('30,5 cm × 41 cm'), []);
+});
+
+test('complete numeric dimensions do not match substrings of other measurements', () => {
+  const works = [
+    artwork('exact', { width_cm: 30.5, height_cm: 40, depth_cm: 5, status: 'sold' }),
+    artwork('wide', { width_cm: 130.5, height_cm: 40, depth_cm: 5, status: 'sold' }),
+    artwork('tall', { width_cm: 30.5, height_cm: 400, depth_cm: 5, status: 'sold' }),
+    artwork('decimal', { width_cm: 30.5, height_cm: 40.5, depth_cm: 5, status: 'sold' }),
+    artwork('deep', { width_cm: 30.5, height_cm: 40, depth_cm: 50, status: 'sold' }),
+    artwork('prose', { description: 'Studio: 30,5 cm × 40 cm.', status: 'sold' }),
+    artwork('other-prose', { description: 'Studio: 130,5 cm × 400 cm.', status: 'sold' })
+  ];
+  const contacts = works.map(a => collector(a.id));
+  const indexes = buildSaleIndexes(works.map(a => sale(a.id, a.id, a.title, a.id)));
+  const artIds = query => filterArtworks(works, options({ query }), indexes).map(a => a.id);
+  const collectorIds = query => filterCollectors(contacts, query, indexes, 'all', works).map(c => c.id);
+  for (const query of ['30,5 cm × 40 cm', '"30.5x40"']) {
+    assert.deepEqual(artIds(query), ['exact', 'deep', 'prose']);
+    assert.deepEqual(collectorIds(query), ['exact', 'deep', 'prose']);
+  }
+  assert.deepEqual(artIds('30,5 cm × 40 cm × 5 cm'), ['exact']);
+  assert.deepEqual(collectorIds('30,5 cm × 40 cm × 5 cm'), ['exact']);
+  assert.deepEqual(artIds('studio 30,5 x 40'), ['prose']);
+  assert.deepEqual(collectorIds('studio 30,5 x 40'), ['prose']);
+});
