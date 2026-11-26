@@ -403,20 +403,28 @@ fn imported_sequence(code: &str) -> Option<(String, i64)> {
 const RESERVE: &str = "INSERT INTO archive_code_sequences(scope_key,last_value) VALUES(?1,?2) ON CONFLICT(scope_key) DO UPDATE SET last_value=excluded.last_value WHERE archive_code_sequences.last_value < excluded.last_value";
 const READ_SEQUENCE: &str = "SELECT COALESCE((SELECT last_value FROM archive_code_sequences WHERE scope_key=?1),0)";
 
-fn reserve_imported_codes(conn: &Connection, rows: &[Record]) -> Result<(), String> {
+fn imported_code_targets(conn: &Connection, rows: &[Record]) -> Result<BTreeMap<String, i64>, String> {
     let mut targets = BTreeMap::<String, i64>::new();
     for (key, number) in rows.iter().filter_map(|row| imported_sequence(&row.code)) {
         targets.entry(key).and_modify(|n| *n = (*n).max(number)).or_insert(number);
     }
-    // Capture all pre-existing high-water marks before touching any sequence.
+    // Capture high-water marks before ANY writes, including artwork inserts.
     for (key, number) in targets.iter_mut() {
         let previous: i64 = conn.query_row(READ_SEQUENCE, [key], |r| r.get(0)).map_err(database_error)?;
         *number = (*number).max(previous);
     }
-    for (key, number) in &targets {
+    Ok(targets)
+}
+
+fn reserve_imported_codes(conn: &Connection, targets: &BTreeMap<String, i64>) -> Result<(), String> {
+    for (key, number) in targets {
         conn.execute(RESERVE, params![key, number]).map_err(database_error)?;
     }
-    for (key, number) in &targets {
+    verify_imported_codes(conn, targets)
+}
+
+fn verify_imported_codes(conn: &Connection, targets: &BTreeMap<String, i64>) -> Result<(), String> {
+    for (key, number) in targets {
         let stored: i64 = conn.query_row(READ_SEQUENCE, [key], |r| r.get(0)).map_err(database_error)?;
         if stored != *number { return Err("database".into()); }
     }
@@ -449,6 +457,7 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).map_err(database_error)?;
         ensure_new(&tx, &parsed)?;
         let rows = &parsed.artworks;
+        let sequence_targets = imported_code_targets(&tx, rows)?;
         let stamp = chrono::Utc::now().to_rfc3339();
         let ids: Vec<String> = rows.iter().map(|_| Uuid::new_v4().to_string()).collect();
         for (id, row) in ids.iter().zip(rows) {
@@ -459,7 +468,7 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
             if affected != 1 { return Err("database".into()); }
         }
         // Reserve imported numbers before committing so deletion cannot make a code reusable.
-        reserve_imported_codes(&tx, rows)?;
+        reserve_imported_codes(&tx, &sequence_targets)?;
         let artwork_ids: BTreeMap<&str, &str> = rows.iter().zip(&ids).map(|(r,id)| (r.code.as_str(),id.as_str())).collect();
         for cover in &parsed.covers {
             let root = directory.ok_or_else(|| "database".to_string())?;
@@ -505,6 +514,8 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
             let stored = std::fs::read(&file).map_err(database_error)?;
             if format!("{:x}", Sha256::digest(&stored)) != cover.sha256 { return Err("database".into()); }
         }
+        // Later media and commercial writes must not alter reserved counters.
+        verify_imported_codes(&tx, &sequence_targets)?;
         tx.commit().map_err(database_error)?;
         Ok(rows.len())
     })();
@@ -701,6 +712,40 @@ mod tests {
                 "tax_cents":1000,"shipping_cents":500,"legacy_shares_bp":[2000,3000,5000],"allocations":[],"installments":[],
                 "receipts":[{"received_at":"2025-03-10","amount_cents":4000,"method":"bank_transfer","reference":"synthetic"}]}]})
     }
+    #[test]
+    fn later_receipt_writes_cannot_corrupt_imported_sequence_reservations() {
+        for mutation in [
+            "UPDATE archive_code_sequences SET last_value=1 WHERE scope_key='HIST|GLOBAL';",
+            "DELETE FROM archive_code_sequences WHERE scope_key='HIST|GLOBAL';",
+            "UPDATE archive_code_sequences SET last_value=51 WHERE scope_key='HIST|GLOBAL';",
+        ] {
+            with_db(|conn| {
+                conn.execute("INSERT INTO archive_code_sequences(scope_key,last_value) VALUES('HIST|GLOBAL',50)", []).unwrap();
+                let source = relational_sample().to_string();
+                let plan = preview(conn, &source).unwrap();
+                conn.execute_batch(&format!("CREATE TRIGGER bad AFTER INSERT ON sale_receipts BEGIN {mutation} END;")).unwrap();
+                assert_eq!(apply(conn,&source,&plan.digest).unwrap_err(),"database");
+                for table in ["artworks","collectors","sales","sale_finances","sale_receipts","sale_installments"] {
+                    assert_eq!(conn.query_row(&format!("SELECT count(*) FROM {table}"),[],|r| r.get::<_,i64>(0)).unwrap(),0);
+                }
+                assert_eq!(conn.query_row(READ_SEQUENCE, ["HIST|GLOBAL"], |r| r.get::<_,i64>(0)).unwrap(), 50);
+                assert_eq!(conn.query_row("SELECT count(*) FROM archive_code_sequences", [], |r| r.get::<_,i64>(0)).unwrap(),1);
+            });
+        }
+    }
+
+    #[test]
+    fn import_captures_sequence_high_water_before_the_first_artwork_write() {
+        with_db(|conn| {
+            conn.execute("INSERT INTO archive_code_sequences(scope_key,last_value) VALUES('HIST|GLOBAL',50)", []).unwrap();
+            conn.execute_batch("CREATE TRIGGER bad AFTER INSERT ON artworks BEGIN UPDATE archive_code_sequences SET last_value=1 WHERE scope_key='HIST|GLOBAL'; END;").unwrap();
+            let source = relational_sample().to_string();
+            let plan = preview(conn,&source).unwrap();
+            assert_eq!(apply(conn,&source,&plan.digest).unwrap(),2);
+            assert_eq!(conn.query_row(READ_SEQUENCE, ["HIST|GLOBAL"], |r| r.get::<_,i64>(0)).unwrap(),50);
+        });
+    }
+
     #[test]
     fn relational_import_preserves_links_deductions_and_explicit_receipts() {
         with_db(|conn| {
