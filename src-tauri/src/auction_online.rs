@@ -819,10 +819,11 @@ mod tests {
         assert!(!session.signing_in.load(Ordering::SeqCst));
     }
 
-    /// Cross-process check against the REAL Auctions server running its synthetic preview with the synthetic
-    /// Studio provider (Repertica-auctions: REPERTICA_SYNTHETIC_ARTIST=1 REPERTICA_SYNTHETIC_STUDIO_PORT=4175
-    /// node apps/auction-server/scripts/synthetic-preview.mjs). Run with
-    /// REPERTICA_E2E_STUDIO=http://127.0.0.1:4175 REPERTICA_E2E_AUCTIONS=http://127.0.0.1:4173 cargo test -- --ignored live_
+    /// Cross-process check against the REAL Auctions server running its synthetic preview (docs/AUCTIONS_DESKTOP_HANDOFF.md):
+    /// * with the synthetic Studio provider: REPERTICA_E2E_STUDIO + REPERTICA_E2E_AUCTIONS;
+    /// * with the REAL Studio provider in its isolated test runtime: also REPERTICA_E2E_BROWSER, a helper that does what
+    ///   the provider's /login page does after sign-in (authorize, then follow the loopback redirect).
+    /// Run with `cargo test -- --ignored live_`.
     #[test]
     #[ignore = "needs the local synthetic Auctions and Studio services"]
     fn live_synthetic_services_sign_in_list_and_cancel() {
@@ -830,8 +831,21 @@ mod tests {
         let auctions = std::env::var("REPERTICA_E2E_AUCTIONS").expect("REPERTICA_E2E_AUCTIONS");
         assert!(loopback_origin(&studio) && loopback_origin(&auctions));
         let endpoints = Endpoints { studio, auctions };
+        let helper = std::env::var("REPERTICA_E2E_BROWSER").ok();
         // The "browser": open the provider login page and follow its redirect to the loopback listener.
-        let browser = |login: &str| -> Result<(), String> {
+        let browser = move |login: &str| -> Result<(), String> {
+            if let Some(helper) = helper.as_deref() {
+                assert!(loopback_origin(helper));
+                let port: u16 = helper.rsplit(':').next().unwrap().parse().unwrap();
+                let mut simulate = tauri::Url::parse("http://127.0.0.1/simulate").unwrap();
+                simulate.query_pairs_mut().append_pair("login", login);
+                let target = format!("{}?{}", simulate.path(), simulate.query().unwrap());
+                thread::spawn(move || {
+                    let answer = get(port, &target);
+                    assert!(answer.starts_with("HTTP/1.1 200"), "browser helper: {answer}");
+                });
+                return Ok(());
+            }
             let url = tauri::Url::parse(login).map_err(|e| e.to_string())?;
             let target = format!("{}?{}", url.path(), url.query().unwrap_or(""));
             let port = url.port().unwrap();
