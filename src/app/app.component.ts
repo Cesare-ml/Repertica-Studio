@@ -687,6 +687,8 @@ export class AppComponent implements OnInit {
     if (this.busy || !this.restoreCandidate) return;
     const candidate = this.restoreCandidate;
     if (!(await confirmed('RIPRISTINO ARCHIVIO\n\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\n\nContinuare?'))) return;
+    // The native dialog is asynchronous: the inspected backup or operation may have changed.
+    if (this.busy || this.restoreCandidate !== candidate) return;
     this.busy = true; this.errorMessage = ''; this.notice = '';
     try {
       this.lastRestore = await api.restoreBackup(candidate.directory);
