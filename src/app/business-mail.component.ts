@@ -79,6 +79,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   otherFoldersOpen = false;
   /** An operation started by the user (sending, saving…) is running. */
   busy = false;
+  private sendConfirmationPending = false;
   /** The first load of the folders and messages is running. */
   loading = false;
   /** A refresh is running in the background (the list on screen is the previous one). */
@@ -437,28 +438,38 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     this.composeOpen=false;this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
   }
   async send():Promise<void>{
-    if(!this.selectedId)return;
-    if(!(await confirmed(this.t('Send this email now? This action cannot be undone.'))))return;
-    await this.operation(async()=>{
-      const current={...this.composer};
-      // One deliberate click issues one send. Never auto-retry on a network error.
-      const result=await api.mailSend({
-        account_id:this.selectedId,to:current.to,cc:current.cc,bcc:current.bcc,
-        subject:current.subject,body:current.body,attachments:current.attachments,confirm:true
-      });
-      if(result.delivery==='accepted'){
-        this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
-        this.composeOpen=false;
-        if(current.id && current.revision!==null){
-          try{await api.mailRemoveDraft(this.selectedId,current.id,current.revision);}
-          catch{/* Delivery was accepted; do not mask it with a draft cleanup error. */}
-          await this.loadDraftsCore();
+    if(this.busy||this.sendConfirmationPending||!this.selectedId)return;
+    const accountId=this.selectedId;
+    const current={...this.composer,attachments:[...this.composer.attachments]};
+    const snapshot=JSON.stringify(current);
+    const unchanged=()=>this.selectedId===accountId&&JSON.stringify(this.composer)===snapshot;
+    this.sendConfirmationPending=true;
+    try{
+      if(!(await confirmed(this.t('Send this email now? This action cannot be undone.'))))return;
+      // Never send a different account or message than the one awaiting confirmation.
+      if(this.busy||!unchanged())return;
+      await this.operation(async()=>{
+        // One deliberate click issues one send. Never auto-retry on a network error.
+        const result=await api.mailSend({
+          account_id:accountId,to:current.to,cc:current.cc,bcc:current.bcc,
+          subject:current.subject,body:current.body,attachments:current.attachments,confirm:true
+        });
+        if(result.delivery==='accepted'){
+          if(unchanged()){
+            this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
+            this.composeOpen=false;
+          }
+          if(current.id && current.revision!==null){
+            try{await api.mailRemoveDraft(accountId,current.id,current.revision);}
+            catch{/* Delivery was accepted; do not mask it with a draft cleanup error. */}
+            if(this.selectedId===accountId)await this.loadDraftsCore();
+          }
         }
-      }
-      this.notice=this.t('SMTP accepted the message.')+' '+(
-        result.sent_copy==='saved'?this.t('A copy was stored in Sent.'):
-        result.sent_copy==='not_saved'?this.t('Could not store a copy in Sent. Do not resend.'):
-        this.t('No Sent folder configured. Check the provider mailbox.'));
-    });
+        this.notice=this.t('SMTP accepted the message.')+' '+(
+          result.sent_copy==='saved'?this.t('A copy was stored in Sent.'):
+          result.sent_copy==='not_saved'?this.t('Could not store a copy in Sent. Do not resend.'):
+          this.t('No Sent folder configured. Check the provider mailbox.'));
+      });
+    }finally{this.sendConfirmationPending=false;}
   }
 }
