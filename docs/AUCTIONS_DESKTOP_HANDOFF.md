@@ -109,5 +109,9 @@ Aggancio aggiunto, solo nelle build di debug: `REPERTICA_DEV_LOGIN_URL_FILE` scr
 
 Non verificati: l'apertura del browser di sistema predefinito (`rundll32`) nella finestra (la sua logica resta coperta dai test), una build di release, macOS e Linux. Il server accetta più aste per la stessa opera con indirizzi diversi (il corpo inviato non contiene l'opera di Studio): da decidere lato server.
 
+## Regole del Gestionale Opere (26 novembre 2026, sera)
+
+Il proprietario ha confermato che valgono le regole del Gestionale Opere. Nel Desktop: annullamento con uno dei cinque motivi, nota riservata facoltativa e blocco facoltativo dell'email, possibile anche dopo la chiusura; nome dell'offerente nella cronologia; bozza con prezzo di riserva facoltativo e condizioni di pagamento del vincitore (spedizione in Italia, beneficiario, IBAN verificato, BIC/SWIFT, banca), precompilate con le ultime usate su questo computer; alla pubblicazione l'immagine principale dell'opera viene ricodificata sul computer (JPEG, lato massimo 2400 px, senza EXIF/GPS; l'originale resta intatto) e caricata dal lato nativo con il comando `auction_upload_artwork_image`, insieme ad anno, tecnica, supporto e misure. Un'opera senza fotografia principale non può essere pubblicata. L'anti-sniping (2 + 2 minuti) lo applica il server. Test: unità 181, Rust `auction_online` 14 + 1 ignorato, build Angular. Non provato nella finestra dopo queste modifiche.
+
 Per accendere il collegamento in produzione servono, nell'ordine: unione del ramo di integrazione del provider in `main` di Studio Online e sua distribuzione con il client nativo `repertica-desktop-auctions` in `OAUTH_CLIENTS_JSON`; servizio Auctions distribuito (`deploy/service/` nel repository Auctions) con le chiavi del provider; una prova nella finestra di una build di release contro i servizi distribuiti; quindi `ONLINE_ENABLED = true` e una release. Le immagini dell'opera non sono ancora inviate dal Desktop.
 
