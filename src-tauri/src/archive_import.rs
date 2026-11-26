@@ -444,6 +444,28 @@ fn preview(conn: &Connection, source: &str) -> Result<Preview, String> {
 const INSERT: &str = "INSERT INTO artworks(id,code,title,year,technique,support,width_cm,height_cm,depth_cm,description,location,status,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents)
 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13,?14,?15,?16,?17,?18)";
 const VERIFY: &str = "SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1 AND code COLLATE BINARY IS ?2 AND title IS ?3 AND year IS ?4 AND technique IS ?5 AND support IS ?6 AND width_cm IS ?7 AND height_cm IS ?8 AND depth_cm IS ?9 AND description IS ?10 AND location IS ?11 AND status IS ?12 AND created_at IS ?13 AND updated_at IS ?13 AND signed IS ?14 AND final_varnish IS ?15 AND framed IS ?16 AND artist_coefficient_override IS ?17 AND fixed_price_cents IS ?18 AND image_path IS ?19 AND image_media_id IS NULL AND (SELECT count(*) FROM sales WHERE artwork_id=?1)=CASE WHEN ?12='sold' THEN 1 ELSE 0 END)";
+// Count the rows in the import's domain before the first write. Per-record verification
+// alone cannot detect a trigger creating unrelated rows or deleting a pre-existing row.
+const IMPORT_TABLES: [&str; 10] = ["artworks", "collectors", "sales", "sale_finances", "sale_receipts",
+    "sale_installments", "artwork_images", "collector_images", "sale_allocations", "sale_receipt_attachments"];
+fn import_counts(conn: &Connection) -> Result<[i64; 10], String> {
+    let mut counts = [0; 10];
+    for (count, table) in counts.iter_mut().zip(IMPORT_TABLES) {
+        *count = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).map_err(database_error)?;
+    }
+    Ok(counts)
+}
+fn verify_import_counts(conn: &Connection, before: [i64; 10], parsed: &Parsed) -> Result<(), String> {
+    let expected = [parsed.artworks.len(), parsed.collectors.len(), parsed.sales.len(), parsed.sales.len(),
+        parsed.sales.iter().map(|s| s.receipts.len()).sum::<usize>(),
+        parsed.sales.iter().map(|s| s.installments.len()).sum::<usize>(),
+        parsed.covers.iter().filter(|c| c.position > 0).count(), 0, 0, 0];
+    for ((actual, previous), added) in import_counts(conn)?.into_iter().zip(before).zip(expected) {
+        if previous.checked_add(added as i64) != Some(actual) { return Err("database".into()); }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 fn apply(conn: &mut Connection, source: &str, expected_digest: &str) -> Result<usize, String> {
     apply_with_media(conn, None, source, expected_digest)
@@ -458,6 +480,7 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
         ensure_new(&tx, &parsed)?;
         let rows = &parsed.artworks;
         let sequence_targets = imported_code_targets(&tx, rows)?;
+        let before_counts = import_counts(&tx)?;
         let stamp = chrono::Utc::now().to_rfc3339();
         let ids: Vec<String> = rows.iter().map(|_| Uuid::new_v4().to_string()).collect();
         for (id, row) in ids.iter().zip(rows) {
@@ -516,6 +539,7 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
         }
         // Later media and commercial writes must not alter reserved counters.
         verify_imported_codes(&tx, &sequence_targets)?;
+        verify_import_counts(&tx, before_counts, &parsed)?;
         tx.commit().map_err(database_error)?;
         Ok(rows.len())
     })();
@@ -887,6 +911,30 @@ mod tests {
             });
         }
     }
+    #[test]
+    fn import_rejects_unexpected_rows_or_deletion_of_existing_rows() {
+        for mutation in [
+            "INSERT INTO collectors(id,name,created_at,updated_at) VALUES('unexpected','Unexpected','t','t');",
+            "INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES('unexpected','EXTRA-01','Unexpected','t','t');",
+            "DELETE FROM artworks WHERE id='existing';",
+        ] {
+            with_db(|conn| {
+                conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at) VALUES('existing','OLD-01','Original','t','t')", []).unwrap();
+                let source = relational_sample().to_string();
+                let plan = preview(conn, &source).unwrap();
+                let before = import_counts(conn).unwrap();
+                conn.execute_batch(&format!("CREATE TRIGGER bad AFTER INSERT ON sale_receipts BEGIN {mutation} END;")).unwrap();
+                assert_eq!(apply(conn, &source, &plan.digest).unwrap_err(), "database");
+                assert_eq!(import_counts(conn).unwrap(), before);
+                assert_eq!(conn.query_row("SELECT title FROM artworks WHERE id='existing'", [], |r| r.get::<_,String>(0)).unwrap(), "Original");
+                assert_eq!(conn.query_row("SELECT count(*) FROM archive_code_sequences", [], |r| r.get::<_,i64>(0)).unwrap(), 0);
+                conn.execute_batch("DROP TRIGGER bad;").unwrap();
+                assert_eq!(apply(conn, &source, &plan.digest).unwrap(), 2);
+                assert_eq!(import_counts(conn).unwrap(), [3,1,1,1,1,0,0,0,0,0]);
+            });
+        }
+    }
+
     #[test]
     fn collector_conflict_after_preview_does_not_overwrite_existing_data() {
         with_db(|conn| {
