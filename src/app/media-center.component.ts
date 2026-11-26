@@ -3,6 +3,7 @@ import { ChangeDetectorRef, Component, EventEmitter, Input, OnInit, Output, View
 import { FormsModule } from '@angular/forms';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { confirmed } from './confirm-dialog';
 import { AppLanguage, translate } from './i18n';
 import { MediaEditorComponent } from './media-editor.component';
 import type {
@@ -447,7 +448,7 @@ export class MediaCenterComponent implements OnInit {
   }
   async purge(): Promise<void> {
     const d = this.selected; if (!d) return;
-    if (!window.confirm(this.tr('Eliminare definitivamente questa immagine e tutte le sue versioni? L’operazione non è reversibile.'))) return;
+    if (!(await confirmed(this.tr('Eliminare definitivamente questa immagine e tutte le sue versioni? L’operazione non è reversibile.')))) return;
     if (await this.run(() => api.mediaPurge(d.item.id)) !== undefined) { this.closeInspector(); this.ok(this.tr('Immagine eliminata')); await this.load(true); }
   }
 

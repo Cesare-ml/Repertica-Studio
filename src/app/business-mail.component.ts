@@ -3,6 +3,7 @@ import { Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, S
 import { FormsModule } from '@angular/forms';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { confirmed } from './confirm-dialog';
 import type { AppLanguage } from './i18n';
 import type { Collector, MailAccount, MailAccountInput, MailDetail, MailDraft, MailDraftInput, MailFolder, MailHeader, MailList, MailOverview, MailSyncState } from './models';
 import { MailIconComponent } from './mail-icons';
@@ -158,7 +159,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     if (this.selectedId && !this.folders.length) await this.connect();
   }
   async selectAccount(id:string):Promise<void>{
-    if(id===this.selectedId||!this.canLeave())return;
+    if(id===this.selectedId||!(await this.canLeave()))return;
     this.selectedId=id;this.folders=[];this.listing=null;this.message=null;
     this.selectedFolder='INBOX';this.accountForm=null;this.view='mail';
     this.drafts=[];this.lastStamp='';++this.loadVersion;
@@ -285,18 +286,20 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   // ---- compose (floating window)
-  startCompose():void{
-    if(!this.selectedId||!this.canLeave())return;
+  async startCompose():Promise<void>{
+    if(!this.selectedId||!(await this.canLeave()))return;
     this.composer={...blankComposer(),body:this.selected?.signature??''};
     this.openComposer();
   }
-  reply(forward=false):void {
-    if(!this.selectedId||!this.message||!this.canLeave())return;
-    const header=this.message.header;
+  async reply(forward=false):Promise<void> {
+    // The message clicked on: the confirmation is asynchronous and the reader may change meanwhile.
+    const message=this.message;
+    if(!this.selectedId||!message||!(await this.canLeave()))return;
+    const header=message.header;
     const mail=/<([^<>\s]+@[^<>\s]+)>/.exec(header.from)?.[1]??header.from.trim();
     const prefix=forward?'Fwd: ':'Re: ';
     const messageSubject=header.subject.replace(/^(Re:|Fwd:)\s*/i,'');
-    const quote=this.message.body.split('\n').slice(0,100).map(line=>'> '+line).join('\n').slice(0,5000);
+    const quote=message.body.split('\n').slice(0,100).map(line=>'> '+line).join('\n').slice(0,5000);
     const signature=this.selected?.signature??'';
     this.composer={
       ...blankComposer(),to:forward?'':mail,subject:prefix+messageSubject,
@@ -304,8 +307,8 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     };
     this.openComposer();
   }
-  openDraft(draft:MailDraft):void{
-    if(!this.canLeave())return;
+  async openDraft(draft:MailDraft):Promise<void>{
+    if(!(await this.canLeave()))return;
     this.composer={id:draft.id,revision:draft.revision,to:draft.to,
       cc:draft.cc,bcc:draft.bcc,subject:draft.subject,body:draft.body,attachments:[...(draft.attachments??[])]};
     this.openComposer();
@@ -316,14 +319,15 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     this.composeOpen=true;this.composeMode='normal';this.clearStatus();
   }
   /** Close the window; unsaved changes are confirmed first. */
-  closeCompose():void{
-    if(!this.canLeave())return;
+  async closeCompose():Promise<void>{
+    if(!(await this.canLeave()))return;
     this.composeOpen=false;this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
   }
   minimizeCompose():void{this.composeMode=this.composeMode==='minimized'?'normal':'minimized';}
   expandCompose():void{this.composeMode=this.composeMode==='expanded'?'normal':'expanded';}
-  private canLeave():boolean{
-    return !this.hasUnsavedComposer || window.confirm(this.t('Discard unsaved changes to this message?'));
+  /** True when nothing unsaved would be lost, or the person agrees to discard it. Always await it. */
+  private async canLeave():Promise<boolean>{
+    return !this.hasUnsavedComposer || await confirmed(this.t('Discard unsaved changes to this message?'));
   }
   // ---- views
   showMail():void{
@@ -364,7 +368,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     if(saved){this.view='mail';await this.connect();}
   }
   async removeAccount(account:MailAccount):Promise<void>{
-    if(!window.confirm(this.t('Remove this account and its local drafts? Remote mail will not be deleted.')))return;
+    if(!(await confirmed(this.t('Remove this account and its local drafts? Remote mail will not be deleted.'))))return;
     await this.operation(async()=>{
       await api.mailRemoveAccount(account.id);
       this.accounts=await api.mailListAccounts();
@@ -417,7 +421,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     });
   }
   async removeDraft(draft:MailDraft):Promise<void>{
-    if(!window.confirm(this.t('Delete the selected local draft?')))return;
+    if(!(await confirmed(this.t('Delete the selected local draft?'))))return;
     await this.operation(async()=>{
       await api.mailRemoveDraft(this.selectedId,draft.id,draft.revision);
       this.drafts=this.drafts.filter(d=>d.id!==draft.id);
@@ -429,12 +433,12 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   async discardCompose():Promise<void>{
     const draft=this.composer.id?this.drafts.find(d=>d.id===this.composer.id):undefined;
     if(draft){await this.removeDraft(draft);return;}
-    if(this.hasUnsavedComposer&&!window.confirm(this.t('Discard unsaved changes to this message?')))return;
+    if(this.hasUnsavedComposer&&!(await confirmed(this.t('Discard unsaved changes to this message?'))))return;
     this.composeOpen=false;this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
   }
   async send():Promise<void>{
     if(!this.selectedId)return;
-    if(!window.confirm(this.t('Send this email now? This action cannot be undone.')))return;
+    if(!(await confirmed(this.t('Send this email now? This action cannot be undone.'))))return;
     await this.operation(async()=>{
       const current={...this.composer};
       // One deliberate click issues one send. Never auto-retry on a network error.

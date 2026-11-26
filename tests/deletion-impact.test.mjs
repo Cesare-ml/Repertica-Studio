@@ -47,8 +47,8 @@ test('a collector with sales is warned that the sales are deleted too', () => {
 
 test('the interface asks for the impact first and only cascades what was shown', () => {
   const app = get('src/app/app.component.ts');
-  assert.match(app, /api\.artworkDeletionImpact\(a\.id\)[\s\S]*window\.confirm\(artworkDeletionMessage[\s\S]*api\.deleteArtwork\(a\.id, hasDependents\(impact\)\)/);
-  assert.match(app, /api\.collectorDeletionImpact\(c\.id\)[\s\S]*window\.confirm\(collectorDeletionMessage[\s\S]*api\.deleteCollector\(c\.id, impact\.sales\.length > 0\)/);
+  assert.match(app, /api\.artworkDeletionImpact\(a\.id\)[\s\S]*await confirmed\(artworkDeletionMessage[\s\S]*api\.deleteArtwork\(a\.id, hasDependents\(impact\)\)/);
+  assert.match(app, /api\.collectorDeletionImpact\(c\.id\)[\s\S]*await confirmed\(collectorDeletionMessage[\s\S]*api\.deleteCollector\(c\.id, impact\.sales\.length > 0\)/);
   assert.match(app, /api\.deleteCertificate\(c\.id\)/);
   assert.match(get('src/app/app.component.html'), /\(click\)="deleteCertificate\(c\)"/);
 });
@@ -105,7 +105,7 @@ test('the lists have tick boxes, a select-all box and one bulk delete that only 
   const app = get('src/app/app.component.ts');
   assert.match(app, /pickedArtworks[\s\S]*this\.visibleArtworks\.filter/);
   assert.match(app, /pickedCollectors[\s\S]*this\.visibleCollectors\.filter/);
-  assert.match(app, /window\.confirm\(bulkDeletionMessage\('artworks'/);
-  assert.match(app, /window\.confirm\(bulkDeletionMessage\('collectors'/);
-  assert.match(app, /window\.confirm\(bulkDeletionMessage\('certificates'/);
+  assert.match(app, /await confirmed\(bulkDeletionMessage\('artworks'/);
+  assert.match(app, /await confirmed\(bulkDeletionMessage\('collectors'/);
+  assert.match(app, /await confirmed\(bulkDeletionMessage\('certificates'/);
 });

@@ -28,6 +28,7 @@ import { badgeText, notificationContent } from './mail-sync';
 import { mailText } from './mail-i18n';
 import { artworkDeletionMessage, bulkDeletionMessage, collectorDeletionMessage, hasDependents, mergeImpacts } from './deletion-impact';
 import type { DeletionImpact } from './deletion-impact';
+import { confirmed } from './confirm-dialog';
 import { FIRST_UPDATE_CHECK_DELAY_MS, UPDATE_CHECK_INTERVAL_MS, isQuietStatus, progressPercent, updateMessage } from './updates';
 import { getVersion } from '@tauri-apps/api/app';
 import type {
@@ -449,8 +450,8 @@ export class AppComponent implements OnInit {
   }
   async connectClient(client: McpClientStatus): Promise<void> {
     if (this.busy) return;
-    if (!window.confirm(this.tr('Verrà aggiunto Repertica Studio alla configurazione di') + ' ' + client.name + '. ' + this.tr('Il file modificato è:') + '\n\n' + client.configPath +
-        '\n\n' + this.tr('Una copia del file originale viene conservata accanto ad esso. Continuare?'))) return;
+    if (!(await confirmed(this.tr('Verrà aggiunto Repertica Studio alla configurazione di') + ' ' + client.name + '. ' + this.tr('Il file modificato è:') + '\n\n' + client.configPath +
+        '\n\n' + this.tr('Una copia del file originale viene conservata accanto ad esso. Continuare?')))) return;
     await this.run(async () => { this.replaceClient(await api.mcpClientConfigure(client.id)); },
       this.tr('Collegamento completato: riavvia l’assistente'));
   }
@@ -685,7 +686,7 @@ export class AppComponent implements OnInit {
   async restoreSelectedBackup(): Promise<void> {
     if (this.busy || !this.restoreCandidate) return;
     const candidate = this.restoreCandidate;
-    if (!window.confirm('RIPRISTINO ARCHIVIO\\n\\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\\n\\nContinuare?')) return;
+    if (!(await confirmed('RIPRISTINO ARCHIVIO\n\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\n\nContinuare?'))) return;
     this.busy = true; this.errorMessage = ''; this.notice = '';
     try {
       this.lastRestore = await api.restoreBackup(candidate.directory);
@@ -876,7 +877,7 @@ export class AppComponent implements OnInit {
     if (await this.run(()=>api.saveExpense(input),this.tr('Salva spesa'))) this.expenseDialog=false;
   }
   async deleteExpense(e:Expense):Promise<void> {
-    if(!window.confirm(this.tr('Elimina') + ': '+e.description+'?'))return;
+    if(!(await confirmed(this.tr('Elimina') + ': '+e.description+'?')))return;
     await this.run(()=>api.deleteExpense(e.id),this.tr('Elimina'));
   }
   openViewer(artwork: Artwork): void {
@@ -1132,7 +1133,7 @@ export class AppComponent implements OnInit {
     } catch (error) { this.errorMessage = this.error(error); }
   }
   async removeRaw(artworkId: string): Promise<void> {
-    if (!window.confirm(this.tr('Rimuovere il file RAW allegato? Il file dell’archivio verrà eliminato.'))) return;
+    if (!(await confirmed(this.tr('Rimuovere il file RAW allegato? Il file dell’archivio verrà eliminato.')))) return;
     await this.run(() => api.removeArtworkRaw(artworkId), this.tr('File RAW rimosso'));
   }
   async exportRaw(artworkId: string): Promise<void> {
@@ -1233,7 +1234,7 @@ export class AppComponent implements OnInit {
     let impact;
     try { impact = await api.artworkDeletionImpact(a.id); }
     catch (error) { this.errorMessage = this.error(error); return; }
-    if (!window.confirm(artworkDeletionMessage(a.title, impact, this.formatters()))) return;
+    if (!(await confirmed(artworkDeletionMessage(a.title, impact, this.formatters())))) return;
     if (await this.run(() => api.deleteArtwork(a.id, hasDependents(impact)), 'Opera eliminata')) delete this.thumbnails[a.id];
   }
   /** One confirmation for the whole selection, then the records are deleted one after the other. */
@@ -1253,7 +1254,7 @@ export class AppComponent implements OnInit {
     let impacts: DeletionImpact[];
     try { impacts = await Promise.all(items.map(a => api.artworkDeletionImpact(a.id))); }
     catch (error) { this.errorMessage = this.error(error); return; }
-    if (!window.confirm(bulkDeletionMessage('artworks', items.map(a => a.title), mergeImpacts(impacts), this.formatters()))) return;
+    if (!(await confirmed(bulkDeletionMessage('artworks', items.map(a => a.title), mergeImpacts(impacts), this.formatters())))) return;
     if (await this.deleteMany(items.map((a, i) => () => api.deleteArtwork(a.id, hasDependents(impacts[i]))), 'Opere eliminate')) {
       items.forEach(a => { delete this.thumbnails[a.id]; this.selectedArtworkIds.delete(a.id); });
     }
@@ -1264,7 +1265,7 @@ export class AppComponent implements OnInit {
     let impacts: DeletionImpact[];
     try { impacts = await Promise.all(items.map(c => api.collectorDeletionImpact(c.id))); }
     catch (error) { this.errorMessage = this.error(error); return; }
-    if (!window.confirm(bulkDeletionMessage('collectors', items.map(c => c.name), mergeImpacts(impacts), this.formatters()))) return;
+    if (!(await confirmed(bulkDeletionMessage('collectors', items.map(c => c.name), mergeImpacts(impacts), this.formatters())))) return;
     if (await this.deleteMany(items.map((c, i) => () => api.deleteCollector(c.id, impacts[i].sales.length > 0)), 'Contatti eliminati')) {
       items.forEach(c => this.selectedCollectorIds.delete(c.id));
     }
@@ -1273,7 +1274,7 @@ export class AppComponent implements OnInit {
     const items = this.pickedCertificates;
     if (!items.length) return;
     const none: DeletionImpact = { certificates: [], sales: [], receipts: 0, attachments: 0 };
-    if (!window.confirm(bulkDeletionMessage('certificates', items.map(c => `${c.serial} (${c.artwork_title})`), none, this.formatters()))) return;
+    if (!(await confirmed(bulkDeletionMessage('certificates', items.map(c => `${c.serial} (${c.artwork_title})`), none, this.formatters())))) return;
     if (await this.deleteMany(items.map(c => () => api.deleteCertificate(c.id)), 'Certificati eliminati')) {
       items.forEach(c => { this.selectedCertificateIds.delete(c.id); if (this.selectedCertificate?.id === c.id) this.selectedCertificate = null; });
     }
@@ -1282,7 +1283,7 @@ export class AppComponent implements OnInit {
     return { t: (key: string) => this.tr(key), money: (cents: number) => this.euros(cents), date: (value: string) => this.date(value) };
   }
   async deleteCertificate(c: Certificate): Promise<void> {
-    if (!window.confirm(`${this.tr('Eliminare il certificato')} ${c.serial} (${c.artwork_title})?\n\n${this.tr('L’opera e la sua vendita non vengono modificate. Questa operazione non è reversibile.')}`)) return;
+    if (!(await confirmed(`${this.tr('Eliminare il certificato')} ${c.serial} (${c.artwork_title})?\n\n${this.tr('L’opera e la sua vendita non vengono modificate. Questa operazione non è reversibile.')}`))) return;
     if (await this.run(() => api.deleteCertificate(c.id), 'Certificato eliminato') && this.selectedCertificate?.id === c.id) this.selectedCertificate = null;
   }
   private async pickPhoto(title: string): Promise<string | null> {
@@ -1405,7 +1406,7 @@ export class AppComponent implements OnInit {
   async makeGalleryPrimary(image: GalleryImage): Promise<void> {
     const artwork = this.galleryArtwork;
     if (!artwork || image.artwork_id !== artwork.id || this.busy) return;
-    if (!window.confirm(this.tr('Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.'))) return;
+    if (!(await confirmed(this.tr('Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.')))) return;
     const promoted = await this.run(async () => {
       await api.promoteArtworkGalleryImage(artwork.id, image.id);
       // Refresh must reload the cover instead of reusing the previous thumbnail.
@@ -1424,7 +1425,7 @@ export class AppComponent implements OnInit {
     this.change.detectChanges();
   }
   async removeGalleryPhoto(image: GalleryImage): Promise<void> {
-    if (!window.confirm(this.tr('Eliminare questa fotografia aggiuntiva?'))) return;
+    if (!(await confirmed(this.tr('Eliminare questa fotografia aggiuntiva?')))) return;
     const artwork = this.galleryArtwork;
     if (await this.run(() => api.deleteArtworkGalleryImage(image.id), this.tr('Fotografia eliminata')) && artwork) {
       delete this.galleryPreviews[image.id];
@@ -1524,7 +1525,7 @@ export class AppComponent implements OnInit {
     this.change.detectChanges();
   }
   async deleteCollectorImage(image: CollectorImage): Promise<void> {
-    if (!window.confirm(this.tr('Eliminare questa fotografia aggiuntiva?'))) return;
+    if (!(await confirmed(this.tr('Eliminare questa fotografia aggiuntiva?')))) return;
     const id = this.collectorDraft.id;
     if (await this.run(() => api.deleteCollectorImage(image.id), this.tr('Fotografia eliminata')) && id) {
       delete this.collectorPreviews[image.id];
@@ -1535,7 +1536,7 @@ export class AppComponent implements OnInit {
     let impact;
     try { impact = await api.collectorDeletionImpact(c.id); }
     catch (error) { this.errorMessage = this.error(error); return; }
-    if (!window.confirm(collectorDeletionMessage(c.name, impact, this.formatters()))) return;
+    if (!(await confirmed(collectorDeletionMessage(c.name, impact, this.formatters())))) return;
     await this.run(() => api.deleteCollector(c.id, impact.sales.length > 0), 'Collezionista eliminato');
   }
   recalculateDefaultSaleTax(): void {
@@ -1572,7 +1573,7 @@ export class AppComponent implements OnInit {
     if (await this.run(() => api.recordSale(input), 'Vendita registrata e stato dell’opera aggiornato')) this.saleDialog = false;
   }
   async deleteSale(sale: Sale): Promise<void> {
-    if (!window.confirm(`Eliminare la vendita di "${sale.artwork_title}"? L'opera tornerà disponibile.`)) return;
+    if (!(await confirmed(`Eliminare la vendita di "${sale.artwork_title}"? L'opera tornerà disponibile.`))) return;
     await this.run(() => api.deleteSale(sale.id), 'Vendita eliminata');
   }
   get saleAmountCents(): number | null {
@@ -1601,7 +1602,7 @@ export class AppComponent implements OnInit {
     if (await this.run(() => api.saveSaleInstallments(sale.id, plan.items), this.tr('Piano rateale salvato'))) this.planEditing = false;
   }
   async removePlan(sale: Sale): Promise<void> {
-    if (!window.confirm(this.tr('Rimuovere il piano rateale? Gli incassi registrati non vengono modificati.'))) return;
+    if (!(await confirmed(this.tr('Rimuovere il piano rateale? Gli incassi registrati non vengono modificati.')))) return;
     await this.run(() => api.saveSaleInstallments(sale.id, []), this.tr('Piano rateale rimosso'));
   }
   balanceForSale(sale: Sale): SaleBalance {
@@ -1640,7 +1641,7 @@ export class AppComponent implements OnInit {
     }
   }
   async deleteSaleReceipt(receipt: SaleReceipt): Promise<void> {
-    if (!window.confirm(this.tr('Confermi eliminazione incasso?'))) return;
+    if (!(await confirmed(this.tr('Confermi eliminazione incasso?')))) return;
     await this.run(()=>api.deleteSaleReceipt(receipt.id),this.tr('Incasso eliminato'));
   }
 
@@ -1720,7 +1721,7 @@ export class AppComponent implements OnInit {
   }
   async removeReceiptFile(receipt: SaleReceipt): Promise<void> {
     if (this.busy || this.receiptAttachmentsLoading ||
-      !window.confirm(this.tr('Confermi rimozione dell’allegato?'))) return;
+      !(await confirmed(this.tr('Confermi rimozione dell’allegato?')))) return;
     const success = await this.run(
       () => api.removeReceiptAttachment(receipt.id), this.tr('Documento rimosso'));
     if (success) {
