@@ -122,7 +122,7 @@ test('commercial preflight rejects inconsistent relationships and cents even wit
     p=>p.sales.push({...p.sales[0]}),
     p=>p.sales=[],
     p=>p.artworks[0].status='available',
-    p=>p.collectors.push({key:'unused'}),
+    p=>p.collectors.push({key:'unused',first_name:'Unused'}),
     p=>p.sales[0].amount_cents=1.5,
     p=>p.sales[0].tax_cents=10001,
     p=>p.sales[0].legacy_shares_bp=[2000,3000,4999],
