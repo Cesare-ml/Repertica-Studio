@@ -582,6 +582,40 @@ pub fn artwork_image_data(db: State<'_, Database>, artwork_id: String) -> Result
     artwork_image_data_core(&db, &artwork_id)
 }
 
+// Read the exact frozen path, not the current media revision.
+fn certificate_image_data_core(db: &Database, certificate_id: &str, expected_snapshot_json: &str) -> Result<Option<String>, String> {
+    let conn = db.conn.lock().map_err(err)?;
+    let snapshot: String = conn.query_row(
+        "SELECT snapshot_json FROM certificates WHERE id=?1", params![certificate_id], |row| row.get(0),
+    ).map_err(err)?;
+    if snapshot != expected_snapshot_json {
+        return Err("Snapshot del certificato cambiato: riapri la scheda".into());
+    }
+    let value: serde_json::Value = serde_json::from_str(&snapshot).map_err(err)?;
+    let object = value.as_object().ok_or("Snapshot del certificato non valido")?;
+    let relative = match object.get("image_path") {
+        None | Some(serde_json::Value::Null) => return Ok(None),
+        Some(serde_json::Value::String(path)) if safe_relative(path) => path,
+        _ => return Err("Percorso della fotografia storica non valido".into()),
+    };
+    require_regular_media_dir(&db.directory)?;
+    let target = db.directory.join(relative);
+    let bytes = read_image_file(target.to_str().ok_or("Percorso della fotografia storica non valido")?)?;
+    // Keep the archive lock until the exact bytes have been copied.
+    drop(conn);
+    let preview = crate::imaging::preview(&bytes, 1600, &[])?;
+    Ok(Some(format!("data:{};base64,{}", preview.mime, STANDARD.encode(preview.bytes))))
+}
+
+#[tauri::command]
+pub async fn certificate_image_data(app: tauri::AppHandle, certificate_id: String, expected_snapshot_json: String) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<Database>();
+        certificate_image_data_core(&db, &certificate_id, &expected_snapshot_json)
+    }).await.map_err(err)?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,6 +718,75 @@ mod tests {
         assert!(!db.directory.join(gallery).exists());
         assert!(!db.directory.join(raw).exists());
         assert!(artwork_by_id(&db.conn.lock().unwrap(), "a").is_err());
+    }
+
+    fn certificate_fixture(db: &Database, id: &str, snapshot: &str) {
+        db.conn.lock().unwrap().execute(
+            "INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+             VALUES(?1,'a',?1,'2026-11-21','Artist',?2,'t')",
+            params![id, snapshot],
+        ).unwrap();
+    }
+
+    fn valid_certificate_png(color: [u8; 3]) -> Vec<u8> {
+        let mut output = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(8, 8, image::Rgb(color)))
+            .write_to(&mut output, image::ImageFormat::Png).unwrap();
+        output.into_inner()
+    }
+
+    #[test]
+    fn certificate_image_reads_exact_historical_file_without_catalog_and_refuses_missing_bytes() {
+        let (_dir, db) = artwork_with_cover();
+        let original_bytes = valid_certificate_png([220, 10, 10]);
+        save_artwork_image_bytes(&db, "a", &original_bytes).unwrap();
+        let original = cover_path(&db);
+        let snapshot = {
+            let conn = db.conn.lock().unwrap();
+            serde_json::to_string(&artwork_by_id(&conn, "a").unwrap()).unwrap()
+        };
+        certificate_fixture(&db, "historic", &snapshot);
+        save_artwork_image_bytes(&db, "a", &valid_certificate_png([10, 10, 220])).unwrap();
+        assert_ne!(cover_path(&db), original);
+        let expected = crate::imaging::preview(&original_bytes, 1600, &[]).unwrap();
+        assert_eq!(certificate_image_data_core(&db, "historic", &snapshot).unwrap(),
+            Some(format!("data:{};base64,{}", expected.mime, STANDARD.encode(expected.bytes))));
+        assert!(certificate_image_data_core(&db, "historic", "{}").is_err());
+        fs::write(db.directory.join(&original), [0xff, 0xd8, 0xff, 0x42]).unwrap();
+        assert!(certificate_image_data_core(&db, "historic", &snapshot).is_err());
+        fs::remove_file(db.directory.join(original)).unwrap();
+        assert!(certificate_image_data_core(&db, "historic", &snapshot).is_err());
+    }
+
+    #[test]
+    fn certificate_image_rejects_unsafe_snapshot_and_handles_no_photo() {
+        let (_dir, db) = artwork_with_cover();
+        for (id, snapshot) in [
+            ("unsafe", r#"{"image_path":"media/../secret"}"#),
+            ("invalid", r#"{"image_path":42}"#),
+            ("array", "[]"),
+            ("malformed", "{"),
+        ] {
+            certificate_fixture(&db, id, snapshot);
+            assert!(certificate_image_data_core(&db, id, snapshot).is_err());
+        }
+        for (id, snapshot) in [("none", r#"{"image_path":null}"#), ("legacy", "{}")] {
+            certificate_fixture(&db, id, snapshot);
+            assert_eq!(certificate_image_data_core(&db, id, snapshot).unwrap(), None);
+        }
+        assert!(certificate_image_data_core(&db, "missing", "{}").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn certificate_image_rejects_symbolic_historical_file() {
+        let (_dir, db) = artwork_with_cover();
+        let target = tempfile::NamedTempFile::new().unwrap();
+        fs::write(target.path(), valid_certificate_png([10, 10, 220])).unwrap();
+        std::os::unix::fs::symlink(target.path(), db.directory.join("media/linked.png")).unwrap();
+        let snapshot = r#"{"image_path":"media/linked.png"}"#;
+        certificate_fixture(&db, "linked", snapshot);
+        assert!(certificate_image_data_core(&db, "linked", snapshot).is_err());
     }
 
     #[test]
