@@ -49,6 +49,56 @@ function verifyPackageMedia(pkg) {
   }
 }
 
+// Structural and monetary checks for exporter-produced packages. Native preview
+// still validates complete records, dates, media decoding and database conflicts.
+function verifyPackageRelations(pkg, seenCollectorKeys) {
+  const artworks = new Map(pkg.artworks.map(a => [a.code, a.status]));
+  const keys = new Set(), linked = new Set(), used = new Set();
+  const int = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max;
+  const maxMoney = 100_000_000_000;
+  const fail = () => { throw Error('Invalid commercial relationship or amount'); };
+  for (const c of pkg.collectors) {
+    if (typeof c?.key !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(c.key) ||
+        keys.has(c.key) || seenCollectorKeys.has(c.key)) fail();
+    keys.add(c.key);
+  }
+  let receipts = 0, installments = 0;
+  for (const sale of pkg.sales) {
+    if (artworks.get(sale?.artwork_code) !== 'sold' || linked.has(sale.artwork_code) ||
+        !keys.has(sale.collector_key) || sale.currency !== 'EUR' ||
+        !int(sale.amount_cents,1,maxMoney) || !int(sale.tax_cents,0,maxMoney) ||
+        !int(sale.shipping_cents,0,maxMoney) || sale.tax_cents + sale.shipping_cents > sale.amount_cents ||
+        !Array.isArray(sale.legacy_shares_bp) || sale.legacy_shares_bp.length !== 3 ||
+        !sale.legacy_shares_bp.every(n => int(n,0,10000)) ||
+        sale.legacy_shares_bp.reduce((a,b) => a+b,0) !== 10000 ||
+        !Array.isArray(sale.allocations) || sale.allocations.length !== 0 ||
+        !Array.isArray(sale.receipts) || !Array.isArray(sale.installments)) fail();
+    linked.add(sale.artwork_code); used.add(sale.collector_key);
+    receipts += sale.receipts.length; installments += sale.installments.length;
+    if (receipts > 1000 || installments > 1000) fail();
+    let total = 0;
+    for (const receipt of sale.receipts) {
+      if (!int(receipt?.amount_cents,1,maxMoney) ||
+          !['bank_transfer','cash','card','other'].includes(receipt.method)) fail();
+      total += receipt.amount_cents;
+      if (total > sale.amount_cents) fail();
+    }
+    if (sale.installments.length) {
+      if (sale.receipts.length || !int(sale.installments.length,2,60)) fail();
+      total = 0;
+      for (const [i,item] of sale.installments.entries()) {
+        if (item?.position !== i+1 || !int(item.amount_cents,1,maxMoney)) fail();
+        total += item.amount_cents;
+        if (total > sale.amount_cents) fail();
+      }
+      if (total !== sale.amount_cents) fail();
+    }
+  }
+  for (const [code,status] of artworks) if ((status === 'sold') !== linked.has(code)) fail();
+  if (keys.size !== used.size) fail();
+  for (const key of keys) seenCollectorKeys.add(key);
+}
+
 async function inspectArchiveMediaBatches(directory) {
   const selected=resolve(directory);
   if (!(await lstat(selected)).isDirectory()) throw Error('Unsafe export directory');
@@ -75,7 +125,7 @@ async function inspectArchiveMediaBatches(directory) {
   };
   expected.sort();
   await checkEntries();
-  const codes=new Set(), names=new Set(), emails=new Set();
+  const codes=new Set(), names=new Set(), emails=new Set(), collectorKeys=new Set();
   for(const row of manifest.packages) {
     const bytes=await readRegular(join(dir,row.file),PACKAGE_LIMIT);
     if(bytes.length!==row.bytes || sha(bytes)!==row.sha256) throw Error('Package integrity mismatch');
@@ -98,6 +148,7 @@ async function inspectArchiveMediaBatches(directory) {
       if(names.has(name) || (email && emails.has(email))) throw Error('Repeated collector contact');
       names.add(name); if(email) emails.add(email);
     }
+    verifyPackageRelations(pkg,collectorKeys);
   }
   await checkEntries();
   if(!(await readRegular(manifestPath,1024*1024)).equals(manifestBytes)) throw Error('Manifest changed');

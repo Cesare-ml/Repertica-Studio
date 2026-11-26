@@ -45,7 +45,8 @@ test('rejects traversal, reordered names and false counts',async t=>{
 test('rejects cross-batch codes and collector contacts',async t=>{
   const a=await fixture(t,[pkg('ART-1'),pkg('art-1')]);
   await assert.rejects(verifyArchiveMediaBatches(a.root),/artwork code/);
-  const b=await fixture(t,[pkg('A',[{first_name:'Ada',email:'x@example.invalid'}]),pkg('B',[{first_name:'Other',email:'X@example.invalid'}])]);
+  const aSale=soldPackage('A','1','Ada','x@example.invalid'), bSale=soldPackage('B','2','Other','X@example.invalid');
+  const b=await fixture(t,[aSale,bSale]);
   await assert.rejects(verifyArchiveMediaBatches(b.root),/collector contact/);
 });
 test('rejects duplicate manifest keys and symlink packages',async t=>{
@@ -97,5 +98,53 @@ test('recovery refuses a damaged original even when the damaged package is not s
   const dest=join(parent,'remaining'),digest=await manifestDigest(root);
   await writeFile(join(root,'package-0001.json'),'tampered');
   await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/integrity/);
+  await assert.rejects(lstat(dest),{code:'ENOENT'});
+});
+
+function soldPackage(code,key='buyer-1',first_name='Synthetic',email=null) {
+  return {...pkg(code,[{key,first_name,email}]),artworks:[{code,title:code,status:'sold'}],sales:[{
+    artwork_code:code,collector_key:key,currency:'EUR',sold_at:'2025-03-04',amount_cents:10000,
+    tax_cents:1000,shipping_cents:500,legacy_shares_bp:[2000,3000,5000],allocations:[],
+    receipts:[{amount_cents:4000,method:'cash',received_at:'2025-03-05'}],installments:[]
+  }]};
+}
+test('commercial preflight accepts explicit receipts and a separate unpaid plan',async t=>{
+  const a=soldPackage('A','1','Ada'),b=soldPackage('B','2','Bob');
+  b.sales[0].receipts=[];
+  b.sales[0].installments=[{position:1,amount_cents:5000,due_date:'2025-04-01'},{position:2,amount_cents:5000,due_date:'2025-05-01'}];
+  const {root}=await fixture(t,[a,b]);
+  assert.equal((await verifyArchiveMediaBatches(root)).sales,2);
+});
+test('commercial preflight rejects inconsistent relationships and cents even with matching outer hashes',async t=>{
+  for(const mutate of [
+    p=>p.sales[0].collector_key='absent',
+    p=>p.sales[0].artwork_code='absent',
+    p=>p.sales.push({...p.sales[0]}),
+    p=>p.sales=[],
+    p=>p.artworks[0].status='available',
+    p=>p.collectors.push({key:'unused'}),
+    p=>p.sales[0].amount_cents=1.5,
+    p=>p.sales[0].tax_cents=10001,
+    p=>p.sales[0].legacy_shares_bp=[2000,3000,4999],
+    p=>p.sales[0].receipts[0].amount_cents=10001,
+    p=>p.sales[0].installments=[{position:1,amount_cents:10000}],
+    p=>{p.sales[0].receipts=[];p.sales[0].installments=[{position:1,amount_cents:5000},{position:2,amount_cents:4999}]},
+  ]) {
+    const a=soldPackage('A');mutate(a);
+    const {root}=await fixture(t,[a]);
+    await assert.rejects(verifyArchiveMediaBatches(root),/Invalid commercial/);
+  }
+});
+test('commercial preflight rejects a collector key split across packages despite different contacts',async t=>{
+  const {root}=await fixture(t,[soldPackage('A','1','Ada'),soldPackage('B','1','Bob')]);
+  await assert.rejects(verifyArchiveMediaBatches(root),/Invalid commercial/);
+});
+test('recovery refuses a commercially inconsistent excluded package without writing output',async t=>{
+  const bad=soldPackage('A');bad.sales[0].receipts[0].amount_cents=10001;
+  const {root}=await fixture(t,[bad,pkg('B')]);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining'),digest=await manifestDigest(root);
+  await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
   await assert.rejects(lstat(dest),{code:'ENOENT'});
 });
