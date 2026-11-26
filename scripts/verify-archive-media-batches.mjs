@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { lstat, readdir, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { readRegular, PACKAGE_LIMIT } from './add-local-artwork-covers.mjs';
+import { readRegular, PACKAGE_LIMIT, COVER_LIMIT } from './add-local-artwork-covers.mjs';
+import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { createLocalPackageDirectory } from './publish-local-package.mjs';
 
@@ -14,6 +15,39 @@ const sha = b => createHash('sha256').update(b).digest('hex');
 const folded = s => s.replace(/[A-Z]/g,c=>c.toLowerCase());
 const boundedInt = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
 const fields = ['file','sha256','bytes','artworks','collectors','sales','photographs'];
+
+// Check embedded media independently of the outer package hash. This remains a
+// header-only preflight; the native preview must decode every image.
+function verifyPackageMedia(pkg) {
+  const codes = new Set(pkg.artworks.map(a => a.code));
+  const covers = new Set(), positions = new Map();
+  let pixels = 0;
+  function verify(photo) {
+    if (!codes.has(photo?.artwork_code) || typeof photo.data_base64 !== 'string' ||
+        photo.data_base64.length > Math.ceil(COVER_LIMIT / 3) * 4 ||
+        typeof photo.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(photo.sha256)) throw Error('Invalid embedded photograph');
+    const bytes = Buffer.from(photo.data_base64, 'base64');
+    if (!bytes.length || bytes.length > COVER_LIMIT || bytes.toString('base64') !== photo.data_base64 ||
+        sha(bytes) !== photo.sha256) throw Error('Embedded photograph integrity mismatch');
+    pixels = addArchiveImagePixels(pixels, bytes);
+  }
+  for (const photo of pkg.covers) {
+    if (covers.has(photo?.artwork_code)) throw Error('Repeated cover');
+    verify(photo);
+    covers.add(photo.artwork_code);
+  }
+  for (const photo of pkg.gallery) {
+    if (!boundedInt(photo?.position, 1, 20)) throw Error('Invalid gallery position');
+    verify(photo);
+    if (!positions.has(photo.artwork_code)) positions.set(photo.artwork_code, new Set());
+    const seen = positions.get(photo.artwork_code);
+    if (seen.has(photo.position)) throw Error('Repeated gallery position');
+    seen.add(photo.position);
+  }
+  for (const seen of positions.values()) {
+    for (let i = 1; i <= seen.size; i++) if (!seen.has(i)) throw Error('Noncontiguous gallery positions');
+  }
+}
 
 async function inspectArchiveMediaBatches(directory) {
   const selected=resolve(directory);
@@ -55,6 +89,7 @@ async function inspectArchiveMediaBatches(directory) {
       if(typeof a?.code!=='string' || !a.code || a.code.trim()!==a.code || codes.has(folded(a.code))) throw Error('Repeated or invalid artwork code');
       codes.add(folded(a.code));
     }
+    verifyPackageMedia(pkg);
     for(const c of pkg.collectors) {
       if(typeof c?.first_name!=='string' || !c.first_name.trim() ||
           (c.last_name!=null && typeof c.last_name!=='string') || (c.email!=null && typeof c.email!=='string')) throw Error('Invalid collector');
