@@ -211,3 +211,67 @@ test('deleting a saved draft uses its original account and preserves subsequent 
     }finally{delete globalThis.window;}
   }
 });
+
+
+async function exercisePurge(source, confirmed, scenario, assert) {
+  const first = source.indexOf('  private async run<T>(');
+  const last = source.indexOf('\n  // ------------------------------------------------------------ listing', first);
+  const runText = source.slice(first, last).trim().replace('private async run<T>(work: () => Promise<T>): Promise<T | undefined>', 'async run(work)');
+  const calls = [];
+  let answer, reject, prompts = 0, closed = 0, reloaded = 0, success = 0, failed = 0;
+  const original = {item:{id:'image-A',state:'TRASHED'}};
+  const other = {item:{id:'image-B',state:'TRASHED'}};
+  const ctx = {selected:original,busy:false,purgeConfirmationPending:false,tr:x=>x,
+    run:new Function('return ({'+runText+'}).run')(),
+    closeInspector(){closed++;this.selected=null;},ok(){success++;},fail(){failed++;},
+    load:async reset=>{assert.equal(reset,true);reloaded++;},change:{detectChanges(){}}};
+  const api={mediaPurge:async id=>{
+    calls.push(id);
+    if(scenario==='ipc-error')throw new Error('permission denied');
+    if(scenario==='changed-during-ipc')ctx.selected=other;
+    // Tauri returns void on success.
+  }};
+  const guard = () => new Promise((resolve,fail)=>{prompts++;answer=resolve;reject=fail;});
+  const start=source.indexOf('  async purge()'),end=source.indexOf('\n  // ------------------------------------------------------------ duplicates',start);
+  assert.ok(start>=0&&end>start);
+  const method=source.slice(start,end).trim().replace('(): Promise<void>','()');
+  const purge=new Function('confirmed','api','return ({'+method+'}).purge')(
+    message=>confirmed(message,guard),api);
+  if(scenario==='active')original.item.state='ACTIVE';
+  if(scenario==='initial-busy')ctx.busy=true;
+  const pending=purge.call(ctx);
+  assert.deepEqual(calls,[]);
+  if(scenario==='active'||scenario==='initial-busy'){
+    assert.equal(prompts,0);
+  }else{
+    assert.equal(prompts,1);
+    if(scenario==='changed')ctx.selected=other;
+    if(scenario==='closed')ctx.selected=null;
+    if(scenario==='restored')original.item.state='ACTIVE';
+    if(scenario==='busy')ctx.busy=true;
+    if(scenario==='double'){await purge.call(ctx);assert.equal(prompts,1);}
+    if(scenario==='reject')reject(new Error('dialog unavailable'));else answer(scenario!=='cancel');
+  }
+  await pending;
+  const invoked=['accept','double','ipc-error','changed-during-ipc'].includes(scenario);
+  const succeeded=invoked&&scenario!=='ipc-error';
+  assert.deepEqual(calls,invoked?['image-A']:[]);
+  assert.equal(reloaded,succeeded?1:0);
+  assert.equal(success,succeeded?1:0);
+  assert.equal(failed,scenario==='ipc-error'?1:0);
+  assert.equal(closed,['accept','double'].includes(scenario)?1:0);
+  if(scenario==='changed'||scenario==='changed-during-ipc')assert.equal(ctx.selected,other);
+  assert.equal(ctx.purgeConfirmationPending,false);
+}
+
+for (const scenario of ["accept","cancel","reject","changed","closed","restored","busy","double","active","initial-busy","ipc-error","changed-during-ipc"]) {
+  test('media purge: '+scenario, async () => {
+    const source=readFileSync(new URL('media-center.component.ts',appDir),'utf8');
+    try {
+      await exercisePurge(source, (message,guard)=>{
+        globalThis.window={confirm:guard};
+        return confirmed(message);
+      }, scenario, assert);
+    } finally {delete globalThis.window;}
+  });
+}
