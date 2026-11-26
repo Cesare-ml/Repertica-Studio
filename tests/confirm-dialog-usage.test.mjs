@@ -137,3 +137,76 @@ test('mail confirmation cannot authorize a changed message or account or duplica
     } finally { delete globalThis.window; }
   }
 });
+
+
+function mailDiscardGuard(source) {
+  const first = source.indexOf('  private async confirmDiscard(');
+  const last = source.indexOf('\n  // ---- views', first);
+  assert.ok(first >= 0 && last > first);
+  const method = source.slice(first, last).replace('private async ', 'async ')
+    .replace('(message:string, ask=true):Promise<boolean>', '(message, ask=true)').trim();
+  return new Function('confirmed', 'return ({' + method + '}).confirmDiscard')(confirmed);
+}
+
+test('discard confirmation is bound to the original editor and account', async () => {
+  const source = readFileSync(new URL('business-mail.component.ts', appDir), 'utf8');
+  const blank = () => ({id:null,revision:null,to:'',cc:'',bcc:'',subject:'',body:'',attachments:[]});
+  const guard = mailDiscardGuard(source);
+  const leave = handler(source, 'async canLeave()', '\n  /** Consent', '():Promise<boolean>', 'canLeave');
+  const close = handler(source, '  async closeCompose()', '\n  minimizeCompose', '():Promise<void>', 'closeCompose', {}, blank);
+  const discard = handler(source, '  async discardCompose()', '\n  async send()', '():Promise<void>', 'discardCompose', {}, blank);
+  for (const action of [close, discard]) {
+    for (const scenario of ['accept','cancel','reject','body','replacement','account','busy','destroyed','double']) {
+      let answer, reject, prompts=0;
+      globalThis.window = { confirm: () => { prompts++; return new Promise((resolve,fail)=>{answer=resolve;reject=fail;}); } };
+      const ctx = { busy:false, destroyed:false, discardConfirmationPending:false, sendConfirmationPending:false,
+        selectedId:'account-A', composeOpen:true, composer:{...blank(),body:'original'}, drafts:[],
+        hasUnsavedComposer:true, t:x=>x, confirmDiscard:guard, canLeave:leave };
+      try {
+        const pending=action.call(ctx);
+        assert.equal(ctx.composeOpen,true);
+        if(scenario==='body')ctx.composer.body='new edits';
+        if(scenario==='replacement')ctx.composer={...ctx.composer};
+        if(scenario==='account')ctx.selectedId='account-B';
+        if(scenario==='busy')ctx.busy=true;
+        if(scenario==='destroyed')ctx.destroyed=true;
+        if(scenario==='double'){await action.call(ctx);assert.equal(prompts,1);}
+        if(scenario==='reject')reject(new Error('not allowed'));else answer(scenario!=='cancel');
+        await pending;
+        assert.equal(ctx.composeOpen,!['accept','double'].includes(scenario),scenario);
+        if(scenario==='body')assert.equal(ctx.composer.body,'new edits');
+        assert.equal(ctx.discardConfirmationPending,false);
+      } finally {delete globalThis.window;}
+    }
+  }
+});
+
+test('deleting a saved draft uses its original account and preserves subsequent editor changes', async () => {
+  const source = readFileSync(new URL('business-mail.component.ts', appDir), 'utf8');
+  const blank = () => ({id:null,revision:null,to:'',cc:'',bcc:'',subject:'',body:'',attachments:[]});
+  const first=source.indexOf('  async removeDraft('), last=source.indexOf('\n  /** Throw the open',first);
+  assert.ok(first>=0&&last>first);
+  const method=source.slice(first,last).replace('(draft:MailDraft):Promise<void>','(draft)').trim();
+  for(const scenario of ['accept','cancel','account','foreign','editing-during-confirm','editing-during-ipc']){
+    let answer;
+    const calls=[];
+    const draft={id:'draft-A',account_id:'account-A',revision:4};
+    const ctx={busy:false,destroyed:false,discardConfirmationPending:false,sendConfirmationPending:false,
+      selectedId:'account-A',composeOpen:true,composer:{...blank(),id:draft.id,revision:4,body:'original'},
+      drafts:[draft],t:x=>x,confirmDiscard:mailDiscardGuard(source),operation:async fn=>fn()};
+    const api={mailRemoveDraft:async(...args)=>{calls.push(args);if(scenario==='editing-during-ipc')ctx.composer.body='new edits';}};
+    const remove=new Function('api','blankComposer','return ({'+method+'}).removeDraft')(api,blank);
+    globalThis.window={confirm:()=>new Promise(resolve=>{answer=resolve;})};
+    try{
+      if(scenario==='foreign')draft.account_id='account-B';
+      const pending=remove.call(ctx,draft);
+      if(scenario==='account')ctx.selectedId='account-B';
+      if(scenario==='editing-during-confirm')ctx.composer.body='new edits';
+      if(scenario!=='foreign')answer(scenario!=='cancel');
+      await pending;
+      assert.deepEqual(calls,['accept','editing-during-ipc'].includes(scenario)?[['account-A','draft-A',4]]:[],scenario);
+      assert.equal(ctx.composeOpen,scenario!=='accept',scenario);
+      if(scenario.startsWith('editing'))assert.equal(ctx.composer.body,'new edits');
+    }finally{delete globalThis.window;}
+  }
+});

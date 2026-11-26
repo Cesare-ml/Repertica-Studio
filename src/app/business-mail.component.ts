@@ -80,6 +80,8 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   /** An operation started by the user (sending, saving…) is running. */
   busy = false;
   private sendConfirmationPending = false;
+  private discardConfirmationPending = false;
+  private destroyed = false;
   /** The first load of the folders and messages is running. */
   loading = false;
   /** A refresh is running in the background (the list on screen is the previous one). */
@@ -127,7 +129,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     await this.loadAccounts();
     this.timer = setInterval(()=>void this.autoRefresh(), REFRESH_MS);
   }
-  ngOnDestroy():void { if (this.timer) clearInterval(this.timer); }
+  ngOnDestroy():void { this.destroyed=true; if (this.timer) clearInterval(this.timer); }
   ngOnChanges(changes: SimpleChanges):void {
     if (!changes['sync'] || !this.selectedId) return;
     const stamp = inboxStamp(this.sync, this.selectedId);
@@ -328,7 +330,20 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   expandCompose():void{this.composeMode=this.composeMode==='expanded'?'normal':'expanded';}
   /** True when nothing unsaved would be lost, or the person agrees to discard it. Always await it. */
   private async canLeave():Promise<boolean>{
-    return !this.hasUnsavedComposer || await confirmed(this.t('Discard unsaved changes to this message?'));
+    return await this.confirmDiscard(this.t('Discard unsaved changes to this message?'), this.hasUnsavedComposer);
+  }
+  /** Consent is scoped to this editor/account, not to changes made while the native dialog is open. */
+  private async confirmDiscard(message:string, ask=true):Promise<boolean>{
+    if(this.destroyed||this.busy||this.discardConfirmationPending||this.sendConfirmationPending)return false;
+    if(!ask)return true;
+    const account=this.selectedId, composer=this.composer, opened=this.composeOpen;
+    const snapshot=JSON.stringify(composer);
+    this.discardConfirmationPending=true;
+    try{
+      if(!(await confirmed(message)))return false;
+      return !this.destroyed&&!this.busy&&this.selectedId===account&&this.composer===composer&&
+        this.composeOpen===opened&&JSON.stringify(this.composer)===snapshot;
+    }finally{this.discardConfirmationPending=false;}
   }
   // ---- views
   showMail():void{
@@ -422,11 +437,16 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     });
   }
   async removeDraft(draft:MailDraft):Promise<void>{
-    if(!(await confirmed(this.t('Delete the selected local draft?'))))return;
+    const account=this.selectedId;
+    if(!account||draft.account_id!==account)return;
+    const composer=this.composer, snapshot=JSON.stringify(composer);
+    if(!(await this.confirmDiscard(this.t('Delete the selected local draft?'))))return;
+    if(this.selectedId!==account)return;
     await this.operation(async()=>{
-      await api.mailRemoveDraft(this.selectedId,draft.id,draft.revision);
+      await api.mailRemoveDraft(account,draft.id,draft.revision);
+      if(this.destroyed||this.selectedId!==account)return;
       this.drafts=this.drafts.filter(d=>d.id!==draft.id);
-      if(this.composer.id===draft.id){this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);this.composeOpen=false;}
+      if(this.composer===composer&&JSON.stringify(this.composer)===snapshot&&this.composer.id===draft.id){this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);this.composeOpen=false;}
       this.notice=this.t('Draft deleted.');
     });
   }
@@ -434,15 +454,15 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   async discardCompose():Promise<void>{
     const draft=this.composer.id?this.drafts.find(d=>d.id===this.composer.id):undefined;
     if(draft){await this.removeDraft(draft);return;}
-    if(this.hasUnsavedComposer&&!(await confirmed(this.t('Discard unsaved changes to this message?'))))return;
+    if(!(await this.canLeave()))return;
     this.composeOpen=false;this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
   }
   async send():Promise<void>{
-    if(this.busy||this.sendConfirmationPending||!this.selectedId)return;
+    if(this.destroyed||this.busy||this.sendConfirmationPending||this.discardConfirmationPending||!this.selectedId)return;
     const accountId=this.selectedId;
     const current={...this.composer,attachments:[...this.composer.attachments]};
     const snapshot=JSON.stringify(current);
-    const unchanged=()=>this.selectedId===accountId&&JSON.stringify(this.composer)===snapshot;
+    const unchanged=()=>!this.destroyed&&this.selectedId===accountId&&JSON.stringify(this.composer)===snapshot;
     this.sendConfirmationPending=true;
     try{
       if(!(await confirmed(this.t('Send this email now? This action cannot be undone.'))))return;
