@@ -3,7 +3,7 @@
 pub(crate) mod batches;
 use crate::{commands::{clean, required}, db::Database};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use std::path::Path;
+use std::{io::Read, path::Path};
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -466,6 +466,50 @@ fn verify_import_counts(conn: &Connection, before: [i64; 10], parsed: &Parsed) -
     Ok(())
 }
 
+// Recheck the actual media directory before writing, verifying or cleaning up.
+// On Windows, refuse junctions and other reparse points as well as symlinks.
+fn media_is_link(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        meta.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    { meta.file_type().is_symlink() }
+}
+fn regular_media_directory(root: &Path) -> Result<(), String> {
+    let meta = std::fs::symlink_metadata(root.join("media")).map_err(database_error)?;
+    if !meta.is_dir() || media_is_link(&meta) { return Err("database".into()); }
+    Ok(())
+}
+
+// The expected length comes from already validated package bytes, not the filesystem.
+// A file that grows between stat and read must not cause an unbounded allocation.
+// These checks detect ordinary changes in a trusted local archive, not an active
+// filesystem adversary able to swap path components between system calls.
+fn verify_written_media(root: &Path, relative: &str, expected_len: usize, expected_sha: &str) -> Result<(), String> {
+    regular_media_directory(root)?;
+    let path = root.join(relative);
+    let meta = std::fs::symlink_metadata(&path).map_err(database_error)?;
+    if !meta.is_file() || media_is_link(&meta) || meta.len() != expected_len as u64 {
+        return Err("database".into());
+    }
+    let file = std::fs::File::open(&path).map_err(database_error)?;
+    let opened = file.metadata().map_err(database_error)?;
+    if !opened.is_file() || media_is_link(&opened) || opened.len() != expected_len as u64 {
+        return Err("database".into());
+    }
+    let mut stored = Vec::new();
+    file.take(expected_len as u64 + 1).read_to_end(&mut stored).map_err(database_error)?;
+    regular_media_directory(root)?;
+    let after = std::fs::symlink_metadata(&path).map_err(database_error)?;
+    if !after.is_file() || media_is_link(&after) || after.len() != expected_len as u64
+        || stored.len() != expected_len || format!("{:x}", Sha256::digest(&stored)) != expected_sha {
+        return Err("database".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 fn apply(conn: &mut Connection, source: &str, expected_digest: &str) -> Result<usize, String> {
     apply_with_media(conn, None, source, expected_digest)
@@ -495,6 +539,7 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
         let artwork_ids: BTreeMap<&str, &str> = rows.iter().zip(&ids).map(|(r,id)| (r.code.as_str(),id.as_str())).collect();
         for cover in &parsed.covers {
             let root = directory.ok_or_else(|| "database".to_string())?;
+            regular_media_directory(root)?;
             let relative = crate::commands::store_media(root, &cover.bytes, cover.extension).map_err(database_error)?;
             let gallery_id = (cover.position > 0).then(|| Uuid::new_v4().to_string());
             written.insert((cover.artwork_code.clone(), cover.position), (relative.clone(), gallery_id.clone()));
@@ -529,13 +574,7 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
                     params![gallery_id, id, relative, cover.caption, stamp, cover.position, cover.kind], |r| r.get(0)).map_err(database_error)?;
                 if !valid { return Err("database".into()); }
             }
-            let file = root.join(relative);
-            let meta = std::fs::symlink_metadata(&file).map_err(database_error)?;
-            if !meta.is_file() || meta.file_type().is_symlink() || meta.len() != cover.bytes.len() as u64 {
-                return Err("database".into());
-            }
-            let stored = std::fs::read(&file).map_err(database_error)?;
-            if format!("{:x}", Sha256::digest(&stored)) != cover.sha256 { return Err("database".into()); }
+            verify_written_media(root, relative, cover.bytes.len(), &cover.sha256)?;
         }
         // Later media and commercial writes must not alter reserved counters.
         verify_imported_codes(&tx, &sequence_targets)?;
@@ -545,7 +584,11 @@ fn apply_with_media(conn: &mut Connection, directory: Option<&Path>, source: &st
     })();
     if outcome.is_err() {
         if let Some(root) = directory {
-            for (relative, _) in written.values() { let _ = std::fs::remove_file(root.join(relative)); }
+            // Never follow a replaced media directory during rollback. If it is
+            // no longer regular, preserve the staged files for manual recovery.
+            if regular_media_directory(root).is_ok() {
+                for (relative, _) in written.values() { let _ = std::fs::remove_file(root.join(relative)); }
+            }
         }
     }
     outcome
@@ -960,6 +1003,44 @@ mod tests {
                 assert_eq!(count(conn), 0);
             });
         }
+    }
+
+    #[test]
+    fn written_media_verification_rejects_missing_changed_and_wrong_length_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("media")).unwrap();
+        let relative = "media/fixture.png";
+        let file = dir.path().join(relative);
+        let expected = b"original";
+        let sha = format!("{:x}", Sha256::digest(expected));
+        assert!(verify_written_media(dir.path(), relative, expected.len(), &sha).is_err());
+        for bytes in [b"changed!".as_slice(), b"short".as_slice(), b"original!".as_slice()] {
+            std::fs::write(&file, bytes).unwrap();
+            assert!(verify_written_media(dir.path(), relative, expected.len(), &sha).is_err());
+        }
+        std::fs::write(&file, expected).unwrap();
+        assert!(verify_written_media(dir.path(), relative, expected.len(), &sha).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn written_media_verification_rejects_symlinked_file_and_directory() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let bytes = b"original";
+        let sha = format!("{:x}", Sha256::digest(bytes));
+        std::fs::write(external.path().join("fixture.png"), bytes).unwrap();
+        let media = dir.path().join("media");
+        std::fs::create_dir(&media).unwrap();
+        let path = media.join("fixture.png");
+        symlink(external.path().join("fixture.png"), &path).unwrap();
+        assert!(verify_written_media(dir.path(), "media/fixture.png", bytes.len(), &sha).is_err());
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&media).unwrap();
+        symlink(external.path(), &media).unwrap();
+        assert!(verify_written_media(dir.path(), "media/fixture.png", bytes.len(), &sha).is_err());
+        assert_eq!(std::fs::read(external.path().join("fixture.png")).unwrap(), bytes);
     }
 
     #[test]
