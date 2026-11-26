@@ -1,11 +1,11 @@
 // Read-only preflight for a completed local export directory. Not an import.
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, readdir, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readRegular, PACKAGE_LIMIT } from './add-local-artwork-covers.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
-import { publishLocalPackage } from './publish-local-package.mjs';
+import { createLocalPackageDirectory } from './publish-local-package.mjs';
 
 const exact = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) &&
   Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v,k));
@@ -90,7 +90,7 @@ export async function prepareRemainingBatches(directory, output, expectedDigest,
     throw Error('Recovery destination must be outside the original export');
   }
   const dest = join(parent,basename(selected));
-  await mkdir(dest,{mode:0o700}); // never overwrite or clean up an existing directory
+  const destination=await createLocalPackageDirectory(dest);
   try {
     const packages=[];
     for (const index of indexes) {
@@ -98,16 +98,16 @@ export async function prepareRemainingBatches(directory, output, expectedDigest,
       const bytes=await readRegular(join(verified.dir,entry.file),PACKAGE_LIMIT);
       if(bytes.length!==entry.bytes || sha(bytes)!==entry.sha256) throw Error('Package integrity mismatch');
       const file=`package-${String(packages.length+1).padStart(4,'0')}.json`;
-      await publishLocalPackage(join(dest,file),bytes);
+      await destination.publish(file,bytes);
       packages.push({...entry,file});
     }
     if (!(await readRegular(join(verified.dir,'manifest.json'),1024*1024)).equals(verified.manifestBytes)) {
       throw Error('Original manifest changed');
     }
-    await publishLocalPackage(join(dest,'manifest.json'),JSON.stringify({format:verified.manifest.format,packages},null,2)+'\n');
+    await destination.publish('manifest.json',JSON.stringify({format:verified.manifest.format,packages},null,2)+'\n');
     return await verifyArchiveMediaBatches(dest);
   } catch (error) {
-    await rm(dest,{recursive:true,force:true}).catch(()=>{});
+    await destination.cleanup();
     throw error;
   }
 }

@@ -1,8 +1,6 @@
 // Split a selected v2 archive without splitting a collector's purchase history.
 import { createHash } from 'node:crypto';
-import { mkdir, rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { publishLocalPackage } from './publish-local-package.mjs';
+import { createLocalPackageDirectory } from './publish-local-package.mjs';
 import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 
 const FORMAT = 'repertica-studio-archive-relations-v2';
@@ -86,14 +84,13 @@ const bounded = p => p.artworks.length <= 1000 && p.collectors.length <= 1000 &&
 // independently assembled; only one batch and one group are retained in memory.
 export async function publishArchiveMediaBatches(output, pkg, rows, attach) {
   const groups=groupArchiveMedia(pkg,rows);
-  const dir=resolve(output);
-  await mkdir(dir,{mode:0o700}); // exclusive; never replace an existing directory
+  const destination=await createLocalPackageDirectory(output);
   const packages=[];
   let batch=null, batchPixels=0;
   async function flush() {
     if (!batch) return;
     const data=encode(batch), name=`package-${String(packages.length+1).padStart(4,'0')}.json`;
-    await publishLocalPackage(join(dir,name),data);
+    await destination.publish(name,data);
     packages.push({file:name,sha256:createHash('sha256').update(data,'utf8').digest('hex'),
       bytes:Buffer.byteLength(data,'utf8'),artworks:batch.artworks.length,collectors:batch.collectors.length,
       sales:batch.sales.length,photographs:imageCount(batch)});
@@ -114,10 +111,10 @@ export async function publishArchiveMediaBatches(output, pkg, rows, attach) {
     }
     await flush();
     // Written last: no manifest means incomplete export, never import it.
-    await publishLocalPackage(join(dir,'manifest.json'),encode({format:'repertica-studio-media-batches-v1',packages}));
+    await destination.publish('manifest.json',encode({format:'repertica-studio-media-batches-v1',packages}));
     return packages;
   } catch (error) {
-    await rm(dir,{recursive:true,force:true}).catch(()=>{});
+    await destination.cleanup();
     throw error;
   }
 }
