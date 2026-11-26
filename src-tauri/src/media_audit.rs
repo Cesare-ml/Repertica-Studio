@@ -1,9 +1,11 @@
-//! Read-only, offline diagnostic of artwork and collector media in the active archive.
-//! This checks reference safety, presence and file headers; without stored
-//! per-image hashes it cannot prove that image contents are unchanged.
+//! Read-only, offline diagnostic of artwork, collector and RAW media in the active archive.
+//! Images are checked for reference safety, presence and file headers; RAW attachments
+//! additionally have stored size and SHA-256 verified with bounded streaming reads.
+//! Without per-image hashes the diagnostic cannot prove image contents are unchanged.
 use crate::db::Database;
 use rusqlite::Row;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{fs, io::Read, path::{Component, Path}};
 use tauri::State;
 
@@ -35,6 +37,13 @@ struct MediaReference {
     image_id: Option<String>,
     role: String,
     path: String,
+}
+
+struct RawReference {
+    artwork_id: String,
+    path: String,
+    size_bytes: i64,
+    sha256: String,
 }
 
 fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
@@ -95,6 +104,59 @@ fn check_media(root: &Path, relative: &str) -> Option<&'static str> {
     None
 }
 
+/// RAW files may be 1 GiB; never read them into memory. Check the recorded
+/// checksum, not just a container header that could survive file corruption.
+fn check_raw(root: &Path, relative: &str, size_bytes: i64, sha256: &str) -> Option<&'static str> {
+    if !valid_relative(relative) || !relative.starts_with("media/raw-") {
+        return Some("unsafe_path");
+    }
+    if size_bytes <= 0 || size_bytes as u64 > crate::raw_files::MAX_RAW_BYTES
+        || sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Some("invalid_metadata");
+    }
+    let full = root.join(relative);
+    let metadata = match fs::symlink_metadata(&full) {
+        Ok(value) => value,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some("missing"),
+        Err(_) => return Some("unreadable"),
+    };
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Some("not_regular");
+    }
+    let expected = size_bytes as u64;
+    if metadata.len() != expected {
+        return Some("invalid_size");
+    }
+    let mut file = match fs::File::open(full) {
+        Ok(file) => file,
+        Err(_) => return Some("unreadable"),
+    };
+    let mut digest = Sha256::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = match file.read(&mut buffer) {
+            Ok(n) => n,
+            Err(_) => return Some("unreadable"),
+        };
+        if count == 0 { break; }
+        total = match total.checked_add(count as u64) {
+            Some(value) if value <= expected => value,
+            _ => return Some("invalid_size"),
+        };
+        digest.update(&buffer[..count]);
+    }
+    if total != expected {
+        return Some("invalid_size");
+    }
+    let actual = format!("{:x}", digest.finalize());
+    if !actual.eq_ignore_ascii_case(sha256) {
+        return Some("hash_mismatch");
+    }
+    None
+}
+
 fn reference(row: &Row<'_>) -> rusqlite::Result<MediaReference> {
     Ok(MediaReference {
         artwork_id: row.get(0)?,
@@ -126,6 +188,17 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
         let rows = stmt.query_map([], reference).map_err(error)?
             .collect::<Result<Vec<_>, _>>().map_err(error)?;
         rows
+    };
+
+    let raw_references: Vec<RawReference> = {
+        let mut stmt = conn.prepare(
+            "SELECT artwork_id, media_path, size_bytes, sha256 FROM artwork_raw_files ORDER BY artwork_id"
+        ).map_err(error)?;
+        let rows = stmt.query_map([], |row| Ok(RawReference {
+            artwork_id: row.get(0)?, path: row.get(1)?,
+            size_bytes: row.get(2)?, sha256: row.get(3)?,
+        })).map_err(error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(error)?
     };
 
     // Invalid certificate snapshots cannot be trusted to expose a historic image.
@@ -200,6 +273,26 @@ fn audit_core(db: &Database) -> Result<MediaAudit, String> {
                     role: entry.role,
                     path: entry.path,
                     problem,
+                });
+            } else {
+                result.truncated = true;
+            }
+        } else {
+            result.healthy += 1;
+        }
+    }
+
+    // SHA-256 checks on large RAWs must not monopolize the SQLite mutex.
+    // They are a best-effort read-only snapshot: external file edits can race the scan.
+    drop(conn);
+    for raw in raw_references {
+        result.checked += 1;
+        if let Some(problem) = check_raw(&db.directory, &raw.path, raw.size_bytes, &raw.sha256) {
+            result.problems += 1;
+            if result.issues.len() < MAX_VISIBLE_ISSUES {
+                result.issues.push(MediaIssue {
+                    artwork_id: raw.artwork_id, image_id: None,
+                    role: "raw".into(), path: raw.path, problem,
                 });
             } else {
                 result.truncated = true;
@@ -367,6 +460,73 @@ mod tests {
             ).unwrap();
             assert_eq!(saved, original);
         }
+    }
+
+    #[test]
+    fn audits_raw_size_and_sha256_and_preserves_original_records() {
+        let (_dir, db) = {
+            let dir = tempfile::tempdir().unwrap();
+            let db = crate::db::open(dir.path().join("app")).unwrap();
+            (dir, db)
+        };
+        let original = b"II*\0RAW example";
+        let good_hash = format!("{:x}", Sha256::digest(original));
+        for id in ["good", "changed", "missing", "unsafe", "badmeta"] {
+            artwork(&db, id, None);
+        }
+        let mut changed = original.to_vec();
+        changed[4] ^= 1; // Same size, still has its RAW signature.
+        fs::write(db.directory.join("media/raw-good.dng"), original).unwrap();
+        fs::write(db.directory.join("media/raw-changed.dng"), &changed).unwrap();
+        fs::write(db.directory.join("media/raw-badmeta.dng"), original).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            for (id, path, digest) in [
+                ("good", "media/raw-good.dng", good_hash.as_str()),
+                ("changed", "media/raw-changed.dng", good_hash.as_str()),
+                ("missing", "media/raw-missing.dng", good_hash.as_str()),
+                ("unsafe", "../outside.dng", good_hash.as_str()),
+                ("badmeta", "media/raw-badmeta.dng", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"),
+            ] {
+                conn.execute(
+                    "INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at)
+                     VALUES(?1,?2,'photo.dng',?3,?4,'t')",
+                    params![id, path, original.len() as i64, digest],
+                ).unwrap();
+            }
+        }
+
+        let audit = audit_core(&db).unwrap();
+        assert_eq!((audit.checked, audit.healthy, audit.problems), (5, 1, 4));
+        assert!(!audit.truncated);
+        for (id, problem) in [
+            ("changed", "hash_mismatch"), ("missing", "missing"),
+            ("unsafe", "unsafe_path"), ("badmeta", "invalid_metadata"),
+        ] {
+            let issue = audit.issues.iter().find(|item| item.artwork_id == id).unwrap();
+            assert_eq!((issue.role.as_str(), issue.image_id.as_deref(), issue.problem),
+                ("raw", None, problem));
+        }
+        let conn = db.conn.lock().unwrap();
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM artwork_raw_files", [], |r| r.get::<_, i64>(0)).unwrap(), 5);
+        assert_eq!(fs::read(db.directory.join("media/raw-changed.dng")).unwrap(), changed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raw_audit_rejects_symlinks_without_following_them() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        let outside = dir.path().join("external.dng");
+        fs::write(&outside, b"II*\0outside").unwrap();
+        let path = db.directory.join("media/raw-link.dng");
+        symlink(&outside, &path).unwrap();
+        assert_eq!(
+            check_raw(&db.directory, "media/raw-link.dng", 11, &"0".repeat(64)),
+            Some("not_regular")
+        );
+        assert_eq!(fs::read(&outside).unwrap(), b"II*\0outside");
     }
 
 }

@@ -626,7 +626,9 @@ export class AppComponent implements OnInit {
       not_regular: 'File non regolare o collegamento simbolico',
       invalid_size: 'Dimensione file non valida',
       invalid_header: 'Formato o intestazione non valida',
-      invalid_snapshot: 'Snapshot del certificato non valido'
+      invalid_snapshot: 'Snapshot del certificato non valido',
+      invalid_metadata: 'Metadati dell’allegato RAW non validi',
+      hash_mismatch: 'Integrità RAW compromessa (SHA-256 differente)'
     };
     return this.tr(labels[problem]);
   }

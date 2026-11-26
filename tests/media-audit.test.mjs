@@ -45,3 +45,26 @@ test('historic certificate snapshots with invalid JSON or image paths are surfac
   const translations = source('src/app/i18n.ts');
   assert.equal((translations.match(/"Snapshot del certificato non valido":/g) || []).length, 4);
 });
+
+test('RAW integrity audit is streamed, read-only and explained in the desktop interface', () => {
+  const rust = source('src-tauri/src/media_audit.rs');
+  const html = source('src/app/app.component.html');
+  const models = source('src/app/models.ts');
+  const translations = source('src/app/i18n.ts');
+  assert.match(rust, /FROM artwork_raw_files ORDER BY artwork_id/);
+  assert.match(rust, /fn check_raw\(/);
+  assert.match(rust, /Sha256::new\(\)/);
+  assert.match(rust, /64 \* 1024/);
+  assert.match(rust, /drop\(conn\)/);
+  assert.match(rust, /fn audits_raw_size_and_sha256_and_preserves_original_records/);
+  assert.match(models, /'hash_mismatch'/);
+  assert.match(models, /'raw'/);
+  assert.match(html, /issue\.role === 'raw' \? 'Allegato RAW'/);
+  assert.match(html, /Per i file RAW controlla anche dimensione e SHA-256/);
+  assert.match(html, /File verificati/);
+  assert.equal((translations.match(/"File verificati":/g) || []).length, 4);
+  assert.equal((translations.match(/"Allegato RAW":/g) || []).length, 4);
+  assert.equal((translations.match(/"Metadati dell’allegato RAW non validi":/g) || []).length, 4);
+  assert.equal((translations.match(/"Integrità RAW compromessa \(SHA-256 differente\)":/g) || []).length, 4);
+  assert.equal((translations.match(/"Per i file RAW controlla anche dimensione e SHA-256, senza modificare gli allegati\.":/g) || []).length, 4);
+});
