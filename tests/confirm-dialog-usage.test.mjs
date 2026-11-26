@@ -67,3 +67,73 @@ test('the archive restore confirmation shows real line breaks', () => {
   assert.match(app, /await confirmed\('RIPRISTINO ARCHIVIO\\n\\nL’archivio/);
   assert.doesNotMatch(app, /RIPRISTINO ARCHIVIO\\\\n/);
 });
+
+ 
+// Exercise the actual component handlers in isolation, without Angular, native IPC or SMTP.
+function handler(source, start, end, signature, name, api, blankComposer) {
+  const first = source.indexOf(start);
+  const last = end ? source.indexOf(end, first) : source.lastIndexOf('\n}');
+  assert.ok(first >= 0 && last > first, name);
+  const method = source.slice(first, last).replace(signature, '()').trim();
+  return new Function('confirmed', 'api', 'blankComposer', 'return ({' + method + '}).' + name)(confirmed, api, blankComposer);
+}
+
+test('restore rechecks the inspected candidate and busy state after native confirmation', async () => {
+  const source = readFileSync(new URL('app.component.ts', appDir), 'utf8');
+  for (const scenario of ['cancel', 'reject', 'accept', 'changed', 'busy']) {
+    let answer, reject;
+    const calls = [];
+    globalThis.window = { confirm: () => new Promise((resolve, fail) => { answer = resolve; reject = fail; }) };
+    const restore = handler(source, '  async restoreSelectedBackup()', '\n  bytes(', '(): Promise<void>', 'restoreSelectedBackup',
+      { restoreBackup: async path => { calls.push(path); return { previousArchive: 'previous' }; } });
+    const ctx = { busy: false, restoreCandidate: { directory: 'backup-A' }, closeGallery() {},
+      refresh: async () => {}, loadAllocationPlan: async () => {}, loadSchedule: async () => {},
+      error: String, change: { detectChanges() {} } };
+    try {
+      const pending = restore.call(ctx);
+      assert.deepEqual(calls, [], scenario);
+      if (scenario === 'changed') ctx.restoreCandidate = { directory: 'backup-B' };
+      if (scenario === 'busy') ctx.busy = true;
+      if (scenario === 'reject') reject(new Error('permission denied'));
+      else answer(scenario !== 'cancel');
+      await pending;
+      assert.deepEqual(calls, scenario === 'accept' ? ['backup-A'] : [], scenario);
+      if (scenario === 'changed') assert.equal(ctx.restoreCandidate.directory, 'backup-B');
+      if (scenario === 'busy') assert.equal(ctx.busy, true);
+    } finally { delete globalThis.window; }
+  }
+});
+
+test('mail confirmation cannot authorize a changed message or account or duplicate send', async () => {
+  const source = readFileSync(new URL('business-mail.component.ts', appDir), 'utf8');
+  for (const scenario of ['cancel', 'reject', 'accept', 'account', 'body', 'attachment', 'busy', 'double']) {
+    let answer, reject, prompts = 0;
+    const calls = [];
+    const blank = () => ({ id: null, revision: null, to: '', cc: '', bcc: '', subject: '', body: '', attachments: [] });
+    globalThis.window = { confirm: () => { prompts++; return new Promise((resolve, fail) => { answer = resolve; reject = fail; }); } };
+    const send = handler(source, '  async send()', null, '():Promise<void>', 'send',
+      { mailSend: async input => { calls.push(input); return { delivery: 'accepted', sent_copy: 'saved' }; } }, blank);
+    const ctx = { busy: false, sendConfirmationPending: false, selectedId: 'account-A', composeOpen: true,
+      composer: { ...blank(), to: 'recipient@example.test', body: 'original', attachments: ['original.pdf'] },
+      t: value => value, operation: async fn => fn() };
+    try {
+      const pending = send.call(ctx);
+      assert.deepEqual(calls, [], scenario);
+      if (scenario === 'account') ctx.selectedId = 'account-B';
+      if (scenario === 'body') ctx.composer.body = 'changed';
+      if (scenario === 'attachment') ctx.composer.attachments.push('another.pdf');
+      if (scenario === 'busy') ctx.busy = true;
+      if (scenario === 'double') { await send.call(ctx); assert.equal(prompts, 1); }
+      if (scenario === 'reject') reject(new Error('permission denied'));
+      else answer(scenario !== 'cancel');
+      await pending;
+      assert.equal(calls.length, ['accept', 'double'].includes(scenario) ? 1 : 0, scenario);
+      if (calls.length) {
+        assert.equal(calls[0].account_id, 'account-A');
+        assert.equal(calls[0].body, 'original');
+        assert.deepEqual(calls[0].attachments, ['original.pdf']);
+      }
+      assert.equal(ctx.sendConfirmationPending, false, scenario);
+    } finally { delete globalThis.window; }
+  }
+});
