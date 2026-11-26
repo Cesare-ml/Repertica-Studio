@@ -20,11 +20,13 @@ test('offline draft selects exactly one available work and excludes private defa
   }
 });
 
-test('request body uses only the nine documented public fields even with extra draft data', () => {
+test('request body is exactly the artist-v1 publication allowlist even with extra draft data', () => {
   const prepared = prepare({ ...artwork, ...draft(), accessToken: 'private-token' });
-  assert.deepEqual(JSON.parse(prepared.body), { tenantId: 'tenant-test', slug: 'paesaggio-01', title: 'Paesaggio',
-    description: 'Olio su tela', startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z',
-    startingAmount: 12000, minimumIncrementAmount: 1000, currency: 'EUR' });
+  assert.deepEqual(JSON.parse(prepared.body), {
+    auction: { id: 'auc-' + key, tenantId: 'tenant-test', startsAt: Date.parse('2027-03-04T10:00:00.000Z'),
+      endsAt: Date.parse('2027-03-06T10:00:00.000Z'), startingAmount: 12000, incrementAmount: 1000 },
+    details: { slug: 'paesaggio-01', title: 'Paesaggio', description: 'Olio su tela' } });
+  assert.equal(prepared.auctionId, 'auc-' + key, 'the server id is derived from the key: every retry names the same auction');
   assert.equal(prepared.artworkId, artwork.id);
   assert.doesNotMatch(prepared.body, /private|artworkId|accessToken/);
 });
@@ -37,7 +39,7 @@ test('frozen request can be serialized locally and replayed unchanged after edit
   const recovered = JSON.parse(saved);
   assert.equal(recovered.body, prepared.body);
   assert.equal(recovered.idempotencyKey, key);
-  assert.equal(JSON.parse(recovered.body).title, 'Paesaggio');
+  assert.equal(JSON.parse(recovered.body).details.title, 'Paesaggio');
   assert.ok(Object.isFrozen(prepared));
 });
 

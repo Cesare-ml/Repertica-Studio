@@ -12,7 +12,10 @@ export interface AuctionDraft {
 
 export interface PreparedPreview {
   readonly artworkId: string;
+  /** Server auction id, derived from the idempotency key so that every retry names the same auction. */
+  readonly auctionId: string;
   readonly idempotencyKey: string;
+  /** Exact body of POST /api/artist/publications (contract artist-v1). */
   readonly body: string;
 }
 
@@ -55,13 +58,16 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   if (!Number.isFinite(now) || start < now || end <= start || end - start > 7 * 86_400_000) {
     throw new Error('invalid_schedule');
   }
+  const auctionId = `auc-${idempotencyKey}`;
   // Explicit allowlist: never spread the draft or the artwork into a network payload.
-  const body = JSON.stringify({ tenantId, slug: draft.slug, title: draft.title.trim(),
-    description: draft.description.trim(), startsAt: draft.startsAt, endsAt: draft.endsAt,
-    startingAmount: cents(draft.startingAmount), minimumIncrementAmount: cents(draft.minimumIncrementAmount),
-    currency: 'EUR' });
+  // In this endpoint the server expects epoch milliseconds (UTC) and cents; currency is always EUR.
+  const body = JSON.stringify({
+    auction: { id: auctionId, tenantId, startsAt: start, endsAt: end,
+      startingAmount: cents(draft.startingAmount), incrementAmount: cents(draft.minimumIncrementAmount) },
+    details: { slug: draft.slug, title: draft.title.trim(), description: draft.description.trim() },
+  });
   if (new TextEncoder().encode(body).length > 8192) throw new Error('payload_too_large');
-  return Object.freeze({ artworkId: draft.artworkId, idempotencyKey, body });
+  return Object.freeze({ artworkId: draft.artworkId, auctionId, idempotencyKey, body });
 }
 
 export interface ReviewRow { readonly field: string; readonly value: string }
@@ -73,7 +79,16 @@ export interface ReviewRow { readonly field: string; readonly value: string }
  */
 export function reviewRows(draft: AuctionDraft, now: number = Date.now()): ReviewRow[] {
   const prepared = preparePreview(draft, 'review-offline', 'review-offline-0123456789', now);
-  const body = JSON.parse(prepared.body) as Record<string, unknown>;
-  delete body['tenantId'];
-  return Object.entries(body).map(([field, value]) => ({ field, value: String(value) }));
+  const body = JSON.parse(prepared.body) as { auction: Record<string, number | string>; details: Record<string, string> };
+  // Exactly the public fields of the request; tenant and generated id are assigned at sign-in / send time.
+  return [
+    { field: 'title', value: body.details['title'] },
+    { field: 'slug', value: body.details['slug'] },
+    { field: 'description', value: body.details['description'] },
+    { field: 'startsAt', value: new Date(body.auction['startsAt'] as number).toISOString() },
+    { field: 'endsAt', value: new Date(body.auction['endsAt'] as number).toISOString() },
+    { field: 'startingAmount', value: String(body.auction['startingAmount']) },
+    { field: 'minimumIncrementAmount', value: String(body.auction['incrementAmount']) },
+    { field: 'currency', value: 'EUR' },
+  ];
 }

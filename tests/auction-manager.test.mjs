@@ -2,11 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAuctionManager } from '../src/app/auction-manager.ts';
 
-const auction = { auctionId: 'auc_1', slug: 'paesaggio-01', title: 'Paesaggio', state: 'open',
-  startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z', startingAmount: 12000,
-  minimumIncrementAmount: 1000, currentAmount: null, leadingBidId: null };
-const bid = (id, at, extra = {}) => ({ bidId: id, amount: 13000, placedAt: at, bidderEmail: 'synthetic@example.test', state: 'valid', ...extra });
-const prepared = { artworkId: 'art-1', idempotencyKey: 'idem-0123456789abcdef', body: JSON.stringify({ slug: 'paesaggio-01', title: 'Paesaggio' }) };
+// Shapes of contract artist-v1 (fixtures captured from the real server are exercised in auction-http-transport.test.mjs).
+const auction = { auctionId: 'auc_1', tenantId: 'tenant-a', slug: 'paesaggio-01', title: 'Paesaggio', state: 'live',
+  startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z', maxEndsAt: '2027-03-06T10:00:00.000Z',
+  currency: 'EUR', startingAmount: 12000, minimumIncrementAmount: 1000, reserveAmount: null, reserveMet: false,
+  currentAmount: null, leadingBidId: null, minimumNextBidAmount: 12000, bidCount: 0, cancelledBidCount: 0,
+  winnerBidId: null, winningAmount: null, paymentRecorded: false, studioArtworkId: null, version: 0 };
+const bid = (id, at, extra = {}) => ({ bidId: id, amount: 13000, placedAt: at, bidderLabel: '#1',
+  bidderEmail: 'synthetic@example.test', state: 'valid', isLeading: false, cancelledAt: null, cancelReason: null, ...extra });
+const cancelledBid = (id, at) => bid(id, at, { state: 'cancelled', cancelledAt: '2027-03-04T13:00:00.000Z', cancelReason: 'sospetta' });
+const prepared = { artworkId: 'art-1', auctionId: 'auc-idem-0123456789abcdef', idempotencyKey: 'idem-0123456789abcdef',
+  body: JSON.stringify({ auction: { id: 'auc-idem-0123456789abcdef' }, details: { slug: 'paesaggio-01', title: 'Paesaggio' } }) };
+const KEY = 'idem-0123456789abcdef';
 
 function fake(over = {}) {
   const t = { calls: [], published: false, cancelled: false,
@@ -14,12 +21,13 @@ function fake(over = {}) {
     async listAuctions() { if (t.failList) throw new Error('network'); return { items: t.published ? [auction] : [] }; },
     async listBids(id, cursor) {
       if (t.failBids) throw new Error('network');
-      if (cursor === null && t.pages) return { items: [bid('bid_a', '2027-03-04T11:00:00.000Z')], nextCursor: 'p2' };
-      if (cursor === 'p2') return { items: [bid('bid_b', '2027-03-04T12:00:00.000Z', t.cancelled ? { state: 'cancelled', cancelledAt: '2027-03-04T13:00:00.000Z' } : {})], nextCursor: null };
-      return { items: [bid('bid_b', '2027-03-04T12:00:00.000Z', t.cancelled ? { state: 'cancelled', cancelledAt: '2027-03-04T13:00:00.000Z' } : {})], nextCursor: null };
+      const b = t.cancelled ? cancelledBid('bid_b', '2027-03-04T12:00:00.000Z') : bid('bid_b', '2027-03-04T12:00:00.000Z');
+      if (cursor === null && t.pages) return { items: [bid('bid_a', '2027-03-04T11:00:00.000Z')], nextCursor: '7' };
+      return { items: [b], nextCursor: null };
     },
-    async cancelBid(a, b, r, key) { t.calls.push(['cancel', key]); if (t.failCancel) throw new Error('network'); if (!t.refuseCancel) t.cancelled = true;
-      return { status: 200, body: { bidId: b, outcome: t.refuseCancel ? 'contested' : 'cancelled' } }; },
+    async cancelBid(a, b, r, key) { t.calls.push(['cancel', key, r]); if (t.failCancel) throw new Error('network');
+      if (t.refuseCancel) return { status: 409, body: { bidId: b, outcome: 'not_allowed', reason: 'auction_closed' } };
+      t.cancelled = true; return { status: 201, body: { bidId: b, outcome: 'cancelled', reason: null } }; },
     ...over };
   return t;
 }
@@ -29,6 +37,7 @@ test('offline: nothing is attempted and no operation is created', async () => {
   const t = fake();
   await assert.rejects(manager(t, false).publish(prepared), /offline/);
   await assert.rejects(manager(t, false).loadAuctions(), /offline/);
+  await assert.rejects(manager(t, false).cancelBid('auc_1', 'bid_b', 'sospetta', KEY), /offline/);
   assert.equal(t.calls.length, 0);
 });
 
@@ -36,6 +45,7 @@ test('publication is confirmed only after the server list shows it', async () =>
   const t = fake();
   const { operation } = await manager(t).publish(prepared);
   assert.equal(operation.state, 'confirmed');
+  assert.equal(operation.target, 'paesaggio-01');
   const lost = fake({ async listAuctions() { throw new Error('network'); } });
   assert.equal((await manager(lost).publish(prepared)).operation.state, 'pending_confirmation');
 });
@@ -50,7 +60,8 @@ test('a lost response is recovered by the retry with the same key and body, with
   assert.equal(second.operation.state, 'confirmed');
   assert.equal(second.operation.attempts, 2);
   assert.deepEqual(t.calls.map(c => c[1]), [prepared.idempotencyKey, prepared.idempotencyKey]);
-  await assert.rejects(manager(t).publish({ ...prepared, body: '{"slug":"paesaggio-01","title":"Altro"}' }, first.operation), /request_changed/);
+  const changed = { ...prepared, body: JSON.stringify({ auction: {}, details: { slug: 'paesaggio-01', title: 'Altro' } }) };
+  await assert.rejects(manager(t).publish(changed, first.operation), /request_changed/);
 });
 
 test('refusals and expired sessions are never reported as success', async () => {
@@ -69,25 +80,36 @@ test('bid history follows cursors and rejects a cursor loop', async () => {
   await assert.rejects(manager(loop).loadBids('auc_1'), /invalid_response/);
 });
 
-test('cancellation is confirmed by the reloaded history; contested and unreachable stay honest', async () => {
+test('cancellation is confirmed by the reloaded history; refusals and unreachable stay honest', async () => {
   const ok = fake();
-  const done = await manager(ok).cancelBid('auc_1', 'bid_b', 'sospetta', 'idem-0123456789abcdef');
+  const done = await manager(ok).cancelBid('auc_1', 'bid_b', '  sospetta  ', KEY);
   assert.equal(done.outcome.operation.state, 'confirmed');
   assert.equal(done.bids.find(b => b.bidId === 'bid_b').state, 'cancelled');
+  assert.equal(ok.calls.at(-1)[2], 'sospetta', 'reason sent trimmed');
 
-  const contested = fake(); contested.refuseCancel = true;
-  assert.equal((await manager(contested).cancelBid('auc_1', 'bid_b', null, 'idem-0123456789abcdef')).outcome.operation.state, 'rejected');
+  const closed = fake(); closed.refuseCancel = true;
+  const refused = await manager(closed).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
+  assert.equal(refused.outcome.operation.state, 'rejected');
+  assert.equal(refused.outcome.operation.reason, 'auction_closed');
 
   const lost = fake(); lost.failCancel = true; lost.failBids = true;
-  const unknown = await manager(lost).cancelBid('auc_1', 'bid_b', null, 'idem-0123456789abcdef');
+  const unknown = await manager(lost).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
   assert.equal(unknown.outcome.operation.state, 'pending_confirmation');
   assert.equal(unknown.bids, null);
 
-  await assert.rejects(manager(ok).cancelBid('auc_1', 'bid_b', '   ', 'idem-0123456789abcdef'), /invalid_reason/);
+  for (const reason of ['   ', 'no', 'x'.repeat(501), null]) {
+    await assert.rejects(manager(ok).cancelBid('auc_1', 'bid_b', reason, KEY), /invalid_reason/);
+  }
+});
+
+test('already cancelled by an earlier attempt: the server history confirms it', async () => {
+  const t = fake({ async cancelBid(a, b) { t.cancelled = true; return { status: 409, body: { bidId: b, outcome: 'already_cancelled', reason: null } }; } });
+  const out = await manager(t).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
+  assert.equal(out.outcome.operation.state, 'confirmed');
 });
 
 test('a cancellation answered "cancelled" but not visible in the history is not a success', async () => {
-  const t = fake({ async cancelBid() { return { status: 200, body: { bidId: 'bid_b', outcome: 'cancelled' } }; } });
-  const out = await manager(t).cancelBid('auc_1', 'bid_b', null, 'idem-0123456789abcdef');
+  const t = fake({ async cancelBid(a, b) { return { status: 201, body: { bidId: b, outcome: 'cancelled', reason: null } }; } });
+  const out = await manager(t).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
   assert.equal(out.outcome.operation.state, 'pending_confirmation');
 });

@@ -64,5 +64,18 @@ Realizzato, senza alcuna chiamata di rete:
 
 Non realizzato perché dipende dal progetto online: login PKCE e sessioni, caricamento immagini, pubblicazione reale, elenco aste e offerte, annullamento, notifiche, registrazione esplicita di una vendita dopo l'aggiudicazione. Decisioni aperte invariate (campi obbligatori, regole di annullamento e motivazione, anti-sniping, conservazione dati). Non verificato: l'interfaccia nella finestra Tauri (solo build e test automatici).
 
-Nota: i branch remoti `feat/auctions-offline-draft-storage-20261124` e `qa/auctions-core-combined-20261124` contengono altro lavoro Desktop non ancora in `main` (bozze in SQLite, PKCE, ledger). Non è stato incluso né sovrascritto; prima di unirlo va riconciliato con questa implementazione (in particolare `auction-preview.ts` e la migrazione v20).
+Nota: i branch remoti `feat/auctions-offline-draft-storage-20261124` e `qa/auctions-core-combined-20261124` contengono altro lavoro Desktop non ancora in `main` (bozze in SQLite, PKCE, ledger). Non è stato incluso né sovrascritto; prima di unirlo va riconciliato con questa implementazione (in particolare `auction-preview.ts` e la migrazione v20). Attenzione: il loro client HTTP nativo usa il vecchio contratto Cloudflare `/api/studio/tenants` e `/api/studio/previews`, non quello del servizio EC2 (`artist-v1`); il modulo PKCE nativo (`auction_pkce.rs`) resta invece riutilizzabile.
+
+## Aggiornamento 26 novembre 2026: contratto `artist-v1`
+
+Lato online (Repertica-auctions, branch `feat/auctions-mvp1-mvp2-20261125`) esiste ora un contratto reale e collaudato per la gestione MVP 2: elenco aste dell'artista, cronologia completa delle offerte con email dell'offerente (solo per owner/editor), annullamento idempotente con motivazione e ricalcolo atomico dell'offerta guida. Documento: `docs/ARTIST_API_V1.md` in quel repository. Non è distribuito.
+
+Nel Desktop (branch `feat/auctions-artist-v1-client-20261126`):
+
+- `auction-contract.ts` legge le forme reali `artist-v1` (stati `upcoming/live/ended/awarded/not_awarded/cancelled`, `paymentRecorded` sempre `false`, email nullable, etichetta offerente, cursore); mappa i rifiuti documentati (`bid_already_cancelled`, `auction_closed`, `403`).
+- `auction-preview.ts` prepara il corpo esatto di `POST /api/artist/publications` (istanti in millisecondi UTC, centesimi); l'id dell'asta deriva dalla chiave di idempotenza, quindi ogni ritentativo nomina la stessa asta.
+- `auction-http-transport.ts` implementa `AuctionTransport` su una **porta HTTP iniettata**: percorsi fissi `/api/artist/...`, nessun URL scelto dalla webview, nessun token nella webview (lo aggiunge la porta nativa). La motivazione è obbligatoria (3–500 caratteri).
+- `tests/fixtures/auctions-artist-v1/` contiene risposte catturate dal server reale in anteprima sintetica; `tests/auction-http-transport.test.mjs` le usa per vincolare parser, trasporto e gestore (compresa la risposta persa confermata solo dalla cronologia riletta).
+
+Ancora mancante per collegare davvero il Desktop: (1) porta HTTP nativa in Rust verso l'origine fissa di Auctions, che conservi il token nel processo nativo (la CSP della webview resta `connect-src 'self'`); (2) accesso Repertica con browser di sistema e PKCE (riusare `auction_pkce.rs`), che richiede un client Desktop registrato nel provider Studio Online, oggi non disponibile; (3) pannello UI di gestione offerte nella sezione Aste, da mostrare solo quando (1) e (2) esistono. `AUCTION_API_CONNECTED` resta `false`.
 
