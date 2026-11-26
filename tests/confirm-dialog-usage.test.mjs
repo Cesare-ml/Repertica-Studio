@@ -207,6 +207,7 @@ test('deleting a saved draft uses its original account and preserves subsequent 
       assert.deepEqual(calls,['accept','editing-during-ipc'].includes(scenario)?[['account-A','draft-A',4]]:[],scenario);
       assert.equal(ctx.composeOpen,scenario!=='accept',scenario);
       if(scenario.startsWith('editing'))assert.equal(ctx.composer.body,'new edits');
+      if(scenario==='editing-during-ipc'){assert.equal(ctx.composer.id,null);assert.equal(ctx.composer.revision,null);}
     }finally{delete globalThis.window;}
   }
 });

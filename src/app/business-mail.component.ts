@@ -446,7 +446,14 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
       await api.mailRemoveDraft(account,draft.id,draft.revision);
       if(this.destroyed||this.selectedId!==account)return;
       this.drafts=this.drafts.filter(d=>d.id!==draft.id);
-      if(this.composer===composer&&JSON.stringify(this.composer)===snapshot&&this.composer.id===draft.id){this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);this.composeOpen=false;}
+      if(this.composer.id===draft.id&&this.composer.revision===draft.revision){
+        if(this.composer===composer&&JSON.stringify(this.composer)===snapshot){
+          this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);this.composeOpen=false;
+        }else{
+          // The persisted draft was deleted, but new edits must be saveable as a new draft.
+          this.composer={...this.composer,id:null,revision:null};
+        }
+      }
       this.notice=this.t('Draft deleted.');
     });
   }
