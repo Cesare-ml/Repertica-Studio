@@ -1,17 +1,14 @@
 /**
  * Orchestration of publication and bid cancellation over an abstract transport.
  *
- * The contract is "artist-v1" (Repertica-auctions docs/ARTIST_API_V1.md) and auction-http-transport.ts maps it
- * over an injected HTTP port; the app does not have that native port nor a Repertica sign-in yet, so nothing is
- * connected. This module never reports success from a transport answer alone; the outcome is decided by
- * re-reading the server state, and a failed re-read leaves the operation "pending confirmation".
- *
- * NOTE: the `.ts` import suffixes let the Node test runner load this file directly. The Angular build does not
- * allow them (TS5096), so drop the suffixes (or inject the parsers) when a component first imports this module.
+ * The contract is "artist-v1" (Repertica-auctions docs/ARTIST_API_V1.md); auction-http-transport.ts maps it over
+ * the native port of auction-native.ts. This module never reports success from a transport answer alone; the
+ * outcome is decided by re-reading the server state, and a failed re-read leaves the operation "pending
+ * confirmation". Tests load it through tests/ts-resolve.mjs (extensionless imports, as the Angular build needs).
  */
-import { parseAuction, parseBidPage, type AuctionBid, type AuctionSummary, type CancelResult } from './auction-contract.ts';
-import { afterTransport, beginOperation, confirmCancellation, confirmPublication, retry, type Operation } from './auction-operations.ts';
-import type { PreparedPreview } from './auction-preview.ts';
+import { parseAuction, parseBidPage, type AuctionBid, type AuctionSummary, type CancelResult } from './auction-contract';
+import { afterTransport, beginOperation, confirmCancellation, confirmPublication, retry, type Operation } from './auction-operations';
+import type { PreparedPreview } from './auction-preview';
 
 export interface AuctionTransport {
   /** Throws (or rejects) when the response is lost. */

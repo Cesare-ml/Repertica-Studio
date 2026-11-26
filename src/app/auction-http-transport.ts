@@ -1,15 +1,13 @@
 /**
  * AuctionTransport for the Auctions contract "artist-v1" over an injected HTTP port.
  *
- * The port is the only thing that touches the network. In the app it must be a native (Rust) command, so that
- * the Repertica access token never enters the webview and the webview CSP (connect-src 'self') stays closed;
- * that native port and the system-browser sign-in do not exist yet (see docs/AUCTIONS_DESKTOP_HANDOFF.md).
- * The port throws or rejects when the response is lost: the manager then treats the operation as uncertain.
- *
- * NOTE: the `.ts` import suffix lets the Node test runner load this file directly (see auction-manager.ts).
+ * The port is the only thing that touches the network. In the app it is the native command auction_api_request
+ * (auction-native.ts -> src-tauri/src/auction_online.rs), so that the Repertica access token never enters the
+ * webview and the webview CSP (connect-src 'self') stays closed. The port throws or rejects when the response is
+ * lost: the manager then treats the operation as uncertain.
  */
-import { cancelOutcomeFromError, parseCancelResult } from './auction-contract.ts';
-import type { AuctionTransport } from './auction-manager.ts';
+import { cancelOutcomeFromError, parseCancelResult, type CancelResult } from './auction-contract';
+import type { AuctionTransport } from './auction-manager';
 
 export interface HttpRequest {
   readonly method: 'GET' | 'POST';
@@ -85,11 +83,11 @@ export function createArtistV1Transport(port: HttpPort, tenantId: () => string |
       ensureId(auctionId, 'invalid_auction');
       ensureId(bidId, 'invalid_bid');
       if (!KEY.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
-      if (reason === null) throw new Error('invalid_reason');
+      if (typeof reason !== 'string') throw new Error('invalid_reason');
       const response = answered(await port({ method: 'POST', path: `/api/artist/auctions/${auctionId}/bids/${bidId}/cancellation`,
         headers: { ...json, 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ reason }) }));
       if (response.status === 200 || response.status === 201) {
-        let result: unknown;
+        let result: CancelResult | undefined;
         try { result = parseCancelResult(response.body); } catch { result = undefined; }
         return { status: response.status, body: result };
       }

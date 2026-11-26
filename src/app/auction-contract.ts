@@ -9,8 +9,8 @@
  */
 export const AUCTION_CONTRACT_VERSION = 'artist-v1';
 /**
- * Flips only when the service is deployed and the Desktop has a native transport and a Repertica sign-in
- * (Authorization Code + PKCE in the system browser). Neither exists yet: no request is ever made.
+ * Production switch, mirrored by ONLINE_ENABLED in src-tauri/src/auction_online.rs (the source of truth): the
+ * interface reads the real availability from the native side. Off until Auctions and the Repertica sign-in are live.
  */
 export const AUCTION_API_CONNECTED = false;
 
@@ -152,6 +152,22 @@ export function cancelOutcomeFromError(bidId: string, status: number, body: unkn
   if (status === 409 && code === 'auction_closed') return Object.freeze({ bidId, outcome: 'not_allowed' as const, reason: 'auction_closed' });
   if (status === 403) return Object.freeze({ bidId, outcome: 'not_allowed' as const, reason: 'tenant_access_denied' });
   return null;
+}
+
+export interface ArtistTenant { readonly id: string; readonly name: string; readonly role: string; readonly canPublish: boolean }
+
+/** GET /api/artist/tenants: the artist profiles the signed-in account manages. */
+export function parseTenants(input: unknown): ArtistTenant[] {
+  const o = record(input);
+  if (!Array.isArray(o['tenants']) || o['tenants'].length > 100) fail();
+  return (o['tenants'] as unknown[]).map(item => {
+    const t = record(item);
+    const role = t['role'];
+    if (role !== 'owner' && role !== 'editor' && role !== 'viewer') fail();
+    const tenantId = id(t['id']);
+    return Object.freeze({ id: tenantId, name: t['name'] === null ? tenantId : text(t['name'], 160), role: role as string,
+      canPublish: bool(t['canPublish']) });
+  });
 }
 
 /** The server's leading bid versus the history it returned. A mismatch is reported, never "fixed" locally. */

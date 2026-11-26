@@ -27,3 +27,12 @@ test('all static translated template strings have an English fallback',()=>{
   const references=[...html.matchAll(/tr\('((?:\\.|[^'])*)'\)/g)].map(m=>m[1].replaceAll("\\'","'"));
   for(const key of references) assert.ok(keys.has(key), 'Missing English UI translation: '+key);
 });
+test('auction connection screens have an English fallback for every label',()=>{
+  const source=text('src/app/i18n.ts');
+  const block=source.slice(source.indexOf('const EN:'),source.indexOf('const ES:'));
+  const keys=new Set([...block.matchAll(/(?:^|,\s*)\s*(?:'((?:\.|[^'])*)'|"((?:\.|[^"])*)")\s*:/gm)]
+      .map(m=>(m[1]??m[2]).replaceAll("\'","'")));
+  for(const file of ['src/app/auction-online.component.ts','src/app/auctions.component.ts']){
+    for(const m of text(file).matchAll(/tr\('((?:\.|[^'])*)'\)/g)) assert.ok(keys.has(m[1]),'Missing English UI translation: '+m[1]);
+  }
+});
