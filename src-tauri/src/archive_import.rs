@@ -1040,7 +1040,38 @@ mod tests {
         std::fs::remove_dir(&media).unwrap();
         symlink(external.path(), &media).unwrap();
         assert!(verify_written_media(dir.path(), "media/fixture.png", bytes.len(), &sha).is_err());
-        assert_eq!(std::fs::read(external.path().join("fixture.png")).unwrap(), bytes);
+        assert_eq!(std::fs::read(external.path().join("fixture.png")).unwrap().as_slice(), bytes.as_slice());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_with_linked_media_directory_preserves_archive_and_external_files() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().to_path_buf()).unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(1,1).write_to(&mut cursor,image::ImageFormat::Png).unwrap();
+        let bytes = cursor.into_inner();
+        let mut value = relational_sample();
+        value["covers"] = json!([{"artwork_code":"HIST-01","sha256":format!("{:x}",Sha256::digest(&bytes)),"data_base64":STANDARD.encode(&bytes)}]);
+        let source = value.to_string();
+        let plan = preview(&conn, &source).unwrap();
+        let before = import_counts(&conn).unwrap();
+        std::fs::write(external.path().join("keep"), b"untouched").unwrap();
+        let media = dir.path().join("media");
+        std::fs::remove_dir(&media).unwrap();
+        symlink(external.path(), &media).unwrap();
+        assert_eq!(apply_with_media(&mut conn, Some(dir.path()), &source, &plan.digest).unwrap_err(), "database");
+        assert_eq!(import_counts(&conn).unwrap(), before);
+        assert_eq!(std::fs::read_dir(external.path()).unwrap().count(), 1);
+        assert_eq!(std::fs::read(external.path().join("keep")).unwrap().as_slice(), b"untouched".as_slice());
+        // Restore the legitimate directory; the unchanged reviewed package can be imported.
+        std::fs::remove_file(&media).unwrap();
+        std::fs::create_dir(&media).unwrap();
+        assert_eq!(apply_with_media(&mut conn, Some(dir.path()), &source, &plan.digest).unwrap(), 2);
+        assert_eq!(std::fs::read_dir(&media).unwrap().count(), 1);
     }
 
     #[test]
