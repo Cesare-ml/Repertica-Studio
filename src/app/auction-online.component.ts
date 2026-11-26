@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { leadingConsistency, type AuctionBid, type AuctionState, type AuctionSummary } from './auction-contract';
+import { CANCEL_REASONS, leadingConsistency, type AuctionBid, type AuctionState, type AuctionSummary, type CancelReason } from './auction-contract';
 import { AuctionOnlineService } from './auction-online.service';
 import { confirmed } from './confirm-dialog';
 import type { Operation } from './auction-operations';
@@ -12,6 +12,11 @@ import { translate } from './i18n';
 const STATE_LABELS: Record<AuctionState, string> = {
   upcoming: 'In arrivo', live: 'In corso', ended: 'Terminata, in chiusura', awarded: 'Aggiudicata',
   not_awarded: 'Non aggiudicata', cancelled: 'Annullata', unknown: 'Stato sconosciuto',
+};
+const REASON_LABELS: Record<string, string> = {
+  suspected_abuse: 'Sospetto abuso', obvious_test_or_troll: 'Offerta di prova o di disturbo',
+  duplicate_or_technical_error: 'Doppione o errore tecnico', participant_request_confirmed: 'Ritirata su richiesta confermata dell’offerente',
+  other_admin_reason: 'Altro motivo',
 };
 const ERROR_LABELS: Record<string, string> = {
   auctions_not_available: 'Il collegamento ad Auctions non è disponibile in questa versione.',
@@ -26,7 +31,9 @@ const ERROR_LABELS: Record<string, string> = {
   service_unavailable: 'Servizio aste temporaneamente non disponibile.',
   invalid_response: 'Il server ha risposto in modo non valido: nulla è stato modificato qui.',
   offline: 'Sei offline: aste, offerte e annullamenti non sono aggiornabili.',
-  invalid_reason: 'Scrivi una motivazione da 3 a 500 caratteri.',
+  invalid_reason: 'Scegli un motivo; la nota può avere al massimo 500 caratteri.',
+  auction_cancelled: 'L’asta è stata annullata: le offerte non si possono più moderare.',
+  block_unavailable: 'Impossibile bloccare l’email: il recapito dell’offerente non è disponibile. Annulla senza blocco.',
   auction_closed: 'L’asta è chiusa: il risultato ufficiale non può più essere modificato.',
   tenant_access_denied: 'Non sei autorizzato a gestire questo profilo o questa asta.',
 };
@@ -101,10 +108,10 @@ const ERROR_LABELS: Record<string, string> = {
         <caption class="sr-only">{{ tr('Offerte ricevute, dalla prima all’ultima') }}</caption>
         <thead><tr><th>{{ tr('Ora') }}</th><th>{{ tr('Importo') }}</th><th>{{ tr('Offerente') }}</th><th>{{ tr('Email') }}</th><th>{{ tr('Stato') }}</th><th><span class="sr-only">{{ tr('Azione') }}</span></th></tr></thead>
         <tbody><tr *ngFor="let b of bids" [class.cancelled]="b.state === 'cancelled'">
-          <td>{{ when(b.placedAt, 'medium') }}</td><td class="amount">{{ euro(b.amount) }}</td><td>{{ b.bidderLabel }}</td>
+          <td>{{ when(b.placedAt, 'medium') }}</td><td class="amount">{{ euro(b.amount) }}</td><td>{{ b.bidderLabel }}<small *ngIf="b.bidderName">{{ b.bidderName }}</small></td>
           <td>{{ b.bidderEmail ?? tr('non disponibile') }}</td>
           <td>{{ b.state === 'cancelled' ? tr('Annullata') : (b.isLeading ? tr('Guida') : tr('Valida')) }}
-            <small *ngIf="b.state === 'cancelled'">{{ when(b.cancelledAt, 'short') }} · {{ b.cancelReason }}</small></td>
+            <small *ngIf="b.state === 'cancelled'">{{ when(b.cancelledAt, 'short') }} · {{ tr(reasonLabel(b.cancelReason)) }}<span *ngIf="b.cancelNote"> · {{ b.cancelNote }}</span></small></td>
           <td><button type="button" *ngIf="canCancel(b)" (click)="askCancel(b)"
             [attr.aria-label]="tr('Annulla offerta') + ': ' + euro(b.amount) + ' ' + b.bidderLabel">{{ tr('Annulla offerta') }}</button></td>
         </tr></tbody>
@@ -112,10 +119,16 @@ const ERROR_LABELS: Record<string, string> = {
 
       <form class="online-cancel" *ngIf="cancelling as c" (ngSubmit)="confirmCancel()" role="group" [attr.aria-label]="tr('Annullamento')">
         <strong>{{ tr('Annullare questa offerta?') }}</strong>
-        <p>{{ euro(c.bid.amount) }} · {{ c.bid.bidderLabel }} · {{ c.bid.bidderEmail ?? tr('non disponibile') }}</p>
-        <p class="online-muted">{{ tr('L’offerta resta nella cronologia come annullata. Il server ricalcola l’offerta guida; la chiusura non cambia. Dopo la chiusura dell’asta non è più possibile.') }}</p>
-        <label>{{ tr('Motivazione (riservata, da 3 a 500 caratteri)') }}
-          <textarea name="reason" rows="3" maxlength="500" [(ngModel)]="c.reason" [readonly]="!!c.operation"></textarea></label>
+        <p>{{ euro(c.bid.amount) }} · {{ c.bid.bidderLabel }}<span *ngIf="c.bid.bidderName"> · {{ c.bid.bidderName }}</span> · {{ c.bid.bidderEmail ?? tr('non disponibile') }}</p>
+        <p class="online-muted">{{ tr('L’offerta resta nella cronologia come annullata. Il server ricalcola l’offerta guida; la chiusura non cambia. Anche dopo la chiusura: in quel caso viene ricalcolato il vincitore.') }}</p>
+        <label>{{ tr('Motivo') }}
+          <select name="reason" [(ngModel)]="c.reason" [disabled]="!!c.operation">
+            <option *ngFor="let r of reasons" [value]="r">{{ tr(reasonLabel(r)) }}</option>
+          </select></label>
+        <label>{{ tr('Nota riservata (facoltativa, massimo 500 caratteri)') }}
+          <textarea name="note" rows="3" maxlength="500" [(ngModel)]="c.note" [readonly]="!!c.operation"></textarea></label>
+        <label class="online-check"><input type="checkbox" name="blockEmail" [(ngModel)]="c.blockEmail" [disabled]="!!c.operation || !c.bid.bidderEmail">
+          {{ tr('Blocca questo indirizzo email per le mie aste') }}</label>
         <div class="online-row">
           <button type="button" (click)="cancelling = null" [disabled]="busy">{{ tr('Indietro') }}</button>
           <button type="submit" class="danger" [disabled]="busy">{{ c.operation ? tr('Riprova la stessa richiesta') : tr('Annulla l’offerta') }}</button>
@@ -148,7 +161,9 @@ const ERROR_LABELS: Record<string, string> = {
 .online-detail dt{font-size:11px;color:#657b6e;text-transform:uppercase}.online-detail dd{margin:0;font-size:14px}
 .online-detail dd small{display:block;color:#657b6e;font-size:11px}
 .online-cancel{display:grid;gap:8px;border:1px solid #e8cfcf;border-radius:8px;padding:12px;background:#fffafa}
-.online-cancel p{margin:0;font-size:13px}.online-cancel label{display:grid;gap:4px;font-size:13px}
+.online-cancel p{margin:0;font-size:13px}
+.online-check{display:flex !important;gap:8px;align-items:center}
+.online-table td small{display:block}.online-cancel label{display:grid;gap:4px;font-size:13px}
 .online button{font:inherit;font-size:12px;padding:7px 12px;border:1px solid #d9ddd5;border-radius:8px;background:#fff;color:#33433b;cursor:pointer}
 .online button.primary{background:#263f3c;color:#fff;border-color:#263f3c}
 .online button.danger{color:#8a2b2b;border-color:#e8cfcf}
@@ -169,7 +184,8 @@ export class AuctionOnlineComponent implements OnInit {
   error = '';
   notice = '';
   consistency: 'consistent' | 'mismatch' | 'unknown' = 'unknown';
-  cancelling: { bid: AuctionBid; reason: string; key: string; operation: Operation | null } | null = null;
+  cancelling: { bid: AuctionBid; reason: CancelReason; note: string; blockEmail: boolean; key: string; operation: Operation | null } | null = null;
+  readonly reasons = CANCEL_REASONS;
 
   constructor(readonly online: AuctionOnlineService) {}
 
@@ -248,25 +264,31 @@ export class AuctionOnlineComponent implements OnInit {
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString(this.language, { dateStyle: style, timeStyle: style });
   }
 
+  /** Gestionale Opere: moderation is possible while the auction runs and after it closed, never once cancelled. */
   canCancel(bid: AuctionBid): boolean {
     const state = this.selected?.state;
-    return bid.state === 'valid' && (state === 'upcoming' || state === 'live' || state === 'ended');
+    return bid.state === 'valid' && !!state && state !== 'cancelled' && state !== 'unknown';
+  }
+
+  reasonLabel(reason: string | null): string {
+    return REASON_LABELS[reason ?? ''] ?? 'Altro motivo';
   }
 
   askCancel(bid: AuctionBid): void {
     // A pending request for the same bid is retried as it is (same key and reason).
     if (this.cancelling?.bid.bidId === bid.bidId && this.cancelling.operation) return;
-    this.cancelling = { bid, reason: '', key: newIdempotencyKey().replace(/^pub-/, 'cancel-'), operation: null };
+    this.cancelling = { bid, reason: 'suspected_abuse', note: '', blockEmail: false, key: newIdempotencyKey().replace(/^pub-/, 'cancel-'), operation: null };
   }
 
   async confirmCancel(): Promise<void> {
     const c = this.cancelling, auction = this.selected;
     if (!c || !auction) return;
-    const reason = c.reason.trim();
-    if (reason.length < 3 || reason.length > 500) { this.error = this.tr(ERROR_LABELS['invalid_reason']); return; }
+    const note = c.note.trim();
+    if (!this.reasons.includes(c.reason) || note.length > 500) { this.error = this.tr(ERROR_LABELS['invalid_reason']); return; }
     if (!(await confirmed(this.tr('Confermi l’annullamento dell’offerta? L’operazione è registrata dal server.')))) return;
     await this.run(async () => {
-      const { outcome, bids } = await this.online.manager.cancelBid(auction.auctionId, c.bid.bidId, reason, c.key, c.operation ?? undefined);
+      const { outcome, bids } = await this.online.manager.cancelBid(auction.auctionId, c.bid.bidId,
+        { reason: c.reason, note, blockEmail: c.blockEmail }, c.key, c.operation ?? undefined);
       if (bids) { this.bids = bids; }
       if (outcome.needsSignIn) { await this.online.refreshStatus(); throw new Error('sign_in_required'); }
       switch (outcome.operation.state) {

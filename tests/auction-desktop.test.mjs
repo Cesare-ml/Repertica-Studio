@@ -124,10 +124,11 @@ test('review lists only the public fields and reports validation codes', () => {
   const now = Date.parse('2027-03-01T00:00:00.000Z');
   const d = { ...newAuctionDraft({ id: 'art-1', title: 'Paesaggio', status: 'available' }), slug: 'paesaggio-01',
     description: 'Olio su tela', startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z',
-    startingAmount: 12000, minimumIncrementAmount: 1000 };
+    startingAmount: 12000, minimumIncrementAmount: 1000, italyShippingCost: 2500, bankBeneficiary: 'Artista di prova', bankIban: 'IT60 X054 2811 1010 0000 0123 456', bankBicSwift: 'BPMOIT2S', bankNameAndAddress: 'Banca di prova, Milano' };
   const rows = reviewRows(d, now);
   assert.deepEqual(rows.map(r => r.field), ['title', 'slug', 'description', 'startsAt', 'endsAt',
-    'startingAmount', 'minimumIncrementAmount', 'currency']);
+    'startingAmount', 'minimumIncrementAmount', 'currency', 'italyShippingCost', 'bankBeneficiary', 'bankIban', 'bankBicSwift',
+    'bankNameAndAddress']);
   assert.equal(rows.find(r => r.field === 'startsAt').value, '2027-03-04T10:00:00.000Z');
   assert.throws(() => reviewRows({ ...d, endsAt: d.startsAt }, now), /invalid_schedule/);
   assert.throws(() => reviewRows({ ...d, startingAmount: null }, now), /invalid_amount/);

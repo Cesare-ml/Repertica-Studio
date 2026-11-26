@@ -37,7 +37,7 @@ test('offline: nothing is attempted and no operation is created', async () => {
   const t = fake();
   await assert.rejects(manager(t, false).publish(prepared), /offline/);
   await assert.rejects(manager(t, false).loadAuctions(), /offline/);
-  await assert.rejects(manager(t, false).cancelBid('auc_1', 'bid_b', 'sospetta', KEY), /offline/);
+  await assert.rejects(manager(t, false).cancelBid('auc_1', 'bid_b', { reason: 'suspected_abuse' }, KEY), /offline/);
   assert.equal(t.calls.length, 0);
 });
 
@@ -96,34 +96,38 @@ test('bids placed at the same instant keep the order in which the server accepte
 
 test('cancellation is confirmed by the reloaded history; refusals and unreachable stay honest', async () => {
   const ok = fake();
-  const done = await manager(ok).cancelBid('auc_1', 'bid_b', '  sospetta  ', KEY);
+  const done = await manager(ok).cancelBid('auc_1', 'bid_b', { reason: 'suspected_abuse', note: '  sospetta  ' }, KEY);
   assert.equal(done.outcome.operation.state, 'confirmed');
   assert.equal(done.bids.find(b => b.bidId === 'bid_b').state, 'cancelled');
-  assert.equal(ok.calls.at(-1)[2], 'sospetta', 'reason sent trimmed');
+  assert.deepEqual(ok.calls.at(-1)[2], { reason: 'suspected_abuse', note: 'sospetta' }, 'note sent trimmed');
 
   const closed = fake(); closed.refuseCancel = true;
-  const refused = await manager(closed).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
+  const refused = await manager(closed).cancelBid('auc_1', 'bid_b', { reason: 'suspected_abuse' }, KEY);
   assert.equal(refused.outcome.operation.state, 'rejected');
   assert.equal(refused.outcome.operation.reason, 'auction_closed');
 
   const lost = fake(); lost.failCancel = true; lost.failBids = true;
-  const unknown = await manager(lost).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
+  const unknown = await manager(lost).cancelBid('auc_1', 'bid_b', { reason: 'suspected_abuse' }, KEY);
   assert.equal(unknown.outcome.operation.state, 'pending_confirmation');
   assert.equal(unknown.bids, null);
 
-  for (const reason of ['   ', 'no', 'x'.repeat(501), null]) {
-    await assert.rejects(manager(ok).cancelBid('auc_1', 'bid_b', reason, KEY), /invalid_reason/);
+  // Gestionale Opere: a reason code, an optional note of up to 500 characters, an optional block.
+  for (const request of [{ reason: 'sospetta' }, { reason: 'suspected_abuse', note: 'x'.repeat(501) },
+    { reason: 'suspected_abuse', blockEmail: 'yes' }, null, 'suspected_abuse']) {
+    await assert.rejects(manager(ok).cancelBid('auc_1', 'bid_b', request, KEY), /invalid_reason/);
   }
+  await manager(ok).cancelBid('auc_1', 'bid_b', { reason: 'other_admin_reason', blockEmail: true }, 'idem-abcdef0123456789');
+  assert.deepEqual(ok.calls.at(-1)[2], { reason: 'other_admin_reason', blockEmail: true });
 });
 
 test('already cancelled by an earlier attempt: the server history confirms it', async () => {
   const t = fake({ async cancelBid(a, b) { t.cancelled = true; return { status: 409, body: { bidId: b, outcome: 'already_cancelled', reason: null } }; } });
-  const out = await manager(t).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
+  const out = await manager(t).cancelBid('auc_1', 'bid_b', { reason: 'suspected_abuse' }, KEY);
   assert.equal(out.outcome.operation.state, 'confirmed');
 });
 
 test('a cancellation answered "cancelled" but not visible in the history is not a success', async () => {
   const t = fake({ async cancelBid(a, b) { return { status: 201, body: { bidId: b, outcome: 'cancelled', reason: null } }; } });
-  const out = await manager(t).cancelBid('auc_1', 'bid_b', 'sospetta', KEY);
+  const out = await manager(t).cancelBid('auc_1', 'bid_b', { reason: 'suspected_abuse' }, KEY);
   assert.equal(out.outcome.operation.state, 'pending_confirmation');
 });

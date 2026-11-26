@@ -6,7 +6,7 @@
  * outcome is decided by re-reading the server state, and a failed re-read leaves the operation "pending
  * confirmation". Tests load it through tests/ts-resolve.mjs (extensionless imports, as the Angular build needs).
  */
-import { parseAuction, parseBidPage, type AuctionBid, type AuctionSummary, type CancelResult } from './auction-contract';
+import { parseAuction, parseBidPage, type AuctionBid, type AuctionSummary, type CancelResult, CANCEL_REASONS, type CancelRequest } from './auction-contract';
 import { afterTransport, beginOperation, confirmCancellation, confirmPublication, retry, type Operation } from './auction-operations';
 import type { PreparedPreview } from './auction-preview';
 
@@ -16,7 +16,7 @@ export interface AuctionTransport {
   listAuctions(): Promise<unknown>;
   listBids(auctionId: string, cursor: string | null): Promise<unknown>;
   /** `body` is the contract answer already mapped by the transport (see auction-http-transport.ts). */
-  cancelBid(auctionId: string, bidId: string, reason: string, idempotencyKey: string): Promise<{ status: number; body?: CancelResult }>;
+  cancelBid(auctionId: string, bidId: string, request: CancelRequest, idempotencyKey: string): Promise<{ status: number; body?: CancelResult }>;
 }
 
 const CANCEL_OUTCOMES: readonly string[] = ['cancelled', 'already_cancelled', 'not_allowed', 'contested'];
@@ -38,7 +38,7 @@ export interface AuctionManager {
   loadAuctions(): Promise<AuctionSummary[]>;
   loadBids(auctionId: string): Promise<AuctionBid[]>;
   publish(prepared: PreparedPreview, previous?: Operation): Promise<OperationOutcome>;
-  cancelBid(auctionId: string, bidId: string, reason: string, idempotencyKey: string,
+  cancelBid(auctionId: string, bidId: string, request: CancelRequest, idempotencyKey: string,
     previous?: Operation): Promise<{ outcome: OperationOutcome; bids: AuctionBid[] | null }>;
 }
 
@@ -91,19 +91,21 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
   }
 
   /** Cancellation of a suspect bid; the history is reloaded to learn the official outcome. */
-  async function cancelBid(auctionId: string, bidId: string, reason: string, idempotencyKey: string,
+  async function cancelBid(auctionId: string, bidId: string, request: CancelRequest, idempotencyKey: string,
     previous?: Operation): Promise<{ outcome: OperationOutcome; bids: AuctionBid[] | null }> {
     requireOnline();
-    // The server requires a private reason of 3 to 500 characters (artist-v1).
-    const trimmed = typeof reason === 'string' ? reason.trim() : '';
-    if (trimmed.length < 3 || trimmed.length > 500) throw new Error('invalid_reason');
-    const body = JSON.stringify({ auctionId, bidId, reason: trimmed });
+    // Gestionale Opere: one of five reasons, an optional private note of up to 500 characters, an optional block.
+    const note = typeof request?.note === 'string' ? request.note.trim() : '';
+    if (!request || !(CANCEL_REASONS as readonly string[]).includes(request.reason) || note.length > 500
+      || (request.blockEmail !== undefined && typeof request.blockEmail !== 'boolean')) throw new Error('invalid_reason');
+    const sent: CancelRequest = { reason: request.reason, ...(note ? { note } : {}), ...(request.blockEmail ? { blockEmail: true } : {}) };
+    const body = JSON.stringify({ auctionId, bidId, ...sent });
     if (previous && previous.body !== body) throw new Error('request_changed');
     let op = previous ? retry(previous) : beginOperation('cancel_bid', bidId, idempotencyKey, body);
     let answer: CancelResult | null = null;
     let status = 0;
     try {
-      const response = await transport.cancelBid(auctionId, bidId, trimmed, idempotencyKey);
+      const response = await transport.cancelBid(auctionId, bidId, sent, idempotencyKey);
       status = response.status;
       op = afterTransport(op, { kind: 'response', status });
       answer = cancelAnswer(response.body, bidId);

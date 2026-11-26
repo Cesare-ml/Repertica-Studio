@@ -53,11 +53,21 @@ export interface AuctionBid {
   /** Private: only for the authorised artist, never logged, cached on disk or shown publicly. Null when the
    * server cannot decrypt the contact. */
   readonly bidderEmail: string | null;
+  /** Name the bidder gave when verifying (private, like the e-mail). */
+  readonly bidderName: string | null;
   readonly state: 'valid' | 'cancelled';
   readonly isLeading: boolean;
   readonly cancelledAt: string | null;
+  /** One of CANCEL_REASONS. */
   readonly cancelReason: string | null;
+  readonly cancelNote: string | null;
 }
+
+/** Reasons of Gestionale Opere for invalidating a bid (artist-v1). */
+export const CANCEL_REASONS = Object.freeze(['suspected_abuse', 'obvious_test_or_troll', 'duplicate_or_technical_error',
+  'participant_request_confirmed', 'other_admin_reason'] as const);
+export type CancelReason = typeof CANCEL_REASONS[number];
+export interface CancelRequest { readonly reason: CancelReason; readonly note?: string; readonly blockEmail?: boolean }
 
 export type CancelOutcome = 'cancelled' | 'already_cancelled' | 'not_allowed' | 'contested';
 export interface CancelResult { readonly bidId: string; readonly outcome: CancelOutcome; readonly reason: string | null }
@@ -121,8 +131,10 @@ export function parseBid(input: unknown): AuctionBid {
   if (!/^#\d{1,6}$/.test(label)) fail();
   return Object.freeze({
     bidId: id(o['bidId']), amount: cents(o['amount']), placedAt: utcInstant(o['placedAt']), bidderLabel: label, bidderEmail,
+    bidderName: o['bidderName'] === undefined ? null : nullable(o['bidderName'], v => text(v, 80)),
     state: state as 'valid' | 'cancelled', isLeading: bool(o['isLeading']), cancelledAt,
     cancelReason: nullable(o['cancelReason'], v => text(v, 500)),
+    cancelNote: o['cancelNote'] === undefined ? null : nullable(o['cancelNote'], v => text(v, 500)),
   });
 }
 
@@ -151,6 +163,8 @@ export function cancelOutcomeFromError(bidId: string, status: number, body: unkn
     ? (body as Record<string, unknown>)['error'] : undefined;
   if (status === 409 && code === 'bid_already_cancelled') return Object.freeze({ bidId, outcome: 'already_cancelled' as const, reason: null });
   if (status === 409 && code === 'auction_closed') return Object.freeze({ bidId, outcome: 'not_allowed' as const, reason: 'auction_closed' });
+  if (status === 409 && code === 'auction_cancelled') return Object.freeze({ bidId, outcome: 'not_allowed' as const, reason: 'auction_cancelled' });
+  if (status === 409 && code === 'block_unavailable') return Object.freeze({ bidId, outcome: 'not_allowed' as const, reason: 'block_unavailable' });
   if (status === 403) return Object.freeze({ bidId, outcome: 'not_allowed' as const, reason: 'tenant_access_denied' });
   return null;
 }

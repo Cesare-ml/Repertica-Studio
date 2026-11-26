@@ -36,11 +36,11 @@ test('the port hands one artist-v1 operation to the native side, without any tok
   const transport = createArtistV1Transport(connection.port, () => 'synthetic-artist');
   assert.equal((await transport.listAuctions()).items.length, 1);
   const bidId = fixture('bids').items.find(b => b.state === 'valid' && !b.isLeading).bidId;
-  await transport.cancelBid('synthetic-lot', bidId, 'Offerente fittizio', 'cancel-0123456789abcdef');
+  await transport.cancelBid('synthetic-lot', bidId, { reason: 'obvious_test_or_troll', note: 'Offerente fittizio' }, 'cancel-0123456789abcdef');
   assert.deepEqual(calls[0], ['auction_api_request', { method: 'GET', path: '/api/artist/auctions?tenantId=synthetic-artist&page=1',
     body: null, idempotencyKey: null }]);
   assert.deepEqual(calls[1][1], { method: 'POST', path: `/api/artist/auctions/synthetic-lot/bids/${bidId}/cancellation`,
-    body: JSON.stringify({ reason: 'Offerente fittizio' }), idempotencyKey: 'cancel-0123456789abcdef' });
+    body: JSON.stringify({ reason: 'obvious_test_or_troll', note: 'Offerente fittizio' }), idempotencyKey: 'cancel-0123456789abcdef' });
   assert.ok(calls.every(([command]) => command === 'auction_api_request'));
   assert.ok(!JSON.stringify(calls).includes('Bearer'), 'the webview never handles the access token');
   const broken = createNativeConnection(async () => ({ body: {} }));
@@ -67,7 +67,7 @@ test('unconfirmed publications survive a restart with the same key and body, and
   const key = newIdempotencyKey();
   assert.match(key, /^pub-[0-9a-f]{36}$/);
   const draft = { ...newAuctionDraft({ id: 'art-1', title: 'Paesaggio', status: 'available' }), slug: 'paesaggio-01', description: 'Olio',
-    startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z', startingAmount: 12000, minimumIncrementAmount: 1000 };
+    startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z', startingAmount: 12000, minimumIncrementAmount: 1000, italyShippingCost: 2500, bankBeneficiary: 'Artista di prova', bankIban: 'IT60 X054 2811 1010 0000 0123 456', bankBicSwift: 'BPMOIT2S', bankNameAndAddress: 'Banca di prova, Milano' };
   const prepared = preparePreview(draft, 'tenant-a', key, Date.parse('2027-03-01T00:00:00.000Z'));
   const operation = { id: 'publish:' + key, kind: 'publish', target: 'paesaggio-01', idempotencyKey: key, body: prepared.body,
     state: 'pending_confirmation', reason: null, attempts: 1 };

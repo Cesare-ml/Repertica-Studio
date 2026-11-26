@@ -6,7 +6,8 @@ import { AuctionOnlineComponent } from './auction-online.component';
 import { AuctionOnlineService } from './auction-online.service';
 import { confirmed } from './confirm-dialog';
 import type { PendingPublication } from './auction-publications';
-import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, removeDraft, saveDraft, slugify,
+import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, loadPaymentDefaults, localInputToUtc, removeDraft, saveDraft,
+  savePaymentDefaults, slugify,
   utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
 import { newAuctionDraft, reviewRows, type AuctionDraft, type ReviewRow } from './auction-preview';
 import type { AppLanguage } from './i18n';
@@ -22,6 +23,10 @@ const ERRORS: Record<string, string> = {
   invalid_schedule: 'Date non valide: l’inizio deve essere futuro, la fine successiva e la durata al massimo 7 giorni',
   invalid_amount: 'Inserisci importi validi per prezzo di partenza e rilancio minimo',
   payload_too_large: 'I dati sono troppo lunghi',
+  invalid_shipping: 'Indica le spese di spedizione in Italia (anche 0)',
+  invalid_iban: 'IBAN non valido: controlla le cifre',
+  invalid_bic: 'BIC/SWIFT non valido (8 o 11 caratteri)',
+  invalid_terms: 'Completa beneficiario e banca per il bonifico del vincitore',
 };
 /** Server refusals of a publication (artist-v1 error codes). */
 const REFUSALS: Record<string, string> = {
@@ -124,6 +129,23 @@ const REFUSALS: Record<string, string> = {
         <label>{{ tr('Rilancio minimo (€)') }}
           <input type="text" inputmode="decimal" [(ngModel)]="incrementText" (ngModelChange)="reviewed = false"></label>
       </div>
+      <div class="auctions-two">
+        <label>{{ tr('Prezzo di riserva (€, facoltativo)') }}
+          <input type="text" inputmode="decimal" [(ngModel)]="reserveText" (ngModelChange)="reviewed = false"></label>
+        <label>{{ tr('Spedizione in Italia (€)') }}
+          <input type="text" inputmode="decimal" [(ngModel)]="shippingText" (ngModelChange)="reviewed = false"></label>
+      </div>
+      <p class="auctions-muted">{{ tr('Un’offerta negli ultimi 2 minuti prolunga la chiusura di 2 minuti. Sotto il prezzo di riserva l’asta non viene aggiudicata.') }}</p>
+      <fieldset class="auctions-payment">
+        <legend>{{ tr('Pagamento del vincitore (bonifico)') }}</legend>
+        <p class="auctions-muted">{{ tr('Questi dati vengono inviati solo al vincitore, nell’email di aggiudicazione. Non compaiono nella pagina pubblica.') }}</p>
+        <label>{{ tr('Beneficiario') }}<input type="text" maxlength="140" [(ngModel)]="editing.bankBeneficiary" (ngModelChange)="reviewed = false"></label>
+        <div class="auctions-two">
+          <label>IBAN<input type="text" maxlength="42" autocomplete="off" [(ngModel)]="editing.bankIban" (ngModelChange)="reviewed = false"></label>
+          <label>BIC/SWIFT<input type="text" maxlength="14" autocomplete="off" [(ngModel)]="editing.bankBicSwift" (ngModelChange)="reviewed = false"></label>
+        </div>
+        <label>{{ tr('Banca e indirizzo') }}<input type="text" maxlength="300" [(ngModel)]="editing.bankNameAndAddress" (ngModelChange)="reviewed = false"></label>
+      </fieldset>
       <p class="auctions-muted">{{ tr('Le immagini non sono ancora incluse: l’invio delle foto sarà disponibile con l’interfaccia online verificata.') }}</p>
     </div>
     <div class="auctions-row">
@@ -164,6 +186,8 @@ const REFUSALS: Record<string, string> = {
 .auctions-form small{color:#657b6e}
 .auctions-two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .auctions-alert{padding:10px 12px;border-radius:8px;background:#fbeaea;color:#8a2b2b;font-size:13px}
+.auctions-payment{border:1px solid #edf0ee;border-radius:8px;padding:10px 12px;display:grid;gap:10px;margin:0}
+.auctions-payment legend{font-size:13px;font-weight:600;padding:0 4px}
 .auctions-review{border-top:1px solid #edf0ee;padding-top:12px;display:grid;gap:8px}
 .auctions-review table{border-collapse:collapse;font-size:13px}
 .auctions-review th{text-align:left;padding:4px 12px 4px 0;color:#4b5d52;font-weight:600;white-space:nowrap;vertical-align:top}
@@ -211,6 +235,8 @@ export class AuctionsComponent implements OnInit, OnChanges {
   endsLocal = '';
   startingText = '';
   incrementText = '';
+  reserveText = '';
+  shippingText = '';
   rows: ReviewRow[] = [];
   reviewed = false;
   error = '';
@@ -242,7 +268,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
 
   startNew(): void {
     const free = this.available.find(a => !this.drafts.some(d => d.artworkId === a.id)) ?? this.available[0];
-    if (free) this.begin(newAuctionDraft(free));
+    if (!free) return;
+    // The last payment terms used on this computer prefill the new draft.
+    this.begin({ ...newAuctionDraft(free), ...(this.store ? loadPaymentDefaults(this.store) : {}) });
   }
   edit(d: LocalAuctionDraft): void { this.publishMessage = ''; this.begin({ ...d }); }
   private begin(draft: AuctionDraft): void {
@@ -251,6 +279,8 @@ export class AuctionsComponent implements OnInit, OnChanges {
     this.endsLocal = utcToLocalInput(draft.endsAt);
     this.startingText = centsToEuro(draft.startingAmount);
     this.incrementText = centsToEuro(draft.minimumIncrementAmount);
+    this.reserveText = centsToEuro(draft.reserveAmount ?? null);
+    this.shippingText = draft.italyShippingCost === null || draft.italyShippingCost === undefined ? '' : centsToEuro(draft.italyShippingCost) || '0';
     this.reviewed = false; this.error = ''; this.rows = [];
   }
   pickArtwork(id: string): void {
@@ -266,14 +296,18 @@ export class AuctionsComponent implements OnInit, OnChanges {
     if (!e.slug.trim() && e.title.trim()) e.slug = slugify(e.title);
     return { artworkId: e.artworkId, title: e.title, description: e.description, slug: e.slug.trim(),
       startsAt: localInputToUtc(this.startsLocal), endsAt: localInputToUtc(this.endsLocal),
-      startingAmount: euroToCents(this.startingText), minimumIncrementAmount: euroToCents(this.incrementText) };
+      startingAmount: euroToCents(this.startingText), minimumIncrementAmount: euroToCents(this.incrementText),
+      reserveAmount: this.reserveText.trim() ? euroToCents(this.reserveText) ?? -1 : null,
+      italyShippingCost: this.shippingText.trim() === '' ? null : /^0+(?:[.,]0{1,2})?$/.test(this.shippingText.trim()) ? 0 : euroToCents(this.shippingText),
+      bankBeneficiary: e.bankBeneficiary ?? '', bankIban: e.bankIban ?? '', bankBicSwift: e.bankBicSwift ?? '',
+      bankNameAndAddress: e.bankNameAndAddress ?? '' };
   }
 
   save(): void {
     const draft = this.collect(), store = this.store;
     if (!draft) return;
     if (!store) { this.error = this.tr('Impossibile salvare la bozza su questo computer'); return; }
-    try { this.drafts = saveDraft(store, draft); this.error = ''; this.editing = null; this.reviewed = false; }
+    try { this.drafts = saveDraft(store, draft); savePaymentDefaults(store, draft); this.error = ''; this.editing = null; this.reviewed = false; }
     catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
   }
   async discard(d: LocalAuctionDraft): Promise<void> {
@@ -353,7 +387,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
   fieldLabel(field: string): string {
     const labels: Record<string, string> = { slug: 'Indirizzo della pagina', title: 'Titolo pubblico', description: 'Descrizione pubblica',
       startsAt: 'Inizio (UTC)', endsAt: 'Fine (UTC)', startingAmount: 'Prezzo di partenza (centesimi)',
-      minimumIncrementAmount: 'Rilancio minimo (centesimi)', currency: 'Valuta' };
+      minimumIncrementAmount: 'Rilancio minimo (centesimi)', currency: 'Valuta', reserveAmount: 'Prezzo di riserva (centesimi)',
+      italyShippingCost: 'Spedizione in Italia (centesimi)', bankBeneficiary: 'Beneficiario', bankIban: 'IBAN', bankBicSwift: 'BIC/SWIFT',
+      bankNameAndAddress: 'Banca e indirizzo' };
     return this.tr(labels[field] ?? field);
   }
 }

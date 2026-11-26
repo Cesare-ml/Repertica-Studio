@@ -82,13 +82,14 @@ export function createArtistV1Transport(port: HttpPort, tenantId: () => string |
       return get(`/api/artist/auctions/${auctionId}/bids` + (cursor === null ? '' : `?cursor=${cursor}`));
     },
 
-    async cancelBid(auctionId, bidId, reason, idempotencyKey) {
+    async cancelBid(auctionId, bidId, request, idempotencyKey) {
       ensureId(auctionId, 'invalid_auction');
       ensureId(bidId, 'invalid_bid');
       if (!KEY.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
-      if (typeof reason !== 'string') throw new Error('invalid_reason');
+      if (!request || typeof request.reason !== 'string') throw new Error('invalid_reason');
+      const body = { reason: request.reason, ...(request.note ? { note: request.note } : {}), ...(request.blockEmail ? { blockEmail: true } : {}) };
       const response = answered(await port({ method: 'POST', path: `/api/artist/auctions/${auctionId}/bids/${bidId}/cancellation`,
-        headers: { ...json, 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ reason }) }));
+        headers: { ...json, 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(body) }));
       if (response.status === 200 || response.status === 201) {
         let result: CancelResult | undefined;
         try { result = parseCancelResult(response.body); } catch { result = undefined; }
