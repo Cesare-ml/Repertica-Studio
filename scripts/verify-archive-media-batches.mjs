@@ -55,6 +55,25 @@ function verifyArtworkMetadata(a) {
   if (!['available','reserved','archived','sold'].includes(a.status)) fail();
 }
 
+// The native CoverRecord rejects unknown fields. A cover cannot carry gallery
+// metadata; a gallery caption and kind are optional, with OTHER as the default.
+function verifyPhotoMetadata(photo, isGallery) {
+  const fail = () => { throw Error('Invalid photograph metadata'); };
+  const allowed = ['artwork_code','sha256','data_base64','position','caption','kind'];
+  if (!photo || typeof photo !== 'object' || Array.isArray(photo) ||
+      Object.keys(photo).some(key => !allowed.includes(key))) fail();
+  if (!isGallery) {
+    if ((Object.hasOwn(photo,'position') && photo.position !== 0) ||
+        photo.caption != null || photo.kind != null) fail();
+    return;
+  }
+  if (photo.kind != null && !['DETAIL','SIGNATURE','DIGITAL_MOCKUP','IN_SITU','OTHER','FRAMED','WORK_IN_PROGRESS'].includes(photo.kind)) fail();
+  if (photo.caption != null &&
+      (typeof photo.caption !== 'string' || /[\uD800-\uDFFF]/u.test(photo.caption) ||
+       photo.caption.includes('\0') ||
+       (!/^\p{White_Space}*$/u.test(photo.caption) && Array.from(photo.caption).length > 300))) fail();
+}
+
 // Check embedded media independently of the outer package hash. This remains a
 // header-only preflight; the native preview must decode every image.
 function verifyPackageMedia(pkg) {
@@ -72,11 +91,13 @@ function verifyPackageMedia(pkg) {
   }
   for (const photo of pkg.covers) {
     if (covers.has(photo?.artwork_code)) throw Error('Repeated cover');
+    verifyPhotoMetadata(photo, false);
     verify(photo);
     covers.add(photo.artwork_code);
   }
   for (const photo of pkg.gallery) {
     if (!boundedInt(photo?.position, 1, 20)) throw Error('Invalid gallery position');
+    verifyPhotoMetadata(photo, true);
     verify(photo);
     if (!positions.has(photo.artwork_code)) positions.set(photo.artwork_code, new Set());
     const seen = positions.get(photo.artwork_code);
