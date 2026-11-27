@@ -161,6 +161,7 @@ pub(crate) fn preflight(conn: &Connection, directory: &Path) -> Result<BatchPlan
     let mut codes = HashSet::new();
     let mut names = HashSet::new();
     let mut emails = HashSet::new();
+    let mut collector_keys = HashSet::new();
     for entry in &plan.packages {
         let source = package_source(&dir, entry)?;
         let parsed = checked_package(&source, entry)?;
@@ -168,8 +169,13 @@ pub(crate) fn preflight(conn: &Connection, directory: &Path) -> Result<BatchPlan
         for row in &parsed.artworks {
             if !codes.insert(row.code.to_ascii_lowercase()) { return Err("batch_duplicate".into()); }
         }
+        // Batch exports must keep all purchases of a source collector together.
+        // Single-package import keys are local, but the batch exporter uses one
+        // source key per collector across the entire selection.
+        let used_keys: HashSet<&str> = parsed.sales.iter().map(|sale| sale.collector_key.as_str()).collect();
         for row in &parsed.collectors {
-            if !names.insert(row.name().to_ascii_lowercase())
+            if !used_keys.contains(row.key.as_str()) { return Err("relations".into()); }
+            if !collector_keys.insert(row.key.clone()) || !names.insert(row.name().to_ascii_lowercase())
                 || row.email.as_ref().is_some_and(|email| !emails.insert(email.to_ascii_lowercase())) {
                 return Err("batch_duplicate".into());
             }
@@ -298,6 +304,49 @@ mod tests {
         fs::write(&manifest, old).unwrap();
         fs::write(export.path().join("unexpected"), b"").unwrap();
         assert!(preflight(&conn, export.path()).is_err());
+        assert_eq!(count(&conn), 0);
+    }
+
+    #[test]
+    fn batch_preflight_rejects_split_source_keys_and_orphan_collectors() {
+        let export = tempfile::tempdir().unwrap();
+        let archive = tempfile::tempdir().unwrap();
+        let db = crate::db::open(archive.path().to_path_buf()).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let write_packages = |second_key: &str, orphan: bool| {
+            let mut entries = vec![];
+            for (i, (code, key, name)) in [("SOLD-A", "source-1", "Ada"), ("SOLD-B", second_key, "Bob")].into_iter().enumerate() {
+                let file = format!("package-{:04}.json", i + 1);
+                let mut collectors = vec![json!({"key":key,"first_name":name})];
+                if orphan && i == 1 {
+                    collectors.push(json!({"key":"unused","first_name":"Unused"}));
+                }
+                let source = json!({"format":RELATIONAL_FORMAT,
+                    "artworks":[{"code":code,"title":"Synthetic","status":"sold"}],
+                    "collectors":collectors,
+                    "sales":[{"artwork_code":code,"collector_key":key,"currency":"EUR",
+                        "sold_at":"2025-03-04","amount_cents":10000,"tax_cents":1000,
+                        "shipping_cents":500,"legacy_shares_bp":[2000,3000,5000],
+                        "allocations":[],"receipts":[],"installments":[]}],
+                    "covers":[],"gallery":[]}).to_string();
+                fs::write(export.path().join(&file), &source).unwrap();
+                entries.push(json!({"file":file,"sha256":digest(&source),"bytes":source.len(),
+                    "artworks":1,"collectors":collectors.len(),"sales":1,"photographs":0}));
+            }
+            fs::write(export.path().join("manifest.json"),
+                json!({"format":FORMAT,"packages":entries}).to_string()).unwrap();
+        };
+        write_packages("source-1", false);
+        assert_eq!(preflight(&conn, export.path()).unwrap_err(), "batch_duplicate");
+        write_packages("source-2", true);
+        assert_eq!(preflight(&conn, export.path()).unwrap_err(), "relations");
+        for table in ["artworks", "collectors", "sales", "archive_code_sequences"] {
+            let n: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap();
+            assert_eq!(n, 0, "{table}");
+        }
+        write_packages("source-2", false);
+        let plan = preflight(&conn, export.path()).unwrap();
+        assert_eq!((plan.artworks, plan.collectors, plan.sales), (2, 2, 2));
         assert_eq!(count(&conn), 0);
     }
 
