@@ -1407,36 +1407,63 @@ export class AppComponent implements OnInit {
     }
     this.change.detectChanges();
   }
+  // Keep the archive busy while consent is pending. A closed/reopened editor,
+  // changed photo list or another record must never inherit that consent.
+  private async confirmPhotoChange(message: string, isCurrent: () => boolean): Promise<boolean> {
+    if (this.busy || !isCurrent()) return false;
+    this.busy = true;
+    try {
+      this.change.detectChanges();
+      return (await confirmed(message)) && isCurrent();
+    } finally {
+      this.busy = false;
+      this.change.detectChanges();
+    }
+  }
   async makeGalleryPrimary(image: GalleryImage): Promise<void> {
     const artwork = this.galleryArtwork;
-    if (!artwork || image.artwork_id !== artwork.id || this.busy) return;
-    if (!(await confirmed(this.tr('Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.')))) return;
+    const images = this.galleryImages;
+    const isCurrent = () => !!artwork && this.galleryArtwork === artwork &&
+      image.artwork_id === artwork.id && this.galleryImages === images && images.includes(image);
+    if (!artwork || !(await this.confirmPhotoChange(this.tr('Impostare questa foto come principale? La precedente, se presente, resterà in galleria. La didascalia della foto scelta non verrà trasferita.'), isCurrent))) return;
+    if (this.busy || !isCurrent()) return;
     const promoted = await this.run(async () => {
       await api.promoteArtworkGalleryImage(artwork.id, image.id);
       // Refresh must reload the cover instead of reusing the previous thumbnail.
       delete this.thumbnails[artwork.id];
     }, this.tr('Fotografia principale aggiornata'));
-    if (!promoted || this.galleryArtwork?.id !== artwork.id) return;
-    this.galleryArtwork = this.artworks.find(item => item.id === artwork.id) ?? artwork;
-    this.galleryPreviews = {};
-    this.cancelGalleryCaptionEdit();
+    if (!promoted || !isCurrent()) return;
     try {
-      this.galleryImages = await api.listArtworkGallery(artwork.id);
-      if (this.galleryImages.length) await this.loadGalleryPreview(this.galleryImages[0]);
+      const updated = await api.listArtworkGallery(artwork.id);
+      if (!isCurrent()) return;
+      this.galleryArtwork = this.artworks.find(item => item.id === artwork.id) ?? artwork;
+      this.galleryPreviews = {};
+      this.cancelGalleryCaptionEdit();
+      this.galleryImages = updated;
+      if (updated.length) await this.loadGalleryPreview(updated[0]);
     } catch (error) {
-      this.errorMessage = this.error(error);
+      if (isCurrent()) this.errorMessage = this.error(error);
     }
     this.change.detectChanges();
   }
   async removeGalleryPhoto(image: GalleryImage): Promise<void> {
-    if (!(await confirmed(this.tr('Eliminare questa fotografia aggiuntiva?')))) return;
     const artwork = this.galleryArtwork;
-    if (await this.run(() => api.deleteArtworkGalleryImage(image.id), this.tr('Fotografia eliminata')) && artwork) {
+    const images = this.galleryImages;
+    const isCurrent = () => !!artwork && this.galleryArtwork === artwork &&
+      image.artwork_id === artwork.id && this.galleryImages === images && images.includes(image);
+    if (!artwork || !(await this.confirmPhotoChange(this.tr('Eliminare questa fotografia aggiuntiva?'), isCurrent))) return;
+    if (this.busy || !isCurrent()) return;
+    if (!(await this.run(() => api.deleteArtworkGalleryImage(image.id), this.tr('Fotografia eliminata'))) || !isCurrent()) return;
+    try {
+      const updated = await api.listArtworkGallery(artwork.id);
+      if (!isCurrent()) return;
       delete this.galleryPreviews[image.id];
       if (this.editingGalleryCaptionId === image.id) this.cancelGalleryCaptionEdit();
-      this.galleryImages = await api.listArtworkGallery(artwork.id);
-      this.change.detectChanges();
+      this.galleryImages = updated;
+    } catch (error) {
+      if (isCurrent()) this.errorMessage = this.error(error);
     }
+    this.change.detectChanges();
   }
   initials(c: Collector): string {
     return ((c.first_name.slice(0, 1) + (c.last_name ?? '').slice(0, 1)) || c.name.slice(0, 1)).toUpperCase();
@@ -1462,15 +1489,22 @@ export class AppComponent implements OnInit {
     void this.loadCollectorImages(c.id);
   }
   private async loadCollectorImages(collectorId: string): Promise<void> {
+    const draft = this.collectorDraft;
+    const isCurrent = () => this.collectorDialog && this.collectorDraft === draft && draft.id === collectorId;
+    if (!isCurrent()) return;
     try {
       const images = await api.listCollectorImages(collectorId);
-      if (this.collectorDraft.id !== collectorId) return;
+      if (!isCurrent()) return;
       this.collectorImages = images;
       await Promise.all(images.map(async image => {
-        try { this.collectorPreviews[image.id] = await api.collectorImageData(image.id); }
-        catch { /* shown without a preview */ }
+        try {
+          const data = await api.collectorImageData(image.id);
+          if (isCurrent() && this.collectorImages === images) this.collectorPreviews[image.id] = data;
+        } catch { /* shown without a preview */ }
       }));
-    } catch (error) { this.errorMessage = this.error(error); }
+    } catch (error) {
+      if (isCurrent()) this.errorMessage = this.error(error);
+    }
     this.change.detectChanges();
   }
   async saveCollector(): Promise<void> {
@@ -1529,9 +1563,14 @@ export class AppComponent implements OnInit {
     this.change.detectChanges();
   }
   async deleteCollectorImage(image: CollectorImage): Promise<void> {
-    if (!(await confirmed(this.tr('Eliminare questa fotografia aggiuntiva?')))) return;
-    const id = this.collectorDraft.id;
-    if (await this.run(() => api.deleteCollectorImage(image.id), this.tr('Fotografia eliminata')) && id) {
+    const draft = this.collectorDraft;
+    const images = this.collectorImages;
+    const id = draft.id;
+    const isCurrent = () => !!id && this.collectorDialog && this.collectorDraft === draft &&
+      image.collector_id === id && this.collectorImages === images && images.includes(image);
+    if (!id || !(await this.confirmPhotoChange(this.tr('Eliminare questa fotografia aggiuntiva?'), isCurrent))) return;
+    if (this.busy || !isCurrent()) return;
+    if (await this.run(() => api.deleteCollectorImage(image.id), this.tr('Fotografia eliminata')) && isCurrent()) {
       delete this.collectorPreviews[image.id];
       await this.loadCollectorImages(id);
     }
