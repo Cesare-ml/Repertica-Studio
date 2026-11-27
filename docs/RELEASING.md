@@ -9,7 +9,7 @@ Repertica Studio controlla da solo se esiste una versione più recente tra le **
 - Se il backup automatico è attivo, prima dell'installazione se ne esegue uno. Se fallisce (per esempio l'unità esterna non è collegata) l'installazione si ferma e si può scegliere **Installa senza backup**.
 - Il download mostra l'avanzamento; a fine installazione l'app si riavvia (su Windows lo fa l'installatore).
 - L'indirizzo del feed è fissato nel programma, il pacchetto deve essere in HTTPS dalle release di questo repository e deve avere una firma valida: altrimenti viene scartato. Le versioni di prova (`1.0.0-beta.1`) non vengono proposte.
-- Una build **senza chiave pubblica** (per esempio `tauri dev` o una build locale) non controlla né installa nulla e lo dichiara in Impostazioni.
+- Una build **senza chiave pubblica** (per esempio `tauri dev` o una build locale) non controlla né installa nulla e lo dichiara in Impostazioni. Lo stesso vale per ogni build con un identificatore diverso da `it.repertica.studio`, come `npm run tauri:dev` (vedi [DEV-DATA.md](DEV-DATA.md)).
 
 I dati dell'archivio non vengono toccati dall'installazione. Se la nuova versione cambia lo schema dell'archivio, la migrazione avviene alla prima apertura ed è solo in avanti: per questo conviene tenere attivo il backup automatico.
 

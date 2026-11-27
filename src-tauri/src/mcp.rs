@@ -16,7 +16,6 @@ use tauri::State;
 /// Schema written by this version of the app (`PRAGMA user_version`).
 const SUPPORTED_SCHEMA: i64 = crate::db::SCHEMA_VERSION;
 const PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
-const APP_DIRECTORY: &str = "it.repertica.studio";
 const INSTRUCTIONS: &str = "Archivio locale di Repertica Studio in SOLA LETTURA: opere, collezionisti, \
 vendite e certificati. Non è possibile modificare nulla. Email, telefono, indirizzi, note private \
 e fotografie non sono esposti. Gli importi sono in centesimi di euro (campi *_cents) e in testo (*_eur).";
@@ -487,7 +486,8 @@ pub fn serve<R: BufRead, W: Write>(archive: &Archive, input: R, mut output: W) -
 
 // ---------------------------------------------------------------- entry points
 
-/// Where the desktop app keeps its archive (Tauri's app-local-data directory).
+/// Where the desktop app keeps its archive (Tauri's app-local-data directory, named after the identifier
+/// this binary was built with: a development build reads its own archive, never the release's).
 pub fn default_data_dir() -> Option<PathBuf> {
     let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
     let base = if cfg!(windows) {
@@ -497,7 +497,7 @@ pub fn default_data_dir() -> Option<PathBuf> {
     } else {
         var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("share")))?
     };
-    Some(base.join(APP_DIRECTORY))
+    Some(base.join(crate::identity::IDENTIFIER))
 }
 
 /// `Repertica Studio --mcp [--data-dir <cartella>]`; returns the process exit code.
@@ -542,6 +542,8 @@ pub fn main(args: &[String]) -> i32 {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpSetup {
+    /// Name of the entry in the assistant's configuration (`repertica-studio`, or `repertica-studio-dev`).
+    server_name: String,
     command: String,
     args: Vec<String>,
     data_dir: String,
@@ -552,6 +554,7 @@ pub struct McpSetup {
 pub fn mcp_setup_info(db: State<'_, Database>) -> Result<McpSetup, String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     Ok(McpSetup {
+        server_name: crate::mcp_client::server_key(),
         command: display_path(&executable),
         args: vec!["--mcp".into(), "--data-dir".into(), display_path(&db.directory)],
         data_dir: display_path(&db.directory),
@@ -734,9 +737,9 @@ mod tests {
     #[test]
     fn default_data_directory_matches_the_desktop_app_identifier() {
         if let Some(path) = default_data_dir() {
-            assert!(path.ends_with("it.repertica.studio"));
+            assert!(path.ends_with(crate::identity::IDENTIFIER));
         }
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        assert_eq!(config["identifier"], "it.repertica.studio", "keep APP_DIRECTORY in sync");
+        assert_eq!(config["identifier"], crate::identity::RELEASE_IDENTIFIER);
     }
 }

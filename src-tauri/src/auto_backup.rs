@@ -403,6 +403,8 @@ pub fn tick(db: &Database, now: NaiveDateTime) -> Result<Option<ScheduleStatus>,
 
 /// Background timer: checks every minute while the application is open.
 pub fn start(app: tauri::AppHandle) {
+    let opt_in = std::env::var(crate::identity::DEV_AUTO_BACKUP_VARIABLE).ok();
+    if !crate::identity::backup_timer_allowed(crate::identity::is_release(), opt_in.as_deref()) { return; }
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(60));
         let db = app.state::<Database>();

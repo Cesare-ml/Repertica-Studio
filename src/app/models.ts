@@ -320,7 +320,7 @@ export type BackupScheduleInput = Pick<BackupScheduleStatus,
 export interface McpClientStatus {
   id: string; name: string; configPath: string; appFound: boolean; configured: boolean; upToDate: boolean; error: string | null;
 }
-export interface McpSetup { command: string; args: string[]; dataDir: string; }
+export interface McpSetup { serverName: string; command: string; args: string[]; dataDir: string; }
 
 export interface UpdateReply {
   status: 'available' | 'current' | 'not_configured' | 'check_failed' | 'invalid_release' | 'busy' | 'stale'
