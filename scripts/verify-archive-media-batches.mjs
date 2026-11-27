@@ -7,6 +7,7 @@ import { readRegular, PACKAGE_LIMIT, COVER_LIMIT } from './add-local-artwork-cov
 import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { createLocalPackageDirectory } from './publish-local-package.mjs';
+import { date } from './gestionale-commercial-values.mjs';
 
 const exact = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) &&
   Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v,k));
@@ -56,7 +57,8 @@ function verifyPackageRelations(pkg, seenCollectorKeys) {
   const keys = new Set(), linked = new Set(), used = new Set();
   const int = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max;
   const maxMoney = 100_000_000_000;
-  const fail = () => { throw Error('Invalid commercial relationship or amount'); };
+  const fail = () => { throw Error('Invalid commercial relationship, date or amount'); };
+  const checkDate = value => { try { return date(value); } catch { return fail(); } };
   for (const c of pkg.collectors) {
     if (typeof c?.key !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(c.key) ||
         keys.has(c.key) || seenCollectorKeys.has(c.key)) fail();
@@ -73,6 +75,7 @@ function verifyPackageRelations(pkg, seenCollectorKeys) {
         sale.legacy_shares_bp.reduce((a,b) => a+b,0) !== 10000 ||
         !Array.isArray(sale.allocations) || sale.allocations.length !== 0 ||
         !Array.isArray(sale.receipts) || !Array.isArray(sale.installments)) fail();
+    checkDate(sale.sold_at);
     linked.add(sale.artwork_code); used.add(sale.collector_key);
     receipts += sale.receipts.length; installments += sale.installments.length;
     if (receipts > 1000 || installments > 1000) fail();
@@ -80,14 +83,19 @@ function verifyPackageRelations(pkg, seenCollectorKeys) {
     for (const receipt of sale.receipts) {
       if (!int(receipt?.amount_cents,1,maxMoney) ||
           !['bank_transfer','cash','card','other'].includes(receipt.method)) fail();
+      checkDate(receipt.received_at);
       total += receipt.amount_cents;
       if (total > sale.amount_cents) fail();
     }
     if (sale.installments.length) {
       if (sale.receipts.length || !int(sale.installments.length,2,60)) fail();
       total = 0;
+      let previous = '';
       for (const [i,item] of sale.installments.entries()) {
         if (item?.position !== i+1 || !int(item.amount_cents,1,maxMoney)) fail();
+        const due = checkDate(item.due_date);
+        if (due < previous) fail();
+        previous = due;
         total += item.amount_cents;
         if (total > sale.amount_cents) fail();
       }

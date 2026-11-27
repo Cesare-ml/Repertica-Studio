@@ -148,3 +148,34 @@ test('recovery refuses a commercially inconsistent excluded package without writ
   await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
   await assert.rejects(lstat(dest),{code:'ENOENT'});
 });
+
+test('commercial preflight validates actual calendar dates and unpaid schedule order',async t=>{
+  const plan=()=>{const p=soldPackage('A');p.sales[0].receipts=[];
+    p.sales[0].installments=[{position:1,amount_cents:5000,due_date:'2024-02-29'},
+      {position:2,amount_cents:5000,due_date:'2024-03-01'}];return p;};
+  const valid=plan();valid.sales[0].sold_at='2024-02-29';
+  assert.equal((await verifyArchiveMediaBatches((await fixture(t,[valid])).root)).sales,1);
+  const sameDay=plan();sameDay.sales[0].installments[1].due_date='2024-02-29';
+  assert.equal((await verifyArchiveMediaBatches((await fixture(t,[sameDay])).root)).sales,1);
+  for (const [make,mutate] of [
+    [()=>soldPackage('A'),p=>p.sales[0].sold_at='2025-02-29'],
+    [()=>soldPackage('A'),p=>delete p.sales[0].sold_at],
+    [()=>soldPackage('A'),p=>p.sales[0].receipts[0].received_at='2025-04-31'],
+    [()=>soldPackage('A'),p=>p.sales[0].receipts[0].received_at='2025-3-05'],
+    [plan,p=>p.sales[0].installments[0].due_date='2024-02-30'],
+    [plan,p=>p.sales[0].installments[1].due_date='2024-02-28'],
+    [plan,p=>delete p.sales[0].installments[1].due_date],
+  ]) {
+    const p=make();mutate(p);
+    await assert.rejects(verifyArchiveMediaBatches((await fixture(t,[p])).root),/Invalid commercial/);
+  }
+});
+test('manual recovery rejects an invalid sale date even in an excluded package',async t=>{
+  const bad=soldPackage('A');bad.sales[0].sold_at='2025-02-29';
+  const {root}=await fixture(t,[bad,pkg('B')]);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining'),digest=await manifestDigest(root);
+  await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
+  await assert.rejects(lstat(dest),{code:'ENOENT'});
+});
