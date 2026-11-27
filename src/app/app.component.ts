@@ -801,10 +801,12 @@ export class AppComponent implements OnInit {
   }
   async chooseRestoreFolder(): Promise<void> {
     if (this.busy || !this.initialized) return;
+    // Hold the archive lock while the native picker and inspection are pending.
+    this.busy = true;
     try {
+      this.change.detectChanges();
       const selection = await open({ directory: true, multiple: false, title: 'Scegli una cartella di backup ReperticaStudio-backup-…' });
       if (typeof selection !== 'string') return;
-      this.busy = true;
       this.errorMessage = '';
       this.restoreCandidate = await api.inspectBackup(selection);
     } catch (error) {
