@@ -6,7 +6,7 @@ import { exportOptions, localEnvironment } from './export-gestionale-artwork-met
 import { convertLegacyRows } from './convert-gestionale-artwork-metadata.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { publishLocalPackage } from './publish-local-package.mjs';
-import { money, date, unpaidInstallments } from './gestionale-commercial-values.mjs';
+import { money, date, unpaidInstallments, validateCommercialText } from './gestionale-commercial-values.mjs';
 
 const MAX_BYTES=2*1024*1024;
 function method(value) {
@@ -80,10 +80,12 @@ function relations(rows,shares,convertMetadata) {
     collectors.set(key,normalized);
     const amount=money(v.amount,true),tax=money(v.tax),shipping=money(v.shipping);
     if(tax+shipping>amount) throw Error('Costs exceed sale');
+    validateCommercialText(v.notes,15000);
     const installments=unpaidInstallments(v.installments,v.receipts,amount);
     let total=0;
     const receipts=v.receipts.map(i=>{
       exact(i,['amount','received_at','method','notes']);
+      validateCommercialText(i.notes,2000);
       const amount_cents=money(i.amount,true);
       total+=amount_cents;
       if(total>amount) throw Error('Receipts exceed sale');
