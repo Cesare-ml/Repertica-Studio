@@ -1111,6 +1111,121 @@ mod tests {
         assert!(parse(&bad.to_string()).is_err());
     }
     #[test]
+    fn batch_import_backup_restore_preserves_commercial_links_and_media() {
+        use crate::backup::{create_backup_core, inspect_backup_core, restore_backup_core};
+        use std::fs;
+
+        let root = tempfile::tempdir().unwrap();
+        let active = root.path().join("active");
+        let export = root.path().join("export");
+        let destination = root.path().join("backup");
+        fs::create_dir(&export).unwrap();
+        fs::create_dir(&destination).unwrap();
+        let db = crate::db::open(active.clone()).unwrap();
+
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(2, 2).write_to(&mut cursor, image::ImageFormat::Png).unwrap();
+        let bytes = cursor.into_inner();
+        let sha = format!("{:x}", Sha256::digest(&bytes));
+        let encoded = STANDARD.encode(&bytes);
+        let mut first = relational_sample();
+        first["covers"] = json!([{"artwork_code":"HIST-01","sha256":sha,"data_base64":encoded}]);
+        first["gallery"] = json!([{"artwork_code":"HIST-01","sha256":sha,"data_base64":encoded,
+            "position":1,"caption":"Detail","kind":"DETAIL"}]);
+        let second = json!({"format":RELATIONAL_FORMAT,
+            "artworks":[{"code":"HIST-03","title":"Later package","status":"available"}],
+            "collectors":[],"sales":[],"covers":[],"gallery":[]});
+        let mut entries = Vec::new();
+        for (i, package) in [first, second].into_iter().enumerate() {
+            let source = package.to_string();
+            let file = format!("package-{:04}.json", i + 1);
+            fs::write(export.join(&file), &source).unwrap();
+            entries.push(json!({"file":file,"sha256":digest(&source),"bytes":source.len(),
+                "artworks":package["artworks"].as_array().unwrap().len(),
+                "collectors":package["collectors"].as_array().unwrap().len(),
+                "sales":package["sales"].as_array().unwrap().len(),
+                "photographs":package["covers"].as_array().unwrap().len()+package["gallery"].as_array().unwrap().len()}));
+        }
+        let manifest = json!({"format":"repertica-studio-media-batches-v1","packages":entries}).to_string();
+        fs::write(export.join("manifest.json"), &manifest).unwrap();
+        let pin = digest(&manifest);
+
+        let (cover_path, gallery_path, first_digest, second_digest) = {
+            let mut conn = db.conn.lock().unwrap();
+            batches::preflight(&conn, &export).unwrap();
+            assert_eq!(count(&conn), 0);
+            let plan = batches::review(&conn, &export, &pin, 0).unwrap();
+            assert_eq!(batches::commit(&mut conn, &active, &export, &pin, 0, &plan.digest).unwrap(), 2);
+            let (cover_path, gallery_path): (String, String) = conn.query_row(
+                "SELECT a.image_path,g.image_path FROM artworks a JOIN artwork_images g ON g.artwork_id=a.id WHERE a.code='HIST-01'",
+                [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+            let next = batches::review(&conn, &export, &pin, 1).unwrap();
+            (cover_path, gallery_path, plan.digest, next.digest)
+        };
+        assert_ne!(cover_path, gallery_path);
+        for path in [&cover_path, &gallery_path] {
+            assert_eq!(fs::read(active.join(path)).unwrap(), bytes);
+        }
+
+        // Real native snapshot and verification, not a mocked backup or IPC response.
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        inspect_backup_core(folder).unwrap();
+        {
+            let mut conn = db.conn.lock().unwrap();
+            assert_eq!(batches::commit(&mut conn, &active, &export, &pin, 1, &second_digest).unwrap(), 1);
+            assert_eq!(count(&conn), 3);
+        }
+
+        // A damaged external backup must not undo the later committed package.
+        let backed_cover = folder.join(&cover_path);
+        let mut changed = bytes.clone();
+        changed[0] ^= 1;
+        fs::write(&backed_cover, changed).unwrap();
+        assert!(inspect_backup_core(folder).is_err());
+        assert!(restore_backup_core(&db, folder).is_err());
+        {
+            let conn = db.conn.lock().unwrap();
+            assert_eq!(count(&conn), 3);
+            assert_eq!(conn.query_row(READ_SEQUENCE, ["HIST|GLOBAL"], |r| r.get::<_,i64>(0)).unwrap(), 3);
+        }
+        assert_eq!(fs::read(active.join(&cover_path)).unwrap(), bytes);
+
+        fs::write(&backed_cover, &bytes).unwrap();
+        let restored = restore_backup_core(&db, folder).unwrap();
+        {
+            let mut conn = db.conn.lock().unwrap();
+            assert_eq!(count(&conn), 2);
+            let data: (String,String,i64,i64,i64,i64,i64,String,String,i64) = conn.query_row(
+                "SELECT a.status,c.name,s.amount_cents,f.tax_cents,f.shipping_cents,f.personal_bp,r.amount_cents,g.caption,g.kind,g.sort_order
+                 FROM sales s JOIN artworks a ON a.id=s.artwork_id JOIN collectors c ON c.id=s.collector_id
+                 JOIN sale_finances f ON f.sale_id=s.id JOIN sale_receipts r ON r.sale_id=s.id
+                 JOIN artwork_images g ON g.artwork_id=a.id", [],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?))).unwrap();
+            assert_eq!(data,("sold".into(),"Ada Example".into(),10000,1000,500,2000,4000,"Detail".into(),"DETAIL".into(),1));
+            assert_eq!(conn.query_row(READ_SEQUENCE, ["HIST|GLOBAL"], |r| r.get::<_,i64>(0)).unwrap(), 2);
+            assert_eq!(conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get::<_,i64>(0)).unwrap(),0);
+            assert!(batches::commit(&mut conn, &active, &export, &pin, 0, &first_digest).is_err());
+            // Restoring the snapshot does not make the first package importable
+            // again, but the explicitly reviewed second package may be reapplied.
+            let next = batches::review(&conn, &export, &pin, 1).unwrap();
+            assert_eq!(batches::commit(&mut conn, &active, &export, &pin, 1, &next.digest).unwrap(), 1);
+            assert_eq!(count(&conn), 3);
+        }
+        for path in [&cover_path, &gallery_path] {
+            assert_eq!(fs::read(active.join(path)).unwrap(), bytes);
+        }
+        let saved = Path::new(&restored.previous_archive);
+        let previous = Connection::open_with_flags(saved.join("repertica.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        assert_eq!(count(&previous), 3);
+        for path in [&cover_path, &gallery_path] {
+            assert_eq!(fs::read(saved.join(path)).unwrap(), bytes);
+        }
+        assert_eq!(fs::read_to_string(export.join("manifest.json")).unwrap(), manifest);
+    }
+
+    #[test]
     fn gallery_import_preserves_order_and_rolls_back_ignored_or_tampered_rows() {
         let mut cursor = std::io::Cursor::new(Vec::new());
         image::DynamicImage::new_rgb8(1,1).write_to(&mut cursor,image::ImageFormat::Png).unwrap();
