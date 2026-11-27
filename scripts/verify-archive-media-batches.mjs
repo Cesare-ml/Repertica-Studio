@@ -7,7 +7,7 @@ import { readRegular, PACKAGE_LIMIT, COVER_LIMIT } from './add-local-artwork-cov
 import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { createLocalPackageDirectory } from './publish-local-package.mjs';
-import { date } from './gestionale-commercial-values.mjs';
+import { date, validateInstallmentNotes } from './gestionale-commercial-values.mjs';
 
 const exact = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) &&
   Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v,k));
@@ -93,6 +93,10 @@ function verifyPackageRelations(pkg, seenCollectorKeys) {
       let previous = '';
       for (const [i,item] of sale.installments.entries()) {
         if (item?.position !== i+1 || !int(item.amount_cents,1,maxMoney)) fail();
+        // Match the native optional note and reject unknown installment fields.
+        // An excluded package must not evade these checks during recovery.
+        if (Object.keys(item).some(k => !['position','amount_cents','due_date','notes'].includes(k))) fail();
+        try { validateInstallmentNotes(item.notes ?? null); } catch { fail(); }
         const due = checkDate(item.due_date);
         if (due < previous) fail();
         previous = due;

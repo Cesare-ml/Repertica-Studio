@@ -179,3 +179,31 @@ test('manual recovery rejects an invalid sale date even in an excluded package',
   await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
   await assert.rejects(lstat(dest),{code:'ENOENT'});
 });
+
+test('commercial preflight checks raw installment notes and rejects unsupported fields',async t=>{
+  const plan=()=>{const p=soldPackage('A');p.sales[0].receipts=[];
+    p.sales[0].installments=[{position:1,amount_cents:5000,due_date:'2025-04-01'},
+      {position:2,amount_cents:5000,due_date:'2025-05-01'}];return p;};
+  for(const note of [undefined,null,'','  note  ','🎨'.repeat(500)]) {
+    const p=plan();
+    if(note!==undefined) p.sales[0].installments[0].notes=note;
+    assert.equal((await verifyArchiveMediaBatches((await fixture(t,[p])).root)).sales,1);
+  }
+  for(const note of [false,42,{},[], 'x\0y','🎨'.repeat(501),' '.repeat(501)]) {
+    const p=plan();p.sales[0].installments[0].notes=note;
+    await assert.rejects(verifyArchiveMediaBatches((await fixture(t,[p])).root),/Invalid commercial/);
+  }
+  const unsupported=plan();unsupported.sales[0].installments[0].paid=true;
+  await assert.rejects(verifyArchiveMediaBatches((await fixture(t,[unsupported])).root),/Invalid commercial/);
+});
+test('manual recovery rejects invalid installment notes in an excluded package without output',async t=>{
+  const bad=soldPackage('A');bad.sales[0].receipts=[];
+  bad.sales[0].installments=[{position:1,amount_cents:5000,due_date:'2025-04-01',notes:'x'.repeat(501)},
+    {position:2,amount_cents:5000,due_date:'2025-05-01'}];
+  const {root}=await fixture(t,[bad,pkg('B')]);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining'),digest=await manifestDigest(root);
+  await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
+  await assert.rejects(lstat(dest),{code:'ENOENT'});
+});

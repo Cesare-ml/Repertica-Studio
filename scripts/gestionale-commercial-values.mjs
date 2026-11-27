@@ -14,6 +14,13 @@ export function date(value) {
   return value;
 }
 
+// Shared with the batch preflight: validate the original Unicode length before
+// trimming; null represents an absent note, not an invalid value.
+export function validateInstallmentNotes(value) {
+  if (value!==null && (typeof value!=='string' || Array.from(value).length>500 || value.includes('\0')))
+    throw Error('Invalid installment notes');
+}
+
 // Legacy receipts can be assigned to particular installments; Studio instead applies
 // receipts in due-date order. Until those semantics can be reconciled, accept only
 // unpaid plans. Preserve source positions, do not sort or regenerate a schedule.
@@ -29,8 +36,7 @@ export function unpaidInstallments(rows, receipts, saleCents) {
       throw Error('Invalid installment position or projection');
     const due_date=date(r.due_date), amount_cents=money(r.amount,true);
     if (due_date<previous) throw Error('Installment order conflicts with due dates');
-    if (r.notes!==null && (typeof r.notes!=='string' || Array.from(r.notes).length>500 || r.notes.includes('\0')))
-      throw Error('Invalid installment notes');
+    validateInstallmentNotes(r.notes);
     previous=due_date;
     total+=amount_cents;
     if (total>saleCents) throw Error('Installments exceed sale');
