@@ -47,7 +47,8 @@ function foldSearch(value: string): string {
     // Dimensions can be entered with decimal commas and the multiplication
     // sign commonly used in artwork catalogues (e.g. 30,5 × 40 cm).
     .replace(/(\d),(\d)/gu, '$1.$2')
-    .replace(/(\d)\s*[x×]\s*(?=\d)/giu, '$1x')
+    // Catalogues often repeat the unit for each dimension (30 cm × 40 cm).
+    .replace(/(\d)\s*(?:cm\s*)?[x×]\s*(?=\d)/giu, '$1x')
     // The unit is implicit in the stored dimensions, but may be typed by a user.
     .replace(/(\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?){1,2})\s*cm\b/giu, '$1')
     .replace(/\s+/gu, ' ').trim();
@@ -92,6 +93,13 @@ function phoneDigitsForSearch(term: string): string | null {
   return digits.length >= 5 ? digits : null;
 }
 
+/** Complete numerical dimension sequences, not arbitrary substrings of larger values. */
+function matchesDimensionTerm(term: string, field: string): boolean {
+  const axes = term.split('x').length;
+  return (field.match(/(?<![\d.])\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?)+/gu) ?? []).some(value =>
+    value === term || (axes === 2 && value.split('x').length === 3 && value.startsWith(`${term}x`)));
+}
+
 function matchesTerms(
   terms: string[], fields: Array<string | null | undefined>, phone?: string | null
 ): boolean {
@@ -101,6 +109,9 @@ function matchesTerms(
   const normalizedFields = fields.map(field => foldSearch(field ?? ''));
   const savedPhoneDigits = (phone ?? '').replace(/\D/gu, '');
   return terms.every(term => {
+    if (/^\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?){1,2}$/u.test(term)) {
+      return normalizedFields.some(field => matchesDimensionTerm(term, field));
+    }
     if (normalizedFields.some(field => field.includes(term))) return true;
     const digits = phoneDigitsForSearch(term);
     return digits !== null && savedPhoneDigits.includes(digits);
