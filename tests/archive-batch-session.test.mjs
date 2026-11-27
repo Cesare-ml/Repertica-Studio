@@ -76,11 +76,47 @@ test('desktop batch import wires explicit native selection, review and confirmat
   }
   assert.ok(ui.includes('directory:true, multiple:false'));
   assert.ok(ui.includes('await this.batchSession.commitReviewed()'));
-  assert.ok(ui.includes("phase === 'unknown' && !window.confirm"));
+  assert.ok(ui.includes("phase === 'unknown' && !(await confirmed"));
   assert.ok(ui.includes('this.batchState || !this.restoreCandidate'));
   assert.ok(html.includes('batchPreview || metadataImport'));
   assert.ok(html.includes("(click)=\"confirmReviewedBatch()\""));
   for (const key of ["Scegli cartella di migrazione","Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.","Pacchetti confermati:","Pacchetto corrente:","Importazione della cartella completata.","Importazione interrotta. Le opere confermate restano nell’archivio.","Esito incerto: il pacchetto potrebbe essere già stato importato. Controlla l’archivio prima di proseguire.","Verifica il prossimo pacchetto","Interrompi importazione","Chiudi sessione di importazione","Importa pacchetto selezionato","Verifica del pacchetto non riuscita. Controlla la cartella e l’archivio.","Importare solo il pacchetto in anteprima? I pacchetti già importati non saranno annullati.","Ho controllato manualmente l’archivio e non ripeterò alla cieca il pacchetto incerto."]) {
     assert.equal(i18n.split(JSON.stringify(key)+':').length-1,4, key);
+  }
+});
+
+test('import confirmation handlers wait, refuse cancellation and reject stale previews', async () => {
+  const {readFileSync} = await import('node:fs');
+  const source = readFileSync(new URL('../src/app/app.component.ts', import.meta.url), 'utf8');
+  const methods = ['confirmReviewedBatch','resetBatchImport','confirmMetadataImport','restoreSelectedBackup'];
+  for (const name of methods) {
+    const start = source.indexOf('  async '+name+'(): Promise<void> {');
+    assert.ok(start >= 0, name);
+    const end = source.indexOf('\n  }', start);
+    const code = source.slice(start, end+4).replace('(): Promise<void>', '()');
+    for (const scenario of ['cancel','stale','accept']) {
+      let answer, writes=0, cleared=0;
+      const confirmed=()=>new Promise(resolve=>{answer=resolve;});
+      const api={importArtworkMetadata:async()=>{writes++;return 1;},restoreBackup:async()=>{writes++;return {previousArchive:'synthetic'};}};
+      const state = {phase:name==='resetBatchImport'?'unknown':'confirm'};
+      const host = {busy:false, initialized:true, section:'settings', batchState:name.includes('Batch')?state:null,
+        batchPreview:{digest:'a'}, metadataImport:{digest:'b'}, metadataSource:'source', restoreCandidate:{directory:'synthetic'},
+        tr:x=>x, batchAction:async f=>f(), batchSession:{commitReviewed:async()=>{writes++;},reset:()=>{writes++;}},
+        syncBatch(){}, refresh:async()=>{}, loadAllocationPlan:async()=>{}, loadSchedule:async()=>{}, closeGallery(){},
+        clearMetadataImport(){cleared++;this.metadataImport=null;this.metadataSource=null;},
+        change:{detectChanges(){}}, showMetadataImportError(e){throw e;}, error:e=>String(e)};
+      const handler = new Function('confirmed','api','return ({'+code+'})')['call'](null,confirmed,api)[name];
+      const pending=handler.call(host);
+      assert.equal(writes,0,name+' before answer');
+      assert.equal(cleared,0,name+' before answer');
+      if(scenario==='stale') {
+        if(name.includes('Batch')) host.batchState={...state};
+        else if(name==='restoreSelectedBackup') host.batchState={phase:'review'};
+        else host.metadataImport={digest:'new'};
+      }
+      answer(scenario!=='cancel');await pending;
+      assert.equal(writes,scenario==='accept'?1:0,name+' '+scenario);
+      assert.equal(cleared,scenario==='accept'&&!name.includes('Batch')?1:0,name+' clear '+scenario);
+    }
   }
 });

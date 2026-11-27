@@ -27,6 +27,7 @@ import { EXAMPLE_SIZES, examplePriceCents, priceFieldsFor, priceModeOf, priceOf 
 import type { PriceMode } from './pricing';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { badgeText, notificationContent } from './mail-sync';
+import { confirmed } from './confirm-dialog';
 import { mailText } from './mail-i18n';
 import { artworkDeletionMessage, bulkDeletionMessage, collectorDeletionMessage, hasDependents, mergeImpacts } from './deletion-impact';
 import type { DeletionImpact } from './deletion-impact';
@@ -693,7 +694,9 @@ export class AppComponent implements OnInit {
   }
   async confirmReviewedBatch(): Promise<void> {
     if (this.busy || !this.initialized || this.batchState?.phase !== 'confirm') return;
-    if (!window.confirm(this.tr('Importare solo il pacchetto in anteprima? I pacchetti già importati non saranno annullati.'))) return;
+    const state = this.batchState, preview = this.batchPreview, section = this.section;
+    if (!preview || !(await confirmed(this.tr('Importare solo il pacchetto in anteprima? I pacchetti già importati non saranno annullati.')))) return;
+    if (this.busy || !this.initialized || this.batchState !== state || this.batchPreview !== preview || this.section !== section) return;
     await this.batchAction(async () => {
       await this.batchSession.commitReviewed();
       // Refresh even after a lost IPC response: the database may have changed.
@@ -707,11 +710,13 @@ export class AppComponent implements OnInit {
     this.batchError = '';
     this.syncBatch();
   }
-  resetBatchImport(): void {
+  async resetBatchImport(): Promise<void> {
     if (this.busy || !this.batchState) return;
-    const phase = this.batchState.phase;
+    const state = this.batchState, section = this.section;
+    const phase = state.phase;
     if (!['complete','stopped','unknown'].includes(phase)) return;
-    if (phase === 'unknown' && !window.confirm(this.tr('Ho controllato manualmente l’archivio e non ripeterò alla cieca il pacchetto incerto.'))) return;
+    if (phase === 'unknown' && !(await confirmed(this.tr('Ho controllato manualmente l’archivio e non ripeterò alla cieca il pacchetto incerto.')))) return;
+    if (this.busy || this.batchState !== state || this.section !== section) return;
     this.batchSession.reset(phase === 'unknown');
     this.batchError = '';
     this.syncBatch();
@@ -762,8 +767,10 @@ export class AppComponent implements OnInit {
   }
   async confirmMetadataImport(): Promise<void> {
     if (this.busy || !this.initialized || this.batchState || !this.metadataImport || this.metadataSource === null) return;
-    const source = this.metadataSource, digest = this.metadataImport.digest;
-    if (!window.confirm(this.tr('Importare tutti i record in anteprima? Nessun record esistente sarà sostituito.'))) return;
+    const source = this.metadataSource, preview = this.metadataImport, section = this.section;
+    const digest = preview.digest;
+    if (!(await confirmed(this.tr('Importare tutti i record in anteprima? Nessun record esistente sarà sostituito.')))) return;
+    if (this.busy || !this.initialized || this.batchState || this.metadataSource !== source || this.metadataImport !== preview || this.section !== section) return;
     this.busy = true;
     this.clearMetadataImport();
     try {
@@ -809,10 +816,12 @@ export class AppComponent implements OnInit {
     }
   }
   async restoreSelectedBackup(): Promise<void> {
-    if (!this.busy) this.clearMetadataImport();
     if (this.busy || this.batchState || !this.restoreCandidate) return;
-    const candidate = this.restoreCandidate;
-    if (!window.confirm('RIPRISTINO ARCHIVIO\\n\\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\\n\\nContinuare?')) return;
+    const candidate = this.restoreCandidate, preview = this.metadataImport, source = this.metadataSource;
+    if (!(await confirmed('RIPRISTINO ARCHIVIO\n\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\n\nContinuare?'))) return;
+    // A new backup, import preview or batch may have been selected while the dialog was open.
+    if (this.busy || this.batchState || this.restoreCandidate !== candidate || this.metadataImport !== preview || this.metadataSource !== source) return;
+    this.clearMetadataImport();
     this.busy = true; this.errorMessage = ''; this.notice = '';
     try {
       this.lastRestore = await api.restoreBackup(candidate.directory);
