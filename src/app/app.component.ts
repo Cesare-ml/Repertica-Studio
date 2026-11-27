@@ -821,7 +821,7 @@ export class AppComponent implements OnInit {
     if (!(await confirmed('RIPRISTINO ARCHIVIO\n\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\n\nContinuare?'))) return;
     // A new backup, import preview or batch may have been selected while the dialog was open.
     if (this.busy || this.batchState || this.restoreCandidate !== candidate || this.metadataImport !== preview || this.metadataSource !== source) return;
-    this.clearMetadataImport();
+    if (preview != null || source != null) this.clearMetadataImport();
     this.busy = true; this.errorMessage = ''; this.notice = '';
     try {
       this.lastRestore = await api.restoreBackup(candidate.directory);
