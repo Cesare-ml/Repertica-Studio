@@ -12,7 +12,8 @@ const bid = (id, at, extra = {}) => ({ bidId: id, amount: 13000, placedAt: at, b
   bidderEmail: 'synthetic@example.test', state: 'valid', isLeading: false, cancelledAt: null, cancelReason: null, ...extra });
 const cancelledBid = (id, at) => bid(id, at, { state: 'cancelled', cancelledAt: '2027-03-04T13:00:00.000Z', cancelReason: 'sospetta' });
 const prepared = { artworkId: 'art-1', auctionId: 'auc-idem-0123456789abcdef', idempotencyKey: 'idem-0123456789abcdef',
-  body: JSON.stringify({ auction: { id: 'auc-idem-0123456789abcdef' }, details: { slug: 'paesaggio-01', title: 'Paesaggio' } }) };
+  // The site chooses the page address: the publication is recognised by the auction id it carries.
+  body: JSON.stringify({ auction: { id: 'auc_1' }, details: { title: 'Paesaggio' } }) };
 const KEY = 'idem-0123456789abcdef';
 
 function fake(over = {}) {
@@ -45,7 +46,7 @@ test('publication is confirmed only after the server list shows it', async () =>
   const t = fake();
   const { operation } = await manager(t).publish(prepared);
   assert.equal(operation.state, 'confirmed');
-  assert.equal(operation.target, 'paesaggio-01');
+  assert.equal(operation.target, 'auc_1', 'the auction id, not the page address');
   const lost = fake({ async listAuctions() { throw new Error('network'); } });
   assert.equal((await manager(lost).publish(prepared)).operation.state, 'pending_confirmation');
 });
@@ -60,7 +61,7 @@ test('a lost response is recovered by the retry with the same key and body, with
   assert.equal(second.operation.state, 'confirmed');
   assert.equal(second.operation.attempts, 2);
   assert.deepEqual(t.calls.map(c => c[1]), [prepared.idempotencyKey, prepared.idempotencyKey]);
-  const changed = { ...prepared, body: JSON.stringify({ auction: {}, details: { slug: 'paesaggio-01', title: 'Altro' } }) };
+  const changed = { ...prepared, body: JSON.stringify({ auction: { id: 'auc_1' }, details: { title: 'Altro' } }) };
   await assert.rejects(manager(t).publish(changed, first.operation), /request_changed/);
 });
 

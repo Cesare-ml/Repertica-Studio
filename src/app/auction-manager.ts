@@ -73,11 +73,12 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
   /** Publication of an already reviewed request. Pass the same `prepared` again to retry. */
   async function publish(prepared: PreparedPreview, previous?: Operation): Promise<OperationOutcome> {
     requireOnline();
-    const slug = (JSON.parse(prepared.body) as { details: { slug: string } }).details.slug;
+    // The site chooses the page address, so a publication is recognised by the auction id the request carries.
+    const auctionId = (JSON.parse(prepared.body) as { auction: { id: string } }).auction.id;
     if (previous && (previous.body !== prepared.body || previous.idempotencyKey !== prepared.idempotencyKey)) {
       throw new Error('request_changed');
     }
-    let op = previous ? retry(previous) : beginOperation('publish', slug, prepared.idempotencyKey, prepared.body);
+    let op = previous ? retry(previous) : beginOperation('publish', auctionId, prepared.idempotencyKey, prepared.body);
     let status = 0;
     try {
       const answer = await transport.publish(prepared.body, prepared.idempotencyKey);
