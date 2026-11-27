@@ -45,3 +45,13 @@ export function unpaidInstallments(rows, receipts, saleCents) {
   if (total!==saleCents) throw Error('Installments must total the sale');
   return plan;
 }
+
+// Mirror native clean_relation: optional text, Unicode scalar length before
+// trimming (whitespace-only values are empty), and no embedded NUL.
+// Rust str::trim uses Unicode White_Space, not JavaScript's trim set.
+export function validateCommercialText(value, limit) {
+  if (value == null) return;
+  if (typeof value !== 'string' || value.includes('\0') ||
+      (!/^\p{White_Space}*$/u.test(value) && Array.from(value).length > limit))
+    throw Error('Invalid commercial text');
+}
