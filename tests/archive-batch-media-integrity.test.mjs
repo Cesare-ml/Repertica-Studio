@@ -85,3 +85,36 @@ test('recovery refuses damaged media in an excluded package before creating any 
   await assert.rejects(lstat(dest),{code:'ENOENT'});
   assert.deepEqual(await readdir(root),['original']);
 });
+
+test('preflight accepts native cover defaults and gallery metadata at Unicode limits',async t => {
+  const a=pkg('A');
+  a.covers.push({...photo('A'),position:0,caption:null,kind:null});
+  a.gallery.push({...photo('A'),position:1},
+    {...gallery('A',2),caption:'🎨'.repeat(300)},
+    {...gallery('A',3),caption:' '.repeat(301),kind:null});
+  const {original,dest,digest}=await fixture(t,[pkg('B'),a]);
+  assert.equal((await verifyArchiveMediaBatches(original)).photographs,4);
+  assert.equal((await prepareRemainingBatches(original,dest,digest,[2])).photographs,4);
+  assert.deepEqual(await readFile(join(dest,'package-0001.json')),
+    await readFile(join(original,'package-0002.json')));
+});
+
+test('recovery rejects invalid cover and gallery metadata in excluded packages with valid hashes',async t => {
+  for(const [isGallery,patch] of [
+    [false,{position:null}],[false,{position:1}],[false,{caption:''}],
+    [false,{kind:'OTHER'}],[false,{path:'private.jpg'}],
+    [true,{kind:'WRONG'}],[true,{kind:1}],[true,{caption:42}],
+    [true,{caption:false}],[true,{caption:[]}],[true,{caption:'x\0y'}],
+    [true,{caption:'🎨'.repeat(301)}],[true,{caption:'x'+' '.repeat(300)}],
+    [true,{url:'https://example.invalid'}],
+  ]) {
+    const a=pkg('A');
+    if(isGallery) a.gallery.push({...gallery('A',1),...patch});
+    else a.covers.push({...photo('A'),...patch});
+    const {root,original,dest,digest}=await fixture(t,[a,pkg('B')]);
+    await assert.rejects(verifyArchiveMediaBatches(original),/Invalid photograph metadata/);
+    await assert.rejects(prepareRemainingBatches(original,dest,digest,[2]),/Invalid photograph metadata/);
+    await assert.rejects(lstat(dest),{code:'ENOENT'});
+    assert.deepEqual(await readdir(root),['original']);
+  }
+});
