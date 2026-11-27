@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { AUCTION_CONTRACT_VERSION } from './auction-contract';
 import { AuctionOnlineComponent } from './auction-online.component';
 import { AuctionOnlineService } from './auction-online.service';
+import type { WinnerMailDraft } from './auction-winner-mail';
 import { confirmed } from './confirm-dialog';
 import type { PendingPublication } from './auction-publications';
 import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, loadSavedBankDetails, loadWinnerDefaults, localInputToUtc, removeDraft,
@@ -71,7 +72,7 @@ const REFUSALS: Record<string, string> = {
     <h3 id="auctions-published">{{ tr('Aste pubblicate') }}</h3>
     <p class="auctions-muted">{{ tr('Offerte, importi e risultati vengono letti dal server dopo il collegamento. Qui non vengono mai simulati.') }}</p>
   </section>
-  <section class="auctions-card" *ngIf="online.status.available"><rp-auction-online [language]="language"></rp-auction-online></section>
+  <section class="auctions-card" *ngIf="online.status.available"><rp-auction-online [language]="language" (composeToWinner)="composeToWinner.emit($event)"></rp-auction-online></section>
 
   <section class="auctions-card" aria-labelledby="auctions-pending" *ngIf="online.publications.length">
     <h3 id="auctions-pending">{{ tr('Pubblicazioni da confermare') }}</h3>
@@ -234,6 +235,8 @@ export class AuctionsComponent implements OnInit, OnChanges {
   /** Artwork chosen from its row ("Avvia asta"); opens a draft for it. */
   @Input() preselectedArtworkId: string | null = null;
   @Output() readonly consumed = new EventEmitter<void>();
+  /** The artist wants to write to the winner of an auction: the app opens the mail window with this draft. */
+  @Output() readonly composeToWinner = new EventEmitter<WinnerMailDraft>();
 
   readonly contractVersion = AUCTION_CONTRACT_VERSION;
   /** The signed-in panel: reloaded from the server once a publication is confirmed, so the new auction shows. */

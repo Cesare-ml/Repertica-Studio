@@ -46,6 +46,13 @@ function requireOk(response: HttpResponse): unknown {
   throw new TransportError(code, response.status);
 }
 
+/** The server's error code of a refusal, when it gave a well-formed one. */
+function errorCode(response: HttpResponse): string | null {
+  if (response.status < 400 || response.body === null || typeof response.body !== 'object' || Array.isArray(response.body)) return null;
+  const code = (response.body as Record<string, unknown>)['error'];
+  return typeof code === 'string' && /^[a-z][a-z0-9_]{2,63}$/.test(code) ? code : null;
+}
+
 export function createArtistV1Transport(port: HttpPort, tenantId: () => string | null): AuctionTransport {
   const json = { 'Content-Type': 'application/json', Accept: 'application/json' };
   const get = async (path: string): Promise<unknown> =>
@@ -80,6 +87,38 @@ export function createArtistV1Transport(port: HttpPort, tenantId: () => string |
       ensureId(auctionId, 'invalid_auction');
       if (cursor !== null && !/^\d{1,16}$/.test(cursor)) throw new Error('invalid_response');
       return get(`/api/artist/auctions/${auctionId}/bids` + (cursor === null ? '' : `?cursor=${cursor}`));
+    },
+
+    async getParticipants(auctionId) {
+      ensureId(auctionId, 'invalid_auction');
+      return get(`/api/artist/auctions/${auctionId}/participants`);
+    },
+
+    async getTerms(auctionId) {
+      ensureId(auctionId, 'invalid_auction');
+      return get(`/api/artist/auctions/${auctionId}/terms`);
+    },
+
+    async getEmailPolicy() {
+      const tenant = ensureId(tenantId() ?? '', 'tenant_not_selected');
+      return get(`/api/artist/email-policy?tenantId=${encodeURIComponent(tenant)}`);
+    },
+
+    async blockEmail(email, reason, idempotencyKey) {
+      const tenant = ensureId(tenantId() ?? '', 'tenant_not_selected');
+      if (!KEY.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
+      const response = answered(await port({ method: 'POST', path: '/api/artist/email-policy/blocks',
+        headers: { ...json, 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ tenantId: tenant, email, ...(reason ? { reason } : {}) }) }));
+      return { status: response.status, error: errorCode(response) };
+    },
+
+    async unblockEmail(blockId, idempotencyKey) {
+      const tenant = ensureId(tenantId() ?? '', 'tenant_not_selected');
+      if (!KEY.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
+      if (!/^[a-f0-9]{24}$/.test(blockId)) throw new Error('invalid_response');
+      const response = answered(await port({ method: 'POST', path: `/api/artist/email-policy/blocks/${blockId}/removal`,
+        headers: { ...json, 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ tenantId: tenant }) }));
+      return { status: response.status, error: errorCode(response) };
     },
 
     async cancelBid(auctionId, bidId, request, idempotencyKey) {

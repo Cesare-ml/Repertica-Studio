@@ -464,6 +464,13 @@ pub(crate) fn allowed_request(method: &str, target: &str) -> bool {
         ("GET", ["auctions", id, "bids"], q) => {
             identifier(id) && q.map(|q| q.strip_prefix("cursor=").map(|c| digits(c, 16)).unwrap_or(false)).unwrap_or(true)
         }
+        ("GET", ["auctions", id, "participants"], None) => identifier(id),
+        ("GET", ["auctions", id, "terms"], None) => identifier(id),
+        ("GET", ["email-policy"], Some(q)) => q.strip_prefix("tenantId=").map(identifier).unwrap_or(false),
+        ("POST", ["email-policy", "blocks"], None) => true,
+        ("POST", ["email-policy", "blocks", id, "removal"], None) => {
+            id.len() == 24 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }
         ("POST", ["publications"], None) => true,
         ("POST", ["auctions", id, "bids", bid, "cancellation"], None) => identifier(id) && identifier(bid),
         _ => false,
@@ -704,6 +711,9 @@ mod tests {
         for ok in [("GET", "/api/artist/tenants"), ("GET", "/api/artist/auctions?tenantId=artist-a&page=1"),
             ("GET", "/api/artist/auctions/lot_1"), ("GET", "/api/artist/auctions/lot-1/bids"),
             ("GET", "/api/artist/auctions/lot-1/bids?cursor=105"), ("POST", "/api/artist/publications"),
+            ("GET", "/api/artist/auctions/lot-1/participants"), ("GET", "/api/artist/auctions/lot_1/terms"),
+            ("GET", "/api/artist/email-policy?tenantId=artist-a"), ("POST", "/api/artist/email-policy/blocks"),
+            ("POST", "/api/artist/email-policy/blocks/0123456789abcdef01234567/removal"),
             ("POST", "/api/artist/auctions/lot-1/bids/0a52304b-27e4-4744-9c16-46976bae9284/cancellation")] {
             assert!(allowed_request(ok.0, ok.1), "{ok:?}");
         }
@@ -712,7 +722,13 @@ mod tests {
             ("GET", "/api/artist/auctions/../tenants"), ("GET", "/api/artist/auctions/a/bids?cursor=0"),
             ("GET", "/api/artist/auctions/a/bids?cursor=1&x=2"), ("GET", "/api/catalog/auctions"), ("GET", "https://evil.test/api/artist/tenants"),
             ("DELETE", "/api/artist/auctions/a"), ("POST", "/api/artist/auctions/a/bids/b/cancellation?x=1"),
-            ("GET", "//evil.test/api/artist/tenants"), ("GET", "/api/artist/auctions/a%2Fb")] {
+            ("GET", "//evil.test/api/artist/tenants"), ("GET", "/api/artist/auctions/a%2Fb"),
+            ("GET", "/api/artist/auctions/a/participants?x=1"), ("POST", "/api/artist/auctions/a/participants"),
+            ("GET", "/api/artist/auctions/a/terms?x=1"), ("GET", "/api/artist/email-policy"),
+            ("GET", "/api/artist/email-policy?tenantId=a&x=1"), ("GET", "/api/artist/email-policy?tenantId=a/b"),
+            ("DELETE", "/api/artist/email-policy/blocks/0123456789abcdef01234567"), ("POST", "/api/artist/email-policy/blocks?x=1"),
+            ("POST", "/api/artist/email-policy/blocks/0123456789ABCDEF01234567/removal"),
+            ("POST", "/api/artist/email-policy/blocks/short/removal"), ("GET", "/api/artist/email-policy/blocks")] {
             assert!(!allowed_request(bad.0, bad.1), "{bad:?}");
         }
     }

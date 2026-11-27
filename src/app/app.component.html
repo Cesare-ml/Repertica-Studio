@@ -223,11 +223,11 @@
 
 
     <section *ngIf="section === 'mail'" class="page mail-section">
-      <rp-business-mail [language]="language" [collectors]="collectors" [sync]="mailSync" [notifications]="settings.mail_notifications" (notificationsChange)="setMailNotifications($event)"></rp-business-mail>
+      <rp-business-mail [language]="language" [collectors]="collectors" [sync]="mailSync" [notifications]="settings.mail_notifications" (notificationsChange)="setMailNotifications($event)" [prefill]="mailPrefill" (prefillUsed)="mailPrefill = null"></rp-business-mail>
     </section>
 
     <section *ngIf="section === 'auctions'" class="page">
-      <rp-auctions [artworks]="artworks" [language]="language" [preselectedArtworkId]="auctionArtworkId" (consumed)="auctionArtworkId = null"></rp-auctions>
+      <rp-auctions [artworks]="artworks" [language]="language" [preselectedArtworkId]="auctionArtworkId" (consumed)="auctionArtworkId = null" (composeToWinner)="startWinnerMail($event)"></rp-auctions>
     </section>
 
     <section *ngIf="section === 'brochures'" class="page brochure-section">
