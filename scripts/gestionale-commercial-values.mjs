@@ -55,3 +55,28 @@ export function validateCommercialText(value, limit) {
       (!/^\p{White_Space}*$/u.test(value) && Array.from(value).length > limit))
     throw Error('Invalid commercial text');
 }
+
+// Match native collector validation without modifying the exported record.
+export function validateCollectorProfile(c) {
+  const limits={last_name:240,email:320,phone:120,address:2000,notes:15000,
+    birth_date:10,birth_time:5,birth_place:300,instagram:300,facebook:300,tiktok:300,website:500,linkedin:500};
+  const fail=()=>{throw Error('Invalid collector profile');};
+  const trim=value=>value?.replace(/^\p{White_Space}+|\p{White_Space}+$/gu,'')||null;
+  if (!c || typeof c!=='object' || Array.isArray(c) ||
+      Object.keys(c).some(k=>k!=='key' && k!=='first_name' && !Object.hasOwn(limits,k)) ||
+      typeof c.first_name!=='string') fail();
+  validateCommercialText(c.first_name,240);
+  const first=trim(c.first_name);
+  if (!first || /\p{Cc}/u.test(first)) fail();
+  const values={};
+  for (const [key,limit] of Object.entries(limits)) {
+    validateCommercialText(c[key],limit);
+    values[key]=trim(c[key]);
+  }
+  const {last_name:last,email,birth_date,birth_time}=values;
+  if ((last && /\p{Cc}/u.test(last)) ||
+      (email && (!email.includes('@') || /[\p{White_Space}\p{Cc}]/u.test(email)))) fail();
+  if (birth_date) date(birth_date);
+  if (birth_time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(birth_time)) fail();
+  return {name:last?first+' '+last:first,email};
+}
