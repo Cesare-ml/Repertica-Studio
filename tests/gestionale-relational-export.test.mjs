@@ -50,3 +50,16 @@ test('collector profile preserves source fields and only exact minute birth time
   for(const bad of [{birth_time:'07:45:01'},{birth_time:'24:00:00'},{birth_date:'1981-02-29'},{website:'x'.repeat(501)},{instagram:7},{unknown:'x'}])
     assert.throws(()=>pack([{artwork,collector:{...collector,...profile,...bad},sale}]));
 });
+
+test('export validates optional sale and receipt notes before publishing a package',()=>{
+  for(const [field,limit] of [['sale',15000],['receipt',2000]]) {
+    const make=notes=>field==='sale'?{...sale,notes}:{...sale,receipts:[{...sale.receipts[0],notes}]};
+    for(const notes of [null,'','  valid  ','🎨'.repeat(limit),' '.repeat(limit+1)]) {
+      const p=pack([{artwork,collector,sale:make(notes)}]);
+      assert.equal(field==='sale'?p.sales[0].notes:p.sales[0].receipts[0].notes,notes);
+    }
+    for(const notes of [false,42,[],{},'a\0b','🎨'.repeat(limit+1),'x'+' '.repeat(limit)]) {
+      assert.throws(()=>pack([{artwork,collector,sale:make(notes)}]),/Invalid commercial text/);
+    }
+  }
+});
