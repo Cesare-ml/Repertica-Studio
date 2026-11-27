@@ -207,3 +207,29 @@ test('manual recovery rejects invalid installment notes in an excluded package w
   await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
   await assert.rejects(lstat(dest),{code:'ENOENT'});
 });
+
+test('preflight validates optional commercial text and refuses unknown sale or receipt fields',async t=>{
+  for(const [field,limit] of [['sale',15000],['notes',2000],['reference',200]]) {
+    const make=value=>{const p=soldPackage('A');if(field==='sale')p.sales[0].notes=value;
+      else p.sales[0].receipts[0][field]=value;return p;};
+    for(const value of [null,'','  valid  ','🎨'.repeat(limit),' '.repeat(limit+1)]) {
+      assert.equal((await verifyArchiveMediaBatches((await fixture(t,[make(value)])).root)).sales,1);
+    }
+    for(const value of [false,42,[],{},'a\0b','🎨'.repeat(limit+1),'x'+' '.repeat(limit)]) {
+      await assert.rejects(verifyArchiveMediaBatches((await fixture(t,[make(value)])).root),/Invalid commercial/);
+    }
+  }
+  for(const mutate of [p=>p.sales[0].paid=true,p=>p.sales[0].receipts[0].installment_id=1]) {
+    const p=soldPackage('A');mutate(p);
+    await assert.rejects(verifyArchiveMediaBatches((await fixture(t,[p])).root),/Invalid commercial/);
+  }
+});
+test('recovery refuses invalid receipt reference in an excluded package without output',async t=>{
+  const bad=soldPackage('A');bad.sales[0].receipts[0].reference='x'.repeat(201);
+  const {root}=await fixture(t,[bad,pkg('B')]);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining'),digest=await manifestDigest(root);
+  await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
+  await assert.rejects(lstat(dest),{code:'ENOENT'});
+});
