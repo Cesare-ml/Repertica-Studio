@@ -7,7 +7,7 @@ import { readRegular, PACKAGE_LIMIT, COVER_LIMIT } from './add-local-artwork-cov
 import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { createLocalPackageDirectory } from './publish-local-package.mjs';
-import { date, validateInstallmentNotes } from './gestionale-commercial-values.mjs';
+import { date, validateInstallmentNotes, validateCommercialText } from './gestionale-commercial-values.mjs';
 
 const exact = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) &&
   Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v,k));
@@ -75,6 +75,9 @@ function verifyPackageRelations(pkg, seenCollectorKeys) {
         sale.legacy_shares_bp.reduce((a,b) => a+b,0) !== 10000 ||
         !Array.isArray(sale.allocations) || sale.allocations.length !== 0 ||
         !Array.isArray(sale.receipts) || !Array.isArray(sale.installments)) fail();
+    if (Object.keys(sale).some(k => !['artwork_code','collector_key','amount_cents','currency','sold_at','notes',
+        'tax_cents','shipping_cents','legacy_shares_bp','allocations','installments','receipts'].includes(k))) fail();
+    try { validateCommercialText(sale.notes,15000); } catch { fail(); }
     checkDate(sale.sold_at);
     linked.add(sale.artwork_code); used.add(sale.collector_key);
     receipts += sale.receipts.length; installments += sale.installments.length;
@@ -83,6 +86,11 @@ function verifyPackageRelations(pkg, seenCollectorKeys) {
     for (const receipt of sale.receipts) {
       if (!int(receipt?.amount_cents,1,maxMoney) ||
           !['bank_transfer','cash','card','other'].includes(receipt.method)) fail();
+      if (Object.keys(receipt).some(k => !['amount_cents','method','received_at','reference','notes'].includes(k))) fail();
+      try {
+        validateCommercialText(receipt.reference,200);
+        validateCommercialText(receipt.notes,2000);
+      } catch { fail(); }
       checkDate(receipt.received_at);
       total += receipt.amount_cents;
       if (total > sale.amount_cents) fail();
