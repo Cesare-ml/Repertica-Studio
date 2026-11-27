@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AUCTION_API_CONNECTED, AUCTION_CONTRACT_VERSION } from './auction-contract';
+import { confirmed } from './confirm-dialog';
 import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, localInputToUtc, removeDraft, saveDraft, slugify,
   utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
 import { newAuctionDraft, reviewRows, type AuctionDraft, type ReviewRow } from './auction-preview';
@@ -225,9 +226,9 @@ export class AuctionsComponent implements OnInit, OnChanges {
     try { this.drafts = saveDraft(store, draft); this.error = ''; this.editing = null; this.reviewed = false; }
     catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
   }
-  discard(d: LocalAuctionDraft): void {
+  async discard(d: LocalAuctionDraft): Promise<void> {
     const store = this.store;
-    if (!store || !confirm(this.tr('Eliminare questa bozza? L’opera non verrà eliminata.'))) return;
+    if (!store || !(await confirmed(this.tr('Eliminare questa bozza? L’opera non verrà eliminata.')))) return;
     try { this.drafts = removeDraft(store, d.artworkId); } catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
   }
   review(): void {

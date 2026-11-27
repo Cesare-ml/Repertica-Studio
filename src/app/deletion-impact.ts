@@ -5,6 +5,8 @@ export interface DeletionImpact {
   sales: SaleImpact[];
   receipts: number;
   attachments: number;
+  /** Returned only for an individual native deletion preview, never merged summaries. */
+  revision?: string;
 }
 
 export const hasDependents = (impact: DeletionImpact): boolean => impact.certificates.length > 0 || impact.sales.length > 0;

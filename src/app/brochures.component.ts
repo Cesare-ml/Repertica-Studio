@@ -3,6 +3,7 @@ import { Component, Input, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { save } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { confirmed } from './confirm-dialog';
 import type { AppLanguage } from './i18n';
 import { translate } from './i18n';
 import type { Artwork, Brochure, BrochureItem, GalleryImage } from './models';
@@ -175,7 +176,7 @@ export class BrochuresComponent implements OnInit {
     } catch (error) { this.busy = false; this.showError(error); }
   }
   async delete(document: Brochure): Promise<void> {
-    if (!window.confirm(this.tr('Eliminare questa brochure? Le opere non verranno eliminate.'))) return;
+    if (!(await confirmed(this.tr('Eliminare questa brochure? Le opere non verranno eliminate.')))) return;
     this.busy = true;
     try {
       await api.deleteBrochure(document.id);
