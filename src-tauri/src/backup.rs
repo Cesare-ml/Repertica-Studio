@@ -334,6 +334,7 @@ fn validate_snapshot(path: &Path) -> Result<(i64, [i64; 4], Vec<String>), String
     if foreign_key_problem != 0 { return Err("Il database contiene relazioni non valide".into()); }
     let schema: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(error)?;
     if !(1..=crate::db::SCHEMA_VERSION).contains(&schema) { return Err(format!("Versione schema SQLite non supportata: {schema}")); }
+    crate::auction_archive_schema::inspect(&conn)?;
     // Sale dates are present even in the original v1 schema.
     validate_sale_dates(&conn)?;
     validate_sale_amounts(&conn)?;

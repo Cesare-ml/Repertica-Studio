@@ -1,6 +1,13 @@
 mod allocations;
 mod archive_code;
 mod auto_backup;
+mod auction_archive_schema;
+#[path = "auction_settlement_ledger.rs"]
+mod settlement_ledger;
+#[path = "auction_settlement_store.rs"]
+mod settlement_store;
+#[cfg(test)]
+extern crate self as repertica_studio_lib;
 mod backup;
 mod brochures;
 mod business_mail;
