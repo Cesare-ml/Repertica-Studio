@@ -1129,6 +1129,31 @@ mod tests {
         let sha = format!("{:x}", Sha256::digest(&bytes));
         let encoded = STANDARD.encode(&bytes);
         let mut first = relational_sample();
+        // The same buyer has one partially received sale and a distinct unpaid
+        // installment sale. Keep both in the same source package.
+        let mut unpaid = unpaid_plan_sample()["sales"][0].clone();
+        unpaid["artwork_code"] = json!("HIST-02");
+        first["artworks"][1]["status"] = json!("sold");
+        first["sales"].as_array_mut().unwrap().push(unpaid);
+        let assert_unpaid_schedule = |conn: &Connection, first_due: &str, first_note: &str| {
+            let mut stmt = conn.prepare(
+                "SELECT i.position,i.due_date,i.amount_cents,i.notes
+                 FROM sale_installments i JOIN sales s ON s.id=i.sale_id
+                 JOIN artworks a ON a.id=s.artwork_id
+                 JOIN collectors c ON c.id=s.collector_id
+                 WHERE a.code='HIST-02' AND a.status='sold' AND c.name='Ada Example'
+                 ORDER BY i.position").unwrap();
+            let rows: Vec<(i64,String,i64,Option<String>)> = stmt.query_map([], |r|
+                Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap()
+                .collect::<Result<_,_>>().unwrap();
+            assert_eq!(rows, vec![(1,first_due.into(),4029,Some(first_note.into())),
+                (2,"2025-04-30".into(),5971,None)]);
+            assert_eq!(conn.query_row("SELECT count(*) FROM sale_receipts r JOIN sales s ON s.id=r.sale_id
+                JOIN artworks a ON a.id=s.artwork_id WHERE a.code='HIST-02'", [], |r| r.get::<_,i64>(0)).unwrap(),0);
+            for (table, expected) in [("collectors",1),("sales",2),("sale_installments",2),("sale_receipts",1)] {
+                assert_eq!(conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get::<_,i64>(0)).unwrap(),expected);
+            }
+        };
         first["covers"] = json!([{"artwork_code":"HIST-01","sha256":sha,"data_base64":encoded}]);
         first["gallery"] = json!([{"artwork_code":"HIST-01","sha256":sha,"data_base64":encoded,
             "position":1,"caption":"Detail","kind":"DETAIL"}]);
@@ -1159,6 +1184,7 @@ mod tests {
             let (cover_path, gallery_path): (String, String) = conn.query_row(
                 "SELECT a.image_path,g.image_path FROM artworks a JOIN artwork_images g ON g.artwork_id=a.id WHERE a.code='HIST-01'",
                 [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+            assert_unpaid_schedule(&conn, "2025-03-31", "first");
             let next = batches::review(&conn, &export, &pin, 1).unwrap();
             (cover_path, gallery_path, plan.digest, next.digest)
         };
@@ -1175,6 +1201,12 @@ mod tests {
             let mut conn = db.conn.lock().unwrap();
             assert_eq!(batches::commit(&mut conn, &active, &export, &pin, 1, &second_digest).unwrap(), 1);
             assert_eq!(count(&conn), 3);
+            // Simulate a later local edit. The damaged backup must preserve it;
+            // a verified restore must recover the original terms.
+            assert_eq!(conn.execute("UPDATE sale_installments SET due_date='2025-04-01',notes='later edit'
+                WHERE position=1 AND sale_id=(SELECT s.id FROM sales s JOIN artworks a ON a.id=s.artwork_id WHERE a.code='HIST-02')",
+                []).unwrap(),1);
+            assert_unpaid_schedule(&conn, "2025-04-01", "later edit");
         }
 
         // A damaged external backup must not undo the later committed package.
@@ -1188,6 +1220,7 @@ mod tests {
             let conn = db.conn.lock().unwrap();
             assert_eq!(count(&conn), 3);
             assert_eq!(conn.query_row(READ_SEQUENCE, ["HIST|GLOBAL"], |r| r.get::<_,i64>(0)).unwrap(), 3);
+            assert_unpaid_schedule(&conn, "2025-04-01", "later edit");
         }
         assert_eq!(fs::read(active.join(&cover_path)).unwrap(), bytes);
 
@@ -1203,6 +1236,7 @@ mod tests {
                  JOIN artwork_images g ON g.artwork_id=a.id", [],
                 |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?))).unwrap();
             assert_eq!(data,("sold".into(),"Ada Example".into(),10000,1000,500,2000,4000,"Detail".into(),"DETAIL".into(),1));
+            assert_unpaid_schedule(&conn, "2025-03-31", "first");
             assert_eq!(conn.query_row(READ_SEQUENCE, ["HIST|GLOBAL"], |r| r.get::<_,i64>(0)).unwrap(), 2);
             assert_eq!(conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get::<_,i64>(0)).unwrap(),0);
             assert!(batches::commit(&mut conn, &active, &export, &pin, 0, &first_digest).is_err());
@@ -1219,6 +1253,7 @@ mod tests {
         let previous = Connection::open_with_flags(saved.join("repertica.sqlite"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert_eq!(count(&previous), 3);
+        assert_unpaid_schedule(&previous, "2025-04-01", "later edit");
         for path in [&cover_path, &gallery_path] {
             assert_eq!(fs::read(saved.join(path)).unwrap(), bytes);
         }
