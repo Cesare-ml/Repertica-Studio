@@ -1249,7 +1249,11 @@ export class AppComponent implements OnInit {
       if (!total || !isCurrent() || !(await ask(impacts)) || !isCurrent()) return false;
       // Never apply consent to a different cascade than the one that was shown.
       const latest = await read();
-      if (!isCurrent() || JSON.stringify(latest) !== JSON.stringify(impacts)) return false;
+      if (!isCurrent()) return false;
+      if (JSON.stringify(latest) !== JSON.stringify(impacts)) {
+        this.errorMessage = this.tr("L'archivio è cambiato: ripeti la conferma di eliminazione");
+        return false;
+      }
       for (const impact of impacts) {
         attempted = true;
         await remove(impact, done);
@@ -1260,9 +1264,10 @@ export class AppComponent implements OnInit {
       return true;
     } catch (error) {
       if (attempted) await this.refresh();
+      const detail = this.tr(this.error(error));
       this.errorMessage = total > 1 && attempted
-        ? `${done}/${total} ${this.tr('eliminati')}: ${this.error(error)}`
-        : this.error(error);
+        ? `${done}/${total} ${this.tr('eliminati')}: ${detail}`
+        : detail;
       return false;
     } finally {
       this.busy = false;

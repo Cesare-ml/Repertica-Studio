@@ -174,7 +174,7 @@ async function cascadeScenario(source, action, scenario, askNative) {
   assert.deepEqual(calls,invoked?(bulk?[['A',true,'revision-A'],['B',true,'revision-B']]:[['A',true,'revision-A']]):[]);
   assert.equal(ctx.busy,scenario==='busy');
   assert.equal(refreshes,invoked?1:0);
-  if (scenario.endsWith('error')) assert.ok(ctx.errorMessage);
+  if (scenario.endsWith('error') || ['revision','impact'].includes(scenario)) assert.ok(ctx.errorMessage);
   if (invoked && scenario!=='write-error') {
     assert.ok(ctx.notice);
     if (bulk) assert.equal((artwork?ctx.selectedArtworkIds:ctx.selectedCollectorIds).size,0);

@@ -111,6 +111,12 @@ fn sales_of(conn: &Connection, column: &str, id: &str) -> Result<(Vec<SaleImpact
             .map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
         rows
     };
+    // Do not let a corrupt orphan sale disappear from the confirmation summary.
+    let actual_sales: i64 = conn.query_row(&format!(
+        "SELECT count(*) FROM sales WHERE {column}=?1"), params![id], |r| r.get(0)).map_err(err)?;
+    if actual_sales != sales.len() as i64 {
+        return Err("Vendite collegate incoerenti: verifica l'archivio SQLite".into());
+    }
     let receipts: i64 = conn.query_row(&format!(
         "SELECT count(*) FROM sale_receipts r JOIN sales s ON s.id=r.sale_id WHERE s.{column}=?1"),
         params![id], |r| r.get(0)).map_err(err)?;

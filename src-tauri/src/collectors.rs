@@ -386,7 +386,10 @@ pub(crate) fn delete_collector_checked(db: &Database, id: &str, cascade: bool, e
     let tx = conn.transaction().map_err(err)?;
     let impact = crate::cascade::collector_impact(&tx, id)?;
     crate::cascade::verify_revision(&impact, expected)?;
-    let has_sales = !impact.sales.is_empty();
+    let has_sales: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sales WHERE collector_id=?1)",
+        params![id], |row| row.get(0),
+    ).map_err(err)?;
     if has_sales && !cascade {
         return Err("Non puoi eliminare un collezionista collegato a una vendita".into());
     }
