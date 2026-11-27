@@ -6,7 +6,7 @@ import { exportOptions, localEnvironment } from './export-gestionale-artwork-met
 import { convertLegacyRows } from './convert-gestionale-artwork-metadata.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { publishLocalPackage } from './publish-local-package.mjs';
-import { money, date, unpaidInstallments, validateCommercialText } from './gestionale-commercial-values.mjs';
+import { money, date, unpaidInstallments, validateCommercialText, validateCollectorProfile } from './gestionale-commercial-values.mjs';
 
 const MAX_BYTES=2*1024*1024;
 function method(value) {
@@ -71,10 +71,7 @@ function relations(rows,shares,convertMetadata) {
         throw Error('Birth time cannot be represented exactly');
       normalized.birth_time=normalized.birth_time.slice(0,5);
     }
-    for(const [field,limit] of Object.entries({birth_place:300,instagram:300,facebook:300,tiktok:300,website:500,linkedin:500})) {
-      const value=normalized[field];
-      if(value!==null && ([...value.trim()].length>limit || value.includes('\0'))) throw Error('Invalid collector profile');
-    }
+    validateCollectorProfile(normalized);
     const previous=collectors.get(key);
     if(previous && JSON.stringify(previous)!==JSON.stringify(normalized)) throw Error('Conflicting collector details');
     collectors.set(key,normalized);
