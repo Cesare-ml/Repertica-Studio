@@ -163,9 +163,19 @@ pub(crate) fn remove_sales(tx: &Transaction, column: &str, id: &str) -> Result<V
         }
         tx.execute("DELETE FROM sale_receipt_attachments WHERE receipt_id IN (SELECT id FROM sale_receipts WHERE sale_id=?1)", params![sale]).map_err(err)?;
         tx.execute("DELETE FROM sale_receipts WHERE sale_id=?1", params![sale]).map_err(err)?;
-        tx.execute("DELETE FROM sales WHERE id=?1", params![sale]).map_err(err)?;
+        let deleted = tx.execute("DELETE FROM sales WHERE id=?1", params![sale]).map_err(err)?;
+        let still_present: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sales WHERE id=?1 OR artwork_id=?2)",
+            params![sale, artwork], |r| r.get(0)).map_err(err)?;
+        if deleted != 1 || still_present {
+            return Err("Vendita non eliminata completamente: verifica l'archivio SQLite".into());
+        }
         tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1 AND status='sold'",
             params![artwork, chrono::Utc::now().to_rfc3339()]).map_err(err)?;
+    }
+    let remaining: bool = tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM sales WHERE {column}=?1)"),
+        params![id], |r| r.get(0)).map_err(err)?;
+    if remaining {
+        return Err("Vendita non eliminata completamente: verifica l'archivio SQLite".into());
     }
     Ok(files)
 }
@@ -184,7 +194,12 @@ pub(crate) fn remove_certificates(tx: &Transaction, artwork_id: &str) -> Result<
             .collect::<Result<Vec<_>, _>>().map_err(err)?;
         rows
     };
-    tx.execute("DELETE FROM certificates WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
+    let deleted = tx.execute("DELETE FROM certificates WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
+    let remaining: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM certificates WHERE artwork_id=?1)",
+        params![artwork_id], |r| r.get(0)).map_err(err)?;
+    if deleted != snapshots.len() || remaining {
+        return Err("Certificato non eliminato completamente: verifica l'archivio SQLite".into());
+    }
     Ok(snapshots.iter().filter_map(|s| snapshot_image(s)).collect())
 }
 
@@ -195,13 +210,19 @@ pub(crate) fn clean_files(conn: &Connection, db: &Database, paths: &[String]) {
 
 fn delete_certificate_core(db: &Database, id: &str) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(err)?;
-    let snapshot: Option<String> = {
-        use rusqlite::OptionalExtension;
-        conn.query_row("SELECT snapshot_json FROM certificates WHERE id=?1", params![id], |r| r.get(0)).optional().map_err(err)?
-    };
-    let snapshot = snapshot.ok_or_else(|| "Certificato non trovato".to_string())?;
     let tx = conn.transaction().map_err(err)?;
-    tx.execute("DELETE FROM certificates WHERE id=?1", params![id]).map_err(err)?;
+    let record: Option<(String, String)> = {
+        use rusqlite::OptionalExtension;
+        tx.query_row("SELECT serial,snapshot_json FROM certificates WHERE id=?1", params![id],
+            |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(err)?
+    };
+    let (serial, snapshot) = record.ok_or_else(|| "Certificato non trovato".to_string())?;
+    let deleted = tx.execute("DELETE FROM certificates WHERE id=?1", params![id]).map_err(err)?;
+    let remaining: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM certificates WHERE id=?1 OR serial=?2)",
+        params![id, serial], |r| r.get(0)).map_err(err)?;
+    if deleted != 1 || remaining {
+        return Err("Certificato non eliminato completamente: verifica l'archivio SQLite".into());
+    }
     tx.commit().map_err(err)?;
     // The cover shown on the certificate may have been replaced since; free it if nothing else uses it.
     if let Some(path) = snapshot_image(&snapshot) { clean_files(&conn, db, &[path]); }
@@ -325,6 +346,64 @@ mod tests {
         // The artwork and its sale stay.
         assert_eq!((count(&db, "artworks"), count(&db, "sales")), (2, 1));
         assert!(delete_certificate_core(&db, "k").is_err());
+    }
+
+    #[test]
+    fn ignored_or_recreated_certificate_deletion_rolls_back_before_file_cleanup() {
+        let (dir, db) = fixture();
+        let path = dir.path().join("media/history.jpg");
+        std::fs::write(&path, b"historical photograph").unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('history','b','RS-2026-000002','2026-11-03','Artista',?1,'t')",
+                params![r#"{"image_path":"media/history.jpg"}"#]).unwrap();
+        }
+        for trigger in [
+            "CREATE TRIGGER adversary BEFORE DELETE ON certificates WHEN OLD.id='history' BEGIN SELECT RAISE(IGNORE); END",
+            "CREATE TRIGGER adversary AFTER DELETE ON certificates WHEN OLD.id='history' BEGIN
+                INSERT INTO certificates(id,artwork_id,serial,issued_at,artist_name,snapshot_json,created_at)
+                VALUES('replacement',OLD.artwork_id,OLD.serial,OLD.issued_at,OLD.artist_name,OLD.snapshot_json,OLD.created_at); END",
+        ] {
+            db.conn.lock().unwrap().execute_batch(trigger).unwrap();
+            assert!(delete_certificate_core(&db, "history").is_err());
+            assert_eq!(count(&db, "certificates"), 2);
+            let id: String = db.conn.lock().unwrap().query_row(
+                "SELECT id FROM certificates WHERE serial='RS-2026-000002'", [], |r| r.get(0)).unwrap();
+            assert_eq!(id, "history");
+            assert_eq!(std::fs::read(&path).unwrap(), b"historical photograph");
+            db.conn.lock().unwrap().execute_batch("DROP TRIGGER adversary").unwrap();
+        }
+        delete_certificate_core(&db, "history").unwrap();
+        assert_eq!(count(&db, "certificates"), 1);
+        assert_eq!((count(&db, "artworks"), count(&db, "sales")), (2, 1));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn ignored_cascade_deletes_keep_sale_receipt_and_certificate_intact() {
+        let (dir, db) = fixture();
+        for trigger in [
+            "CREATE TRIGGER adversary BEFORE DELETE ON sales WHEN OLD.id='s' BEGIN SELECT RAISE(IGNORE); END",
+            "CREATE TRIGGER adversary AFTER DELETE ON sales WHEN OLD.id='s' BEGIN
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,currency,sold_at,created_at)
+                VALUES('replacement',OLD.artwork_id,OLD.collector_id,OLD.amount_cents,OLD.currency,OLD.sold_at,OLD.created_at); END",
+            "CREATE TRIGGER adversary BEFORE DELETE ON certificates WHEN OLD.id='k' BEGIN SELECT RAISE(IGNORE); END",
+        ] {
+            db.conn.lock().unwrap().execute_batch(trigger).unwrap();
+            let revision = { let conn = db.conn.lock().unwrap(); artwork_impact(&conn, "a").unwrap().revision };
+            assert!(crate::commands::delete_artwork_checked(&db, "a", true, Some(&revision)).is_err());
+            assert_eq!((count(&db, "artworks"), count(&db, "sales"), count(&db, "certificates")), (2, 1, 1));
+            assert_eq!((count(&db, "sale_receipts"), count(&db, "sale_receipt_attachments")), (1, 1));
+            assert_eq!(std::fs::read(dir.path().join("media/receipt.pdf")).unwrap(), b"%PDF");
+            let sale: String = db.conn.lock().unwrap().query_row("SELECT id FROM sales", [], |r| r.get(0)).unwrap();
+            assert_eq!(sale, "s");
+            db.conn.lock().unwrap().execute_batch("DROP TRIGGER adversary").unwrap();
+        }
+        let revision = { let conn = db.conn.lock().unwrap(); artwork_impact(&conn, "a").unwrap().revision };
+        crate::commands::delete_artwork_checked(&db, "a", true, Some(&revision)).unwrap();
+        assert_eq!((count(&db, "artworks"), count(&db, "sales"), count(&db, "certificates")), (1, 0, 0));
+        assert!(!dir.path().join("media/receipt.pdf").exists());
     }
 
     #[test]
