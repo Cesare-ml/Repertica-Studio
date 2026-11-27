@@ -275,3 +275,87 @@ for (const scenario of ["accept","cancel","reject","changed","closed","restored"
     } finally {delete globalThis.window;}
   });
 }
+
+
+// Native consent belongs to the exact photo and editor, not a later selection.
+async function exercisePhotoConfirmation(source, confirmed, action, scenario, assert) {
+  const get = (start, end, signature, replacement, name, api) => {
+    const first=source.indexOf(start), last=source.indexOf(end,first);
+    assert.ok(first>=0&&last>first,name);
+    const method=source.slice(first,last).trim().replace(signature,replacement);
+    return new Function('confirmed','api','return ({'+method+'}).'+name)(confirmed,api);
+  };
+  const collector=action==='deleteCollectorImage';
+  const artwork={id:'art-A'}, otherArtwork={id:'art-B'}, draft={id:'collector-A'};
+  const image={id:'photo-A',artwork_id:artwork.id,collector_id:draft.id};
+  const otherImage={id:'photo-B',artwork_id:otherArtwork.id,collector_id:'collector-B'};
+  const calls=[], reads=[];
+  let answer, reject, prompts=0;
+  const switchEditor=()=>{
+    ctx.galleryArtwork=otherArtwork; ctx.galleryImages=[otherImage]; ctx.galleryPreviews={'photo-B':'other'};
+    ctx.collectorDraft={id:'collector-B'}; ctx.collectorImages=[otherImage]; ctx.collectorPreviews={'photo-B':'other'};
+  };
+  const mutate=async (...args)=>{
+    calls.push(args);
+    if(scenario==='ipc-error')throw new Error('write failed');
+    if(scenario==='switched-during-ipc')switchEditor();
+  };
+  const api={
+    promoteArtworkGalleryImage:mutate,deleteArtworkGalleryImage:mutate,deleteCollectorImage:mutate,
+    listArtworkGallery:async id=>{reads.push(id);if(scenario==='switched-during-read')switchEditor();return [];},
+    listCollectorImages:async id=>{reads.push(id);if(scenario==='switched-during-read')switchEditor();return [];},
+    collectorImageData:async()=> 'preview'
+  };
+  const ctx={
+    busy:false,galleryArtwork:artwork,galleryImages:[image],galleryPreviews:{'photo-A':'original'},
+    collectorDialog:true,collectorDraft:draft,collectorImages:[image],collectorPreviews:{'photo-A':'original'},
+    artworks:[artwork],thumbnails:{'art-A':'cover'},editingGalleryCaptionId:image.id,
+    change:{detectChanges(){}},tr:x=>x,error:String,cancelGalleryCaptionEdit(){this.editingGalleryCaptionId=null;},
+    loadGalleryPreview:async()=>{},
+    run:async function(fn){if(this.busy)return false;this.busy=true;try{await fn();return true;}catch{return false;}finally{this.busy=false;}}
+  };
+  if(source.includes('private async confirmPhotoChange(')){
+    ctx.confirmPhotoChange=get('  private async confirmPhotoChange(', '\n  async makeGalleryPrimary(', 'private async confirmPhotoChange(message: string, isCurrent: () => boolean): Promise<boolean>', 'async confirmPhotoChange(message, isCurrent)', 'confirmPhotoChange',api);
+  }
+  ctx.loadCollectorImages=get('  private async loadCollectorImages(', '\n  async saveCollector(', 'private async loadCollectorImages(collectorId: string): Promise<void>', 'async loadCollectorImages(collectorId)', 'loadCollectorImages',api);
+  const end={makeGalleryPrimary:'\n  async removeGalleryPhoto(',removeGalleryPhoto:'\n  initials(c:',deleteCollectorImage:'\n  async deleteCollector(c:'}[action];
+  const method=get('  async '+action+'(',end,'(image: '+(collector?'CollectorImage':'GalleryImage')+'): Promise<void>','(image)',action,api);
+  globalThis.window={confirm:()=>{prompts++;return new Promise((resolve,fail)=>{answer=resolve;reject=fail;});}};
+  try{
+    if(scenario==='foreign'){image.artwork_id='foreign';image.collector_id='foreign';}
+    if(scenario==='initial-busy')ctx.busy=true;
+    const pending=method.call(ctx,image);
+    assert.deepEqual(calls,[]);
+    if(['foreign','initial-busy'].includes(scenario)){
+      assert.equal(prompts,0,scenario);
+    }else{
+      assert.equal(prompts,1,scenario);
+      assert.equal(ctx.busy,true,'archive lock before native dialog');
+      if(scenario==='closed'){ctx.galleryArtwork=null;ctx.collectorDialog=false;}
+      if(scenario==='switched')switchEditor();
+      if(scenario==='reopened'){ctx.galleryArtwork={...artwork};ctx.collectorDraft={...draft};}
+      if(scenario==='replaced'){ctx.galleryImages=[{...image}];ctx.collectorImages=[{...image}];}
+      if(scenario==='double'){await method.call(ctx,image);assert.equal(prompts,1);}
+      if(scenario==='reject')reject(new Error('native dialog unavailable'));else answer(scenario!=='cancel');
+    }
+    await pending;
+    const invoked=['accept','double','switched-during-ipc','switched-during-read','ipc-error'].includes(scenario);
+    assert.deepEqual(calls,invoked?[action==='makeGalleryPrimary'?['art-A','photo-A']:['photo-A']]:[],scenario);
+    assert.deepEqual(reads,['accept','double','switched-during-read'].includes(scenario)?[collector?'collector-A':'art-A']:[],scenario);
+    if(scenario.startsWith('switched')){
+      assert.equal(ctx.galleryArtwork,otherArtwork);
+      assert.deepEqual(ctx.galleryImages,[otherImage]);
+      assert.deepEqual(ctx.collectorImages,[otherImage]);
+      assert.deepEqual(ctx.galleryPreviews,{'photo-B':'other'});
+      assert.deepEqual(ctx.collectorPreviews,{'photo-B':'other'});
+    }
+    assert.equal(ctx.busy,scenario==='initial-busy',scenario);
+  }finally{if(answer)answer(false);delete globalThis.window;}
+}
+for(const action of ['makeGalleryPrimary','removeGalleryPhoto','deleteCollectorImage']){
+  for(const scenario of ['accept','cancel','reject','closed','switched','reopened','replaced','foreign','initial-busy','double','switched-during-ipc','switched-during-read','ipc-error']){
+    test('photo consent: '+action+' / '+scenario,async()=>{
+      await exercisePhotoConfirmation(readFileSync(new URL('app.component.ts',appDir),'utf8'),confirmed,action,scenario,assert);
+    });
+  }
+}
