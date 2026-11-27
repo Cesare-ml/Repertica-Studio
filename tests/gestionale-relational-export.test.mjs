@@ -63,3 +63,14 @@ test('export validates optional sale and receipt notes before publishing a packa
     }
   }
 });
+
+test('export rejects invalid collector details before producing an import package',()=>{
+  for(const bad of [{first_name:'a\nb'},{first_name:'🎨'.repeat(241)},{last_name:7},
+    {email:'not-an-email'},{email:'a @b'},{phone:'🎨'.repeat(121)},{address:'a\0b'},
+    {notes:'x'.repeat(15001)},{instagram:'x'+' '.repeat(300)}]) {
+    assert.throws(()=>pack([{artwork,collector:{...collector,...bad},sale}]));
+  }
+  const valid={phone:'🎨'.repeat(120),notes:' '.repeat(15001),email:'  a@example.invalid  '};
+  const p=pack([{artwork,collector:{...collector,...valid},sale}]);
+  for(const [k,v] of Object.entries(valid))assert.equal(p.collectors[0][k],v);
+});
