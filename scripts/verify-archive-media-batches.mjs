@@ -7,7 +7,7 @@ import { readRegular, PACKAGE_LIMIT, COVER_LIMIT } from './add-local-artwork-cov
 import { addArchiveImagePixels } from './archive-image-pixels.mjs';
 import { parseLegacyJson } from './strict-legacy-json.mjs';
 import { createLocalPackageDirectory } from './publish-local-package.mjs';
-import { date, validateInstallmentNotes, validateCommercialText } from './gestionale-commercial-values.mjs';
+import { date, validateInstallmentNotes, validateCommercialText, validateCollectorProfile } from './gestionale-commercial-values.mjs';
 
 const exact = (v, keys) => v && typeof v === 'object' && !Array.isArray(v) &&
   Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v,k));
@@ -161,10 +161,9 @@ async function inspectArchiveMediaBatches(directory) {
     }
     verifyPackageMedia(pkg);
     for(const c of pkg.collectors) {
-      if(typeof c?.first_name!=='string' || !c.first_name.trim() ||
-          (c.last_name!=null && typeof c.last_name!=='string') || (c.email!=null && typeof c.email!=='string')) throw Error('Invalid collector');
-      const name=folded([c.first_name.trim(),c.last_name?.trim()].filter(Boolean).join(' '));
-      const email=c.email?.trim() ? folded(c.email.trim()) : null;
+      const identity=validateCollectorProfile(c);
+      const name=folded(identity.name);
+      const email=identity.email ? folded(identity.email) : null;
       if(names.has(name) || (email && emails.has(email))) throw Error('Repeated collector contact');
       names.add(name); if(email) emails.add(email);
     }
