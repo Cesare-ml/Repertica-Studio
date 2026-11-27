@@ -233,3 +233,29 @@ test('recovery refuses invalid receipt reference in an excluded package without 
   await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid commercial/);
   await assert.rejects(lstat(dest),{code:'ENOENT'});
 });
+
+test('preflight validates collector fields against native bounds and identity rules',async t=>{
+  const good=soldPackage('A');
+  Object.assign(good.collectors[0],{last_name:'  Collector  ',email:'  a@example.invalid  ',
+    phone:'🎨'.repeat(120),notes:' '.repeat(15001),birth_date:'  ',birth_time:'07:45',website:'🎨'.repeat(500)});
+  assert.equal((await verifyArchiveMediaBatches((await fixture(t,[good])).root)).collectors,1);
+  for(const bad of [
+    {first_name:'\u0085'},{first_name:'a\nb'},{first_name:'🎨'.repeat(241)},
+    {last_name:'a\u007fb'},{email:'no-at'},{email:'a @b'},{email:'a@\u0085b'},
+    {phone:42},{phone:'🎨'.repeat(121)},{address:'a\0b'},{notes:'x'.repeat(15001)},
+    {birth_date:'1981-02-29'},{birth_time:'07:45:00'},{birth_time:'24:00'},
+    {instagram:'x'+' '.repeat(300)},{website:[]},{linkedin:'x'.repeat(501)},{private_id:1}
+  ]) {
+    const p=soldPackage('A');Object.assign(p.collectors[0],bad);
+    await assert.rejects(verifyArchiveMediaBatches((await fixture(t,[p])).root));
+  }
+});
+test('recovery refuses invalid collector data in an excluded package without output',async t=>{
+  const bad=soldPackage('A');bad.collectors[0].birth_time='24:00';
+  const {root}=await fixture(t,[bad,pkg('B')]);
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining'),digest=await manifestDigest(root);
+  await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid collector/);
+  await assert.rejects(lstat(dest),{code:'ENOENT'});
+});
