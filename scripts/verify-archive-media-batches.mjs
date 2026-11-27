@@ -17,6 +17,44 @@ const folded = s => s.replace(/[A-Z]/g,c=>c.toLowerCase());
 const boundedInt = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
 const fields = ['file','sha256','bytes','artworks','collectors','sales','photographs'];
 
+// Match native metadata bounds before a recovery can exclude any package.
+function verifyArtworkMetadata(a) {
+  const fail = () => { throw Error('Invalid artwork metadata'); };
+  const limits = {year:40,technique:300,support:300,description:40000,location:300};
+  const numbers = ['width_cm','height_cm','depth_cm','artist_coefficient_override'];
+  const flags = ['signed','final_varnish','framed'];
+  const allowed = ['code','title','status','fixed_price_cents',...Object.keys(limits),...numbers,...flags];
+  const trim = value => value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu,'');
+  const validString = value => typeof value === 'string' && !/[\uD800-\uDFFF]/u.test(value);
+  if (!a || typeof a !== 'object' || Array.isArray(a) ||
+      Object.keys(a).some(k => !allowed.includes(k))) fail();
+  for (const [k,max] of [['code',80],['title',240]]) {
+    const value = a[k];
+    if (!validString(value) || !trim(value) || Array.from(value).length > max ||
+        /\p{Cc}/u.test(trim(value))) fail();
+  }
+  // Exporter-produced codes must be canonical for exact media/sale joins.
+  if (a.code !== trim(a.code)) fail();
+  const suffix = /\d+$/.exec(a.code)?.[0];
+  if (suffix && BigInt(suffix) === 9223372036854775807n) fail();
+  for (const [k,max] of Object.entries(limits)) {
+    const value = a[k];
+    if (value != null && (!validString(value) || value.includes('\0') ||
+        (trim(value) && Array.from(value).length > max))) fail();
+  }
+  for (const k of numbers) {
+    const value = a[k];
+    if (value != null && (typeof value !== 'number' || !Number.isFinite(value) ||
+        value <= 0 || value > 100000)) fail();
+  }
+  for (const k of flags) {
+    if (Object.hasOwn(a,k) && typeof a[k] !== 'boolean') fail();
+  }
+  if (a.fixed_price_cents != null && (!Number.isSafeInteger(a.fixed_price_cents) ||
+      a.fixed_price_cents < 0 || a.fixed_price_cents > 100000000000)) fail();
+  if (!['available','reserved','archived','sold'].includes(a.status)) fail();
+}
+
 // Check embedded media independently of the outer package hash. This remains a
 // header-only preflight; the native preview must decode every image.
 function verifyPackageMedia(pkg) {
@@ -156,6 +194,7 @@ async function inspectArchiveMediaBatches(directory) {
         pkg.artworks.length!==row.artworks || pkg.collectors.length!==row.collectors || pkg.sales.length!==row.sales ||
         pkg.covers.length+pkg.gallery.length!==row.photographs) throw Error('Package count mismatch');
     for(const a of pkg.artworks) {
+      verifyArtworkMetadata(a);
       if(typeof a?.code!=='string' || !a.code || a.code.trim()!==a.code || codes.has(folded(a.code))) throw Error('Repeated or invalid artwork code');
       codes.add(folded(a.code));
     }

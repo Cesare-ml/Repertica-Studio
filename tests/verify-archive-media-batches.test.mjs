@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyArchiveMediaBatches, prepareRemainingBatches } from '../scripts/verify-archive-media-batches.mjs';
 
-const pkg=(code,collectors=[])=>({format:'repertica-studio-archive-relations-v2',artworks:[{code}],collectors,sales:[],covers:[],gallery:[]});
+const pkg=(code,collectors=[])=>({format:'repertica-studio-archive-relations-v2',artworks:[{code,title:code,status:'available'}],collectors,sales:[],covers:[],gallery:[]});
 async function fixture(t,packages=[pkg('A'),pkg('B')]) {
   const root=await mkdtemp(join(tmpdir(),'repertica-verify-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
@@ -258,4 +258,34 @@ test('recovery refuses invalid collector data in an excluded package without out
   const dest=join(parent,'remaining'),digest=await manifestDigest(root);
   await assert.rejects(prepareRemainingBatches(root,dest,digest,[2]),/Invalid collector/);
   await assert.rejects(lstat(dest),{code:'ENOENT'});
+});
+
+test('metadata validation accepts native scalar limits and optional fields',async t=>{
+  const a=pkg('ART-1');
+  Object.assign(a.artworks[0],{title:'🎨'.repeat(240),description:'x'.repeat(40000),
+    year:null,width_cm:0.1,height_cm:100000,depth_cm:null,artist_coefficient_override:1,
+    fixed_price_cents:100000000000,signed:false,framed:true,final_varnish:false});
+  assert.equal((await verifyArchiveMediaBatches((await fixture(t,[a])).root)).artworks,1);
+});
+test('recovery rejects invalid artwork metadata in an excluded package with valid hashes',async t=>{
+  const cases=[
+    a=>delete a.title, a=>a.title=' ', a=>a.title='🎨'.repeat(241),
+    a=>a.title='bad\u0000title', a=>a.code='x'.repeat(81),
+    a=>a.code='ART-9223372036854775807', a=>a.status='unknown',
+    a=>a.description='x'.repeat(40001), a=>a.location='a\u0000b',
+    a=>a.width_cm=0, a=>a.height_cm='12', a=>a.depth_cm=100001,
+    a=>a.artist_coefficient_override=-1, a=>a.fixed_price_cents=1.5,
+    a=>a.fixed_price_cents=100000000001, a=>a.signed=null,
+    a=>a.framed=1, a=>a.image_path='private.jpg', a=>a.title='\ud800',
+  ];
+  const parent=await mkdtemp(join(tmpdir(),'repertica-recovery-'));
+  t.after(()=>rm(parent,{recursive:true,force:true}));
+  const dest=join(parent,'remaining');
+  for(const mutate of cases) {
+    const bad=pkg('A'); mutate(bad.artworks[0]);
+    const {root}=await fixture(t,[bad,pkg('B')]);
+    await assert.rejects(verifyArchiveMediaBatches(root),/Invalid artwork metadata/);
+    await assert.rejects(prepareRemainingBatches(root,dest,await manifestDigest(root),[2]),/Invalid artwork metadata/);
+    await assert.rejects(lstat(dest),{code:'ENOENT'});
+  }
 });
