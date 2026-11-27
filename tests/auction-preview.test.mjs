@@ -7,15 +7,16 @@ const key = 'preview-0123456789';
 const artwork = { id: 'local-private-id', title: 'Paesaggio', status: 'available',
   description: 'private notes', location: 'private address', image_path: 'media/private.jpg',
   collector_id: 'private-buyer', fixed_price_cents: 999 };
-const draft = () => ({ ...newAuctionDraft(artwork), slug: 'paesaggio-01', description: 'Olio su tela',
+const draft = () => ({ ...newAuctionDraft(artwork), description: 'Olio su tela',
   startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z',
-  startingAmount: 12000, minimumIncrementAmount: 1000, italyShippingCost: 2500, bankBeneficiary: 'Artista di prova', bankIban: 'IT60 X054 2811 1010 0000 0123 456', bankBicSwift: 'BPMOIT2S', bankNameAndAddress: 'Banca di prova, Milano' });
+  startingAmount: 12000, minimumIncrementAmount: 1000, artistEmail: ' Studio@Example.test ', winnerMode: 'custom_email',
+  winnerSubject: ' Hai vinto «{title}» ', winnerBody: 'Ciao {name},\r\nla tua offerta di {amount} ha vinto «{title}».\r\nIBAN IT60X0542811101000000123456\r\n' });
 const prepare = d => preparePreview(d, 'tenant-test', key, now);
 
 test('offline draft selects exactly one available work and excludes private defaults', () => {
   assert.deepEqual(newAuctionDraft(artwork), { artworkId: artwork.id, title: artwork.title,
-    description: '', slug: '', startsAt: '', endsAt: '', startingAmount: null, minimumIncrementAmount: null, reserveAmount: null,
-    italyShippingCost: null, bankBeneficiary: '', bankIban: '', bankBicSwift: '', bankNameAndAddress: '' });
+    description: '', startsAt: '', endsAt: '', startingAmount: null, minimumIncrementAmount: null, reserveAmount: null,
+    artistEmail: '', winnerMode: 'contact_privately', winnerSubject: '', winnerBody: '' });
   for (const status of ['sold', 'reserved', 'archived']) {
     assert.throws(() => newAuctionDraft({ ...artwork, status }), /artwork_not_available/);
   }
@@ -26,9 +27,10 @@ test('request body is exactly the artist-v1 publication allowlist even with extr
   assert.deepEqual(JSON.parse(prepared.body), {
     auction: { id: 'auc-' + key, tenantId: 'tenant-test', startsAt: Date.parse('2027-03-04T10:00:00.000Z'),
       endsAt: Date.parse('2027-03-06T10:00:00.000Z'), startingAmount: 12000, incrementAmount: 1000 },
-    details: { slug: 'paesaggio-01', title: 'Paesaggio', description: 'Olio su tela' },
-    terms: { italyShippingCostAmount: 2500, bankTransfer: { beneficiary: 'Artista di prova', iban: 'IT60X0542811101000000123456',
-      bicSwift: 'BPMOIT2S', bankNameAndAddress: 'Banca di prova, Milano' } } });
+    // No page address: the site derives it from the title.
+    details: { title: 'Paesaggio', description: 'Olio su tela' },
+    terms: { artistEmail: 'studio@example.test', winner: { mode: 'custom_email', subject: 'Hai vinto «{title}»',
+      body: 'Ciao {name},\nla tua offerta di {amount} ha vinto «{title}».\nIBAN IT60X0542811101000000123456' } } });
   assert.equal(prepared.auctionId, 'auc-' + key, 'the server id is derived from the key: every retry names the same auction');
   assert.equal(prepared.artworkId, artwork.id);
   assert.doesNotMatch(prepared.body, /private|artworkId|accessToken/);
@@ -49,9 +51,20 @@ test('frozen request can be serialized locally and replayed unchanged after edit
 test('invalid tenant, key and incomplete public fields are rejected', () => {
   assert.throws(() => preparePreview(draft(), 'a', key, now), /invalid_tenant/);
   assert.throws(() => preparePreview(draft(), 'tenant-test', 'short', now), /invalid_idempotency_key/);
-  assert.throws(() => prepare({ ...draft(), slug: 'Bad slug' }), /invalid_slug/);
+  assert.throws(() => prepare({ ...draft(), artistEmail: '' }), /invalid_artist_email/);
+  assert.throws(() => prepare({ ...draft(), artistEmail: 'a@example.test, b@example.test' }), /invalid_artist_email/);
+  assert.throws(() => prepare({ ...draft(), winnerSubject: 'Hai\nvinto' }), /invalid_winner_subject/);
+  assert.throws(() => prepare({ ...draft(), winnerSubject: 'Hi' }), /invalid_winner_subject/);
+  assert.throws(() => prepare({ ...draft(), winnerBody: 'Troppo corto' }), /invalid_winner_body/);
+  assert.throws(() => prepare({ ...draft(), winnerBody: 'x'.repeat(2501) }), /invalid_winner_body/);
+  assert.throws(() => prepare({ ...draft(), winnerMode: 'bank_transfer' }), /invalid_terms/);
   assert.throws(() => prepare({ ...draft(), title: '  a  ' }), /invalid_title/);
   assert.throws(() => prepare({ ...draft(), description: 'x'.repeat(1501) }), /invalid_description/);
+});
+
+test('contacting the winner privately sends only the e-mail and the mode, never a kept template', () => {
+  const body = JSON.parse(prepare({ ...draft(), winnerMode: 'contact_privately' }).body);
+  assert.deepEqual(body.terms, { artistEmail: 'studio@example.test', winner: { mode: 'contact_privately' } });
 });
 
 test('rejects ambiguous UTC timestamps, rollover dates, past starts and excessive duration', () => {

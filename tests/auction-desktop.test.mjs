@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { parseAuction, parseBid, parseBidPage, parseCancelResult, cancelOutcomeFromError, leadingConsistency,
   resultNeedsExplicitSale, maskEmail, AUCTION_API_CONNECTED, AUCTION_CONTRACT_VERSION } from '../src/app/auction-contract.ts';
 import { beginOperation, afterTransport, retry, confirmPublication, confirmCancellation } from '../src/app/auction-operations.ts';
-import { loadDrafts, saveDraft, removeDraft, localInputToUtc, euroToCents, centsToEuro, slugify } from '../src/app/auction-drafts.ts';
+import { loadDrafts, saveDraft, removeDraft, localInputToUtc, euroToCents, centsToEuro, loadSavedBankDetails, loadWinnerDefaults,
+  saveWinnerDefaults } from '../src/app/auction-drafts.ts';
+import { defaultWinnerEmail, fillWinnerTemplate } from '../src/app/auction-winner-email.ts';
 import { newAuctionDraft, reviewRows } from '../src/app/auction-preview.ts';
 
 // Shapes of contract artist-v1 (see tests/fixtures/auctions-artist-v1, captured from the real server).
@@ -72,7 +74,8 @@ test('award is not payment', () => {
 
 test('a lost response is pending, not success; retry keeps key and body; only the server state confirms', () => {
   const key = 'idem-0123456789abcdef';
-  let op = beginOperation('publish', 'paesaggio-01', key, '{"slug":"paesaggio-01"}');
+  // A publication is recognised by its auction id: the site chooses the page address.
+  let op = beginOperation('publish', 'auc_1', key, '{"auction":{"id":"auc_1"}}');
   op = afterTransport(op, { kind: 'lost' });
   assert.equal(op.state, 'pending_confirmation');
   const again = retry(op);
@@ -80,7 +83,11 @@ test('a lost response is pending, not success; retry keeps key and body; only th
   assert.equal(again.body, op.body);
   assert.equal(again.attempts, 2);
   assert.equal(confirmPublication(again, []).state, 'pending_confirmation');
-  assert.equal(confirmPublication(again, [parseAuction(auction())]).state, 'confirmed');
+  assert.equal(confirmPublication(again, [parseAuction(auction({ slug: 'paesaggio-2' }))]).state, 'confirmed');
+  assert.equal(confirmPublication(again, [parseAuction(auction({ auctionId: 'auc_2' }))]).state, 'pending_confirmation');
+  // Requests journaled by versions that named the page address are still confirmed by it.
+  const journaled = beginOperation('publish', 'paesaggio-01', key, '{"details":{"slug":"paesaggio-01"}}');
+  assert.equal(confirmPublication(journaled, [parseAuction(auction())]).state, 'confirmed');
   assert.equal(afterTransport(beginOperation('publish', 's', key, '{}'), { kind: 'response', status: 201 }).state, 'pending_confirmation');
   assert.equal(afterTransport(beginOperation('publish', 's', key, '{}'), { kind: 'response', status: 403 }).state, 'rejected');
   assert.equal(afterTransport(beginOperation('publish', 's', key, '{}'), { kind: 'response', status: 503 }).state, 'pending_confirmation');
@@ -103,7 +110,8 @@ test('bid cancellation is confirmed only when the reloaded history shows it', ()
 test('local drafts: one per artwork, validated on load, no extra fields kept', () => {
   const store = memory();
   const a = { id: 'art-1', title: 'Paesaggio', status: 'available' };
-  const d = { ...newAuctionDraft(a), slug: 'paesaggio', description: 'Olio', secret: 'private', buyer: 'x' };
+  const d = { ...newAuctionDraft(a), description: 'Olio', secret: 'private', buyer: 'x', artistEmail: 'studio@example.test',
+    winnerMode: 'custom_email', winnerSubject: 'Hai vinto', winnerBody: 'Ciao {name}, grazie per la tua offerta.' };
   saveDraft(store, d, new Date('2027-01-01T00:00:00Z'));
   saveDraft(store, { ...d, title: 'Paesaggio II' }, new Date('2027-01-02T00:00:00Z'));
   const loaded = loadDrafts(store);
@@ -111,6 +119,15 @@ test('local drafts: one per artwork, validated on load, no extra fields kept', (
   assert.equal(loaded[0].title, 'Paesaggio II');
   assert.equal(loaded[0].local, true);
   assert.equal('secret' in loaded[0], false);
+  assert.deepEqual([loaded[0].artistEmail, loaded[0].winnerMode, loaded[0].winnerSubject], ['studio@example.test', 'custom_email', 'Hai vinto']);
+  // A draft saved by an earlier version (page address, shipping and bank transfer) still loads, without those fields.
+  store.setItem('repertica-auction-drafts-v1', JSON.stringify([{ artworkId: 'art-1', title: 'Paesaggio', description: 'Olio',
+    startsAt: '', endsAt: '', startingAmount: null, minimumIncrementAmount: null, slug: 'paesaggio', italyShippingCost: 2500, bankIban: 'IT60X0542811101000000123456', local: true,
+    updatedAt: '2027-01-01T00:00:00.000Z' }]));
+  const old = loadDrafts(store)[0];
+  assert.equal(old.winnerMode, 'contact_privately');
+  assert.equal(['slug', 'italyShippingCost', 'bankIban'].some(key => key in old), false);
+  saveDraft(store, d, new Date('2027-01-02T00:00:00Z'));
   assert.equal(JSON.stringify(store.m.get('repertica-auction-drafts-v1')).includes('private'), false);
   store.setItem('repertica-auction-drafts-v1', 'not json');
   assert.deepEqual(loadDrafts(store), []);
@@ -122,13 +139,15 @@ test('local drafts: one per artwork, validated on load, no extra fields kept', (
 
 test('review lists only the public fields and reports validation codes', () => {
   const now = Date.parse('2027-03-01T00:00:00.000Z');
-  const d = { ...newAuctionDraft({ id: 'art-1', title: 'Paesaggio', status: 'available' }), slug: 'paesaggio-01',
+  const d = { ...newAuctionDraft({ id: 'art-1', title: 'Paesaggio', status: 'available' }),
     description: 'Olio su tela', startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z',
-    startingAmount: 12000, minimumIncrementAmount: 1000, italyShippingCost: 2500, bankBeneficiary: 'Artista di prova', bankIban: 'IT60 X054 2811 1010 0000 0123 456', bankBicSwift: 'BPMOIT2S', bankNameAndAddress: 'Banca di prova, Milano' };
+    startingAmount: 12000, minimumIncrementAmount: 1000, artistEmail: 'studio@example.test' };
   const rows = reviewRows(d, now);
-  assert.deepEqual(rows.map(r => r.field), ['title', 'slug', 'description', 'startsAt', 'endsAt',
-    'startingAmount', 'minimumIncrementAmount', 'currency', 'italyShippingCost', 'bankBeneficiary', 'bankIban', 'bankBicSwift',
-    'bankNameAndAddress', 'mainImage']);
+  assert.deepEqual(rows.map(r => r.field), ['title', 'description', 'startsAt', 'endsAt',
+    'startingAmount', 'minimumIncrementAmount', 'currency', 'artistEmail', 'winnerMode', 'mainImage']);
+  const custom = reviewRows({ ...d, winnerMode: 'custom_email', winnerSubject: 'Hai vinto', winnerBody: 'Ciao {name},\nbonifico a IT60…' }, now);
+  assert.deepEqual(custom.filter(r => r.field.startsWith('winner')).map(r => [r.field, r.value]),
+    [['winnerMode', 'custom_email'], ['winnerSubject', 'Hai vinto'], ['winnerBody', 'Ciao {name},\nbonifico a IT60…']]);
   assert.equal(rows.find(r => r.field === 'startsAt').value, '2027-03-04T10:00:00.000Z');
   assert.throws(() => reviewRows({ ...d, endsAt: d.startsAt }, now), /invalid_schedule/);
   assert.throws(() => reviewRows({ ...d, startingAmount: null }, now), /invalid_amount/);
@@ -143,5 +162,27 @@ test('form conversions are strict', () => {
   assert.equal(centsToEuro(12050), '120,50');
   assert.equal(localInputToUtc('nonsense'), '');
   assert.match(localInputToUtc('2027-03-04T10:00'), /^2027-03-0[34]T\d\d:00:00\.000Z$/);
-  assert.equal(slugify('  Paesaggio d’Autunno N°1 '), 'paesaggio-d-autunno-n-1');
+});
+
+test('winner choices are kept on this computer; the template uses saved bank details and the interface language', () => {
+  const store = memory();
+  assert.deepEqual(loadWinnerDefaults(store), { artistEmail: '', winnerMode: 'contact_privately', winnerSubject: '', winnerBody: '' });
+  saveWinnerDefaults(store, { artistEmail: 'studio@example.test', winnerMode: 'custom_email', winnerSubject: 'Hai vinto', winnerBody: 'Testo' });
+  assert.deepEqual(loadWinnerDefaults(store), { artistEmail: 'studio@example.test', winnerMode: 'custom_email', winnerSubject: 'Hai vinto', winnerBody: 'Testo' });
+  assert.equal(loadSavedBankDetails(store), null);
+  store.setItem('repertica-auction-payment-v1', JSON.stringify({ bankBeneficiary: 'Artista di prova', bankIban: 'it60 x054 2811 1010 0000 0123 456',
+    bankBicSwift: 'bpmo it2s', bankNameAndAddress: 'Banca di prova, Milano', italyShippingCost: 2500 }));
+  const bank = loadSavedBankDetails(store);
+  assert.deepEqual(bank, { beneficiary: 'Artista di prova', iban: 'IT60X0542811101000000123456', bicSwift: 'BPMOIT2S', bankNameAndAddress: 'Banca di prova, Milano' });
+  const it = defaultWinnerEmail('it', bank);
+  assert.equal(it.subject, 'Hai vinto l’asta: {title}');
+  assert.match(it.body, /^Ciao \{name\},[\s\S]*\{amount\}[\s\S]*Beneficiario: Artista di prova\nIBAN: IT60X0542811101000000123456\nBIC\/SWIFT: BPMOIT2S[\s\S]*\{artist\}$/);
+  assert.match(defaultWinnerEmail('en').body, /^Hello \{name\},[\s\S]*IBAN: …/);
+  for (const language of ['it', 'en', 'es', 'fr', 'de']) {
+    const t = defaultWinnerEmail(language, bank);
+    assert.ok(t.subject.length >= 3 && t.subject.length <= 160 && !/\n/.test(t.subject), language);
+    assert.ok(t.body.length >= 20 && t.body.length <= 2500 && /\{name\}/.test(t.body) && /\{amount\}/.test(t.body), language);
+  }
+  assert.equal(fillWinnerTemplate('Ciao {name}, {amount} per {title} {altro}', { name: 'Anna', amount: '160,00 €', title: 'Opera' }),
+    'Ciao Anna, 160,00 € per Opera {altro}');
 });
