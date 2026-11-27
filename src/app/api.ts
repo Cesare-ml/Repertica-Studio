@@ -44,7 +44,7 @@ export const api = {
   saveArtwork: (input: ArtworkInput) => invoke<Artwork>('save_artwork', { input }),
   createArtworkFull: (input: NewArtworkInput) => invoke<Artwork>('create_artwork_full', { input }),
   /** `cascade` also deletes the certificates and the sale of the artwork: only after the user confirmed the impact. */
-  deleteArtwork: (id: string, cascade = false) => invoke<void>('delete_artwork', { id, cascade }),
+  deleteArtwork: (id: string, cascade: boolean, expectedRevision: string) => invoke<void>('delete_artwork', { id, cascade, expectedRevision }),
   artworkDeletionImpact: (id: string) => invoke<DeletionImpact>('artwork_deletion_impact', { id }),
   collectorDeletionImpact: (id: string) => invoke<DeletionImpact>('collector_deletion_impact', { id }),
   deleteCertificate: (id: string) => invoke<void>('delete_certificate', { id }),
@@ -78,7 +78,7 @@ export const api = {
   listCollectors: () => invoke<Collector[]>('list_collectors'),
   saveCollector: (input: CollectorInput) => invoke<Collector>('save_collector', { input }),
   createCollectorFull: (input: NewCollectorInput) => invoke<Collector>('create_collector_full', { input }),
-  deleteCollector: (id: string, cascade = false) => invoke<void>('delete_collector', { id, cascade }),
+  deleteCollector: (id: string, cascade: boolean, expectedRevision: string) => invoke<void>('delete_collector', { id, cascade, expectedRevision }),
   listCollectorImages: (collectorId: string) => invoke<CollectorImage[]>('list_collector_images', { collectorId }),
   addCollectorImageFromPath: (collectorId: string, sourcePath: string, kind: 'PROFILE' | 'PHOTO') =>
     invoke<CollectorImage>('add_collector_image_from_path', { collectorId, sourcePath, kind }),
