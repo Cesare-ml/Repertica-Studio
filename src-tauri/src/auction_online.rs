@@ -20,8 +20,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Switch on only when the Studio provider and the Auctions service are deployed and verified.
-pub const ONLINE_ENABLED: bool = false;
+/// On since 27 November 2026: the identity provider (studio.repertica.com, page under /id/) and the Auctions
+/// service (auctions.repertica.com) are deployed.
+pub const ONLINE_ENABLED: bool = true;
 const STUDIO_ORIGIN: &str = "https://studio.repertica.com";
 const AUCTIONS_ORIGIN: &str = "https://auctions.repertica.com";
 const CLIENT_ID: &str = "repertica-desktop-auctions";
@@ -63,7 +64,8 @@ impl Endpoints {
     }
 
     fn current() -> Option<Self> {
-        if ONLINE_ENABLED { Some(Self::production()) } else { Self::development() }
+        // Debug builds pointed at local services use them; otherwise the production services, when enabled.
+        Self::development().or_else(|| ONLINE_ENABLED.then(Self::production))
     }
 
     fn secure(&self) -> bool {
@@ -145,7 +147,7 @@ fn status_of(session: &AuctionSession) -> ConnectionStatus {
         available: endpoints.is_some(),
         signed_in,
         expires_in_seconds: if signed_in { session.remaining() } else { None },
-        development: !ONLINE_ENABLED && endpoints.is_some(),
+        development: endpoints.as_ref().is_some_and(|e| e.studio != STUDIO_ORIGIN),
         signing_in: session.signing_in.load(Ordering::SeqCst),
     }
 }
@@ -186,9 +188,15 @@ pub(crate) fn redirect_uri(port: u16) -> String {
     format!("http://127.0.0.1:{port}{CALLBACK_PATH}")
 }
 
+/// The provider's login page: under /id/ on studio.repertica.com, where it lives beside the historical Studio pilot
+/// (same issuer); at /login on local development providers.
+pub(crate) fn login_page(endpoints: &Endpoints) -> String {
+    if endpoints.studio == STUDIO_ORIGIN { format!("{STUDIO_ORIGIN}/id/login") } else { format!("{}/login", endpoints.studio) }
+}
+
 /// The Studio login page: it authenticates the person and then redirects the browser to the loopback URI.
 pub(crate) fn login_url(endpoints: &Endpoints, redirect: &str, pkce: &Pkce) -> Result<String, String> {
-    let mut url = tauri::Url::parse(&format!("{}/login", endpoints.studio)).map_err(|_| "oauth_unavailable".to_string())?;
+    let mut url = tauri::Url::parse(&login_page(endpoints)).map_err(|_| "oauth_unavailable".to_string())?;
     url.query_pairs_mut()
         .append_pair("client_id", CLIENT_ID)
         .append_pair("redirect_uri", redirect)
@@ -664,7 +672,7 @@ mod tests {
         let pkce = Pkce { verifier: "v".repeat(43), challenge: "c".repeat(43), state: "s".repeat(43) };
         let url = tauri::Url::parse(&login_url(&Endpoints::production(), &redirect_uri(49152), &pkce).unwrap()).unwrap();
         assert_eq!(url.origin().ascii_serialization(), STUDIO_ORIGIN);
-        assert_eq!(url.path(), "/login");
+        assert_eq!(url.path(), "/id/login", "the provider page beside the Studio pilot");
         let pairs: Vec<(String, String)> = url.query_pairs().map(|(k, v)| (k.into(), v.into())).collect();
         assert_eq!(pairs, vec![
             ("client_id".into(), "repertica-desktop-auctions".into()),
@@ -685,7 +693,10 @@ mod tests {
         }
         assert!(Endpoints::production().secure());
         assert!(!local().secure());
-        assert!(!ONLINE_ENABLED, "the online connection stays off until the services are deployed");
+        assert!(ONLINE_ENABLED, "the services are deployed");
+        assert_eq!(login_page(&Endpoints::production()), "https://studio.repertica.com/id/login");
+        assert_eq!(login_page(&local()), "http://127.0.0.1:1/login");
+        assert_eq!(Endpoints::current(), Some(Endpoints::production()), "tests run without development origins");
     }
 
     #[test]
@@ -873,7 +884,7 @@ mod tests {
         let session = AuctionSession::default();
         tauri::async_runtime::block_on(sign_in_flow(&session, &endpoints, &browser, Duration::from_secs(10))).unwrap();
         assert_eq!(session.bearer().as_deref(), Some("aaa.bbb.ccc"));
-        assert!(status_of(&session).signed_in == false, "release/test builds without ONLINE_ENABLED never report a usable connection");
+        assert_eq!(status_of(&session).signed_in, ONLINE_ENABLED, "the connection is usable only when the services are enabled");
 
         let exchange = studio.join().unwrap();
         let body: serde_json::Value = serde_json::from_str(exchange.split("\r\n\r\n").nth(1).unwrap()).unwrap();

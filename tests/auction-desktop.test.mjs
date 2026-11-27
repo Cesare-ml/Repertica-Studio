@@ -16,8 +16,8 @@ const bid = (id, amount, at, extra = {}) => ({ bidId: id, amount, placedAt: at, 
   state: 'valid', isLeading: false, cancelledAt: null, cancelReason: null, ...extra });
 const memory = () => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), m }; };
 
-test('the client is not connected: no flow may be presented as operational', () => {
-  assert.equal(AUCTION_API_CONNECTED, false);
+test('the client is connected to the deployed services (mirrors ONLINE_ENABLED)', () => {
+  assert.equal(AUCTION_API_CONNECTED, true);
   assert.equal(AUCTION_CONTRACT_VERSION, 'artist-v1');
 });
 

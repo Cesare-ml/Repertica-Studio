@@ -10,9 +10,10 @@
 export const AUCTION_CONTRACT_VERSION = 'artist-v1';
 /**
  * Production switch, mirrored by ONLINE_ENABLED in src-tauri/src/auction_online.rs (the source of truth): the
- * interface reads the real availability from the native side. Off until Auctions and the Repertica sign-in are live.
+ * interface reads the real availability from the native side. On since Auctions and the Repertica sign-in are live
+ * (27 November 2026).
  */
-export const AUCTION_API_CONNECTED = false;
+export const AUCTION_API_CONNECTED = true;
 
 export type AuctionState = 'upcoming' | 'live' | 'ended' | 'awarded' | 'not_awarded' | 'cancelled' | 'unknown';
 const STATES: readonly string[] = ['upcoming', 'live', 'ended', 'awarded', 'not_awarded', 'cancelled'];
