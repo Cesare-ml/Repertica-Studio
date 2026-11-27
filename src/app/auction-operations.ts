@@ -22,7 +22,7 @@ export interface Operation {
 }
 
 export type TransportResult =
-  | { kind: 'response'; status: number }
+  | { kind: 'response'; status: number; /** The server's error code, when it gave one. */ error?: string | null }
   | { kind: 'lost' };
 
 export function beginOperation(kind: OperationKind, target: string, idempotencyKey: string, body: string): Operation {
@@ -35,7 +35,7 @@ export function beginOperation(kind: OperationKind, target: string, idempotencyK
 export function afterTransport(op: Operation, result: TransportResult): Operation {
   if (op.state === 'confirmed' || op.state === 'rejected') return op;
   if (result.kind === 'response' && result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 429) {
-    return Object.freeze({ ...op, state: 'rejected' as const, reason: `http_${result.status}` });
+    return Object.freeze({ ...op, state: 'rejected' as const, reason: result.error ?? `http_${result.status}` });
   }
   return Object.freeze({ ...op, state: 'pending_confirmation' as const });
 }

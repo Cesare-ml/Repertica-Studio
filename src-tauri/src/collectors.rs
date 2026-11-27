@@ -375,12 +375,17 @@ fn delete_image_core(db: &Database, image_id: &str) -> Result<(), String> {
 /// With `cascade` the sales made to the collector (receipts and attached documents included) are deleted with
 /// them, and the artworks of those sales become available again; without it a collector with sales is refused.
 pub(crate) fn delete_collector_core(db: &Database, id: &str, cascade: bool) -> Result<(), String> {
+    delete_collector_checked(db, id, cascade, None)
+}
+pub(crate) fn delete_collector_checked(db: &Database, id: &str, cascade: bool, expected: Option<&str>) -> Result<(), String> {
     require_regular_media_dir(db)?;
     let mut conn = db.conn.lock().map_err(err)?;
     // Keep both the sales preflight and the deletion in one SQLite transaction.
     // A trigger in an imported database may ignore a DELETE or recreate its row;
     // never remove photo files before the final database state is verified.
     let tx = conn.transaction().map_err(err)?;
+    let impact = crate::cascade::collector_impact(&tx, id)?;
+    crate::cascade::verify_revision(&impact, expected)?;
     let has_sales: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM sales WHERE collector_id=?1)",
         params![id], |row| row.get(0),
@@ -434,8 +439,8 @@ pub fn create_collector_full(db: State<'_, Database>, input: NewCollectorInput) 
     create_collector_full_core(&db, input)
 }
 #[tauri::command]
-pub fn delete_collector(db: State<'_, Database>, id: String, cascade: Option<bool>) -> Result<(), String> {
-    delete_collector_core(&db, &id, cascade.unwrap_or(false))
+pub fn delete_collector(db: State<'_, Database>, id: String, cascade: Option<bool>, expected_revision: String) -> Result<(), String> {
+    delete_collector_checked(&db, &id, cascade.unwrap_or(false), Some(&expected_revision))
 }
 // Distinguish a genuinely empty gallery from a stale/deleted collector. Otherwise
 // a UI opening an old link misleadingly reports "no photographs" for a missing owner.

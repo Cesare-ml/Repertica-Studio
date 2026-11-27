@@ -26,6 +26,7 @@ mod receipt_attachments;
 mod updater;
 mod reveal;
 mod mail_watch;
+mod auction_online;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -36,6 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().pubkey(updater::PUBLIC_KEY).build())
         .manage(updater::UpdateState::default())
         .manage(mail_watch::MailWatch::default())
+        .manage(auction_online::AuctionSession::default())
         .setup(|app| {
             use tauri::Manager;
             let directory = app.path().app_local_data_dir()?;
@@ -173,7 +175,12 @@ pub fn run() {
             allocations::save_allocation_plan,
             archive_code::get_archive_code_policy,
             archive_code::save_archive_code_policy,
-            archive_code::next_archive_code
+            archive_code::next_archive_code,
+            auction_online::auction_connection_status,
+            auction_online::auction_sign_in,
+            auction_online::auction_sign_out,
+            auction_online::auction_api_request,
+            auction_online::auction_upload_artwork_image
         ])
         .run(tauri::generate_context!())
         .expect("unable to start Repertica Studio");

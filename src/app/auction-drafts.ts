@@ -25,7 +25,11 @@ function isDraft(value: unknown): value is LocalAuctionDraft {
   return d['local'] === true && typeof d['artworkId'] === 'string' && d['artworkId'] !== '' && d['artworkId'].length <= 96
     && str(d['title'], 160) && str(d['description'], 1500) && str(d['slug'], 60)
     && str(d['startsAt'], 40) && str(d['endsAt'], 40) && str(d['updatedAt'], 40)
-    && amount(d['startingAmount']) && amount(d['minimumIncrementAmount']);
+    && amount(d['startingAmount']) && amount(d['minimumIncrementAmount'])
+    // Fields added with the Gestionale Opere terms: optional in drafts saved before.
+    && (d['reserveAmount'] === undefined || amount(d['reserveAmount']))
+    && (d['italyShippingCost'] === undefined || amount(d['italyShippingCost']))
+    && ['bankBeneficiary', 'bankIban', 'bankBicSwift', 'bankNameAndAddress'].every(k => d[k] === undefined || str(d[k], 300));
 }
 
 export function loadDrafts(store: KeyValueStore): LocalAuctionDraft[] {
@@ -49,7 +53,9 @@ export function loadDrafts(store: KeyValueStore): LocalAuctionDraft[] {
 function pick(d: LocalAuctionDraft): LocalAuctionDraft {
   return { artworkId: d.artworkId, title: d.title, description: d.description, slug: d.slug,
     startsAt: d.startsAt, endsAt: d.endsAt, startingAmount: d.startingAmount,
-    minimumIncrementAmount: d.minimumIncrementAmount, local: true, updatedAt: d.updatedAt };
+    minimumIncrementAmount: d.minimumIncrementAmount, reserveAmount: d.reserveAmount ?? null,
+    italyShippingCost: d.italyShippingCost ?? null, bankBeneficiary: d.bankBeneficiary ?? '', bankIban: d.bankIban ?? '',
+    bankBicSwift: d.bankBicSwift ?? '', bankNameAndAddress: d.bankNameAndAddress ?? '', local: true, updatedAt: d.updatedAt };
 }
 
 function persist(store: KeyValueStore, drafts: LocalAuctionDraft[]): void {
@@ -64,6 +70,26 @@ export function saveDraft(store: KeyValueStore, draft: AuctionDraft, now: Date =
   const all = [next, ...others].slice(0, MAX_DRAFTS);
   persist(store, all);
   return all;
+}
+
+const PAYMENT_KEY = 'repertica-auction-payment-v1';
+
+/** The artist's last payment terms, kept on this computer only to prefill the next draft. */
+export function loadPaymentDefaults(store: KeyValueStore): Pick<AuctionDraft, 'italyShippingCost' | 'bankBeneficiary' | 'bankIban' | 'bankBicSwift' | 'bankNameAndAddress'> {
+  try {
+    const raw = store.getItem(PAYMENT_KEY);
+    const d = raw && raw.length < 4000 ? JSON.parse(raw) as Record<string, unknown> : {};
+    const str = (v: unknown) => typeof v === 'string' && v.length <= 300 ? v : '';
+    const shipping = d['italyShippingCost'];
+    return { italyShippingCost: typeof shipping === 'number' && Number.isSafeInteger(shipping) && shipping >= 0 && shipping <= 100_000_000 ? shipping : null,
+      bankBeneficiary: str(d['bankBeneficiary']), bankIban: str(d['bankIban']), bankBicSwift: str(d['bankBicSwift']),
+      bankNameAndAddress: str(d['bankNameAndAddress']) };
+  } catch { return { italyShippingCost: null, bankBeneficiary: '', bankIban: '', bankBicSwift: '', bankNameAndAddress: '' }; }
+}
+
+export function savePaymentDefaults(store: KeyValueStore, draft: AuctionDraft): void {
+  store.setItem(PAYMENT_KEY, JSON.stringify({ italyShippingCost: draft.italyShippingCost ?? null, bankBeneficiary: draft.bankBeneficiary ?? '',
+    bankIban: draft.bankIban ?? '', bankBicSwift: draft.bankBicSwift ?? '', bankNameAndAddress: draft.bankNameAndAddress ?? '' }));
 }
 
 export function removeDraft(store: KeyValueStore, artworkId: string): LocalAuctionDraft[] {

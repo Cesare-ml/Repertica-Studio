@@ -64,7 +64,7 @@ test('every new email label has an English fallback and translations', () => {
 test('mail UI requires explicit send confirmation and never embeds remote HTML', () => {
   const src = read('src/app/business-mail.component.ts');
   const html = read('src/app/business-mail.component.html');
-  assert.match(src,/window\.confirm\(this\.t\('Send this email now/);
+  assert.match(src,/await confirmed\(this\.t\('Send this email now/);
   assert.match(src,/confirm:true/);
   assert.match(html,/type="password"/);
   assert.match(html,/\{\{msg\.body\}\}/);

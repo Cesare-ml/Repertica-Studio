@@ -3,6 +3,7 @@ import { Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, S
 import { FormsModule } from '@angular/forms';
 import { open } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { confirmed } from './confirm-dialog';
 import type { AppLanguage } from './i18n';
 import type { Collector, MailAccount, MailAccountInput, MailDetail, MailDraft, MailDraftInput, MailFolder, MailHeader, MailList, MailOverview, MailSyncState } from './models';
 import { MailIconComponent } from './mail-icons';
@@ -78,6 +79,9 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   otherFoldersOpen = false;
   /** An operation started by the user (sending, saving…) is running. */
   busy = false;
+  private sendConfirmationPending = false;
+  private discardConfirmationPending = false;
+  private destroyed = false;
   /** The first load of the folders and messages is running. */
   loading = false;
   /** A refresh is running in the background (the list on screen is the previous one). */
@@ -125,7 +129,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     await this.loadAccounts();
     this.timer = setInterval(()=>void this.autoRefresh(), REFRESH_MS);
   }
-  ngOnDestroy():void { if (this.timer) clearInterval(this.timer); }
+  ngOnDestroy():void { this.destroyed=true; if (this.timer) clearInterval(this.timer); }
   ngOnChanges(changes: SimpleChanges):void {
     if (!changes['sync'] || !this.selectedId) return;
     const stamp = inboxStamp(this.sync, this.selectedId);
@@ -158,7 +162,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     if (this.selectedId && !this.folders.length) await this.connect();
   }
   async selectAccount(id:string):Promise<void>{
-    if(id===this.selectedId||!this.canLeave())return;
+    if(id===this.selectedId||!(await this.canLeave()))return;
     this.selectedId=id;this.folders=[];this.listing=null;this.message=null;
     this.selectedFolder='INBOX';this.accountForm=null;this.view='mail';
     this.drafts=[];this.lastStamp='';++this.loadVersion;
@@ -285,18 +289,20 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   // ---- compose (floating window)
-  startCompose():void{
-    if(!this.selectedId||!this.canLeave())return;
+  async startCompose():Promise<void>{
+    if(!this.selectedId||!(await this.canLeave()))return;
     this.composer={...blankComposer(),body:this.selected?.signature??''};
     this.openComposer();
   }
-  reply(forward=false):void {
-    if(!this.selectedId||!this.message||!this.canLeave())return;
-    const header=this.message.header;
+  async reply(forward=false):Promise<void> {
+    // The message clicked on: the confirmation is asynchronous and the reader may change meanwhile.
+    const message=this.message;
+    if(!this.selectedId||!message||!(await this.canLeave()))return;
+    const header=message.header;
     const mail=/<([^<>\s]+@[^<>\s]+)>/.exec(header.from)?.[1]??header.from.trim();
     const prefix=forward?'Fwd: ':'Re: ';
     const messageSubject=header.subject.replace(/^(Re:|Fwd:)\s*/i,'');
-    const quote=this.message.body.split('\n').slice(0,100).map(line=>'> '+line).join('\n').slice(0,5000);
+    const quote=message.body.split('\n').slice(0,100).map(line=>'> '+line).join('\n').slice(0,5000);
     const signature=this.selected?.signature??'';
     this.composer={
       ...blankComposer(),to:forward?'':mail,subject:prefix+messageSubject,
@@ -304,8 +310,8 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     };
     this.openComposer();
   }
-  openDraft(draft:MailDraft):void{
-    if(!this.canLeave())return;
+  async openDraft(draft:MailDraft):Promise<void>{
+    if(!(await this.canLeave()))return;
     this.composer={id:draft.id,revision:draft.revision,to:draft.to,
       cc:draft.cc,bcc:draft.bcc,subject:draft.subject,body:draft.body,attachments:[...(draft.attachments??[])]};
     this.openComposer();
@@ -316,14 +322,28 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     this.composeOpen=true;this.composeMode='normal';this.clearStatus();
   }
   /** Close the window; unsaved changes are confirmed first. */
-  closeCompose():void{
-    if(!this.canLeave())return;
+  async closeCompose():Promise<void>{
+    if(!(await this.canLeave()))return;
     this.composeOpen=false;this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
   }
   minimizeCompose():void{this.composeMode=this.composeMode==='minimized'?'normal':'minimized';}
   expandCompose():void{this.composeMode=this.composeMode==='expanded'?'normal':'expanded';}
-  private canLeave():boolean{
-    return !this.hasUnsavedComposer || window.confirm(this.t('Discard unsaved changes to this message?'));
+  /** True when nothing unsaved would be lost, or the person agrees to discard it. Always await it. */
+  private async canLeave():Promise<boolean>{
+    return await this.confirmDiscard(this.t('Discard unsaved changes to this message?'), this.hasUnsavedComposer);
+  }
+  /** Consent is scoped to this editor/account, not to changes made while the native dialog is open. */
+  private async confirmDiscard(message:string, ask=true):Promise<boolean>{
+    if(this.destroyed||this.busy||this.discardConfirmationPending||this.sendConfirmationPending)return false;
+    if(!ask)return true;
+    const account=this.selectedId, composer=this.composer, opened=this.composeOpen;
+    const snapshot=JSON.stringify(composer);
+    this.discardConfirmationPending=true;
+    try{
+      if(!(await confirmed(message)))return false;
+      return !this.destroyed&&!this.busy&&this.selectedId===account&&this.composer===composer&&
+        this.composeOpen===opened&&JSON.stringify(this.composer)===snapshot;
+    }finally{this.discardConfirmationPending=false;}
   }
   // ---- views
   showMail():void{
@@ -364,7 +384,7 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     if(saved){this.view='mail';await this.connect();}
   }
   async removeAccount(account:MailAccount):Promise<void>{
-    if(!window.confirm(this.t('Remove this account and its local drafts? Remote mail will not be deleted.')))return;
+    if(!(await confirmed(this.t('Remove this account and its local drafts? Remote mail will not be deleted.'))))return;
     await this.operation(async()=>{
       await api.mailRemoveAccount(account.id);
       this.accounts=await api.mailListAccounts();
@@ -417,11 +437,23 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
     });
   }
   async removeDraft(draft:MailDraft):Promise<void>{
-    if(!window.confirm(this.t('Delete the selected local draft?')))return;
+    const account=this.selectedId;
+    if(!account||draft.account_id!==account)return;
+    const composer=this.composer, snapshot=JSON.stringify(composer);
+    if(!(await this.confirmDiscard(this.t('Delete the selected local draft?'))))return;
+    if(this.selectedId!==account)return;
     await this.operation(async()=>{
-      await api.mailRemoveDraft(this.selectedId,draft.id,draft.revision);
+      await api.mailRemoveDraft(account,draft.id,draft.revision);
+      if(this.destroyed||this.selectedId!==account)return;
       this.drafts=this.drafts.filter(d=>d.id!==draft.id);
-      if(this.composer.id===draft.id){this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);this.composeOpen=false;}
+      if(this.composer.id===draft.id&&this.composer.revision===draft.revision){
+        if(this.composer===composer&&JSON.stringify(this.composer)===snapshot){
+          this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);this.composeOpen=false;
+        }else{
+          // The persisted draft was deleted, but new edits must be saveable as a new draft.
+          this.composer={...this.composer,id:null,revision:null};
+        }
+      }
       this.notice=this.t('Draft deleted.');
     });
   }
@@ -429,32 +461,42 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   async discardCompose():Promise<void>{
     const draft=this.composer.id?this.drafts.find(d=>d.id===this.composer.id):undefined;
     if(draft){await this.removeDraft(draft);return;}
-    if(this.hasUnsavedComposer&&!window.confirm(this.t('Discard unsaved changes to this message?')))return;
+    if(!(await this.canLeave()))return;
     this.composeOpen=false;this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
   }
   async send():Promise<void>{
-    if(!this.selectedId)return;
-    if(!window.confirm(this.t('Send this email now? This action cannot be undone.')))return;
-    await this.operation(async()=>{
-      const current={...this.composer};
-      // One deliberate click issues one send. Never auto-retry on a network error.
-      const result=await api.mailSend({
-        account_id:this.selectedId,to:current.to,cc:current.cc,bcc:current.bcc,
-        subject:current.subject,body:current.body,attachments:current.attachments,confirm:true
-      });
-      if(result.delivery==='accepted'){
-        this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
-        this.composeOpen=false;
-        if(current.id && current.revision!==null){
-          try{await api.mailRemoveDraft(this.selectedId,current.id,current.revision);}
-          catch{/* Delivery was accepted; do not mask it with a draft cleanup error. */}
-          await this.loadDraftsCore();
+    if(this.destroyed||this.busy||this.sendConfirmationPending||this.discardConfirmationPending||!this.selectedId)return;
+    const accountId=this.selectedId;
+    const current={...this.composer,attachments:[...this.composer.attachments]};
+    const snapshot=JSON.stringify(current);
+    const unchanged=()=>!this.destroyed&&this.selectedId===accountId&&JSON.stringify(this.composer)===snapshot;
+    this.sendConfirmationPending=true;
+    try{
+      if(!(await confirmed(this.t('Send this email now? This action cannot be undone.'))))return;
+      // Never send a different account or message than the one awaiting confirmation.
+      if(this.busy||!unchanged())return;
+      await this.operation(async()=>{
+        // One deliberate click issues one send. Never auto-retry on a network error.
+        const result=await api.mailSend({
+          account_id:accountId,to:current.to,cc:current.cc,bcc:current.bcc,
+          subject:current.subject,body:current.body,attachments:current.attachments,confirm:true
+        });
+        if(result.delivery==='accepted'){
+          if(unchanged()){
+            this.composer=blankComposer();this.originalComposer=JSON.stringify(this.composer);
+            this.composeOpen=false;
+          }
+          if(current.id && current.revision!==null){
+            try{await api.mailRemoveDraft(accountId,current.id,current.revision);}
+            catch{/* Delivery was accepted; do not mask it with a draft cleanup error. */}
+            if(this.selectedId===accountId)await this.loadDraftsCore();
+          }
         }
-      }
-      this.notice=this.t('SMTP accepted the message.')+' '+(
-        result.sent_copy==='saved'?this.t('A copy was stored in Sent.'):
-        result.sent_copy==='not_saved'?this.t('Could not store a copy in Sent. Do not resend.'):
-        this.t('No Sent folder configured. Check the provider mailbox.'));
-    });
+        this.notice=this.t('SMTP accepted the message.')+' '+(
+          result.sent_copy==='saved'?this.t('A copy was stored in Sent.'):
+          result.sent_copy==='not_saved'?this.t('Could not store a copy in Sent. Do not resend.'):
+          this.t('No Sent folder configured. Check the provider mailbox.'));
+      });
+    }finally{this.sendConfirmationPending=false;}
   }
 }
