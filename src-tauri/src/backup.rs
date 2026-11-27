@@ -59,11 +59,15 @@ fn error(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn unique_name(prefix: &str) -> String {
     format!("{}-{}-{}", prefix, Utc::now().format("%Y%m%d-%H%M%S"), Uuid::new_v4().simple())
 }
+/// Name of a folder created beside the data folder (shared by every installation's data folder):
+/// the release keeps its names, other builds (`tauri:dev`) get their own.
+fn beside_archive(prefix: &str) -> String { unique_name(&crate::identity::scoped(prefix)) }
 fn app_parent(data_dir: &Path) -> Result<&Path, String> {
     data_dir.parent().ok_or_else(|| "Cartella dati non valida".into())
 }
+/// Fixed per installation: a development build must never "recover" the release's interrupted restore.
 fn rollback_folder(data_dir: &Path) -> Result<PathBuf, String> {
-    Ok(app_parent(data_dir)?.join(ROLLBACK_FOLDER))
+    Ok(app_parent(data_dir)?.join(crate::identity::scoped(ROLLBACK_FOLDER)))
 }
 fn check_regular(path: &Path) -> Result<(), String> {
     let typ = fs::symlink_metadata(path).map_err(error)?.file_type();
@@ -635,7 +639,7 @@ pub fn recover_interrupted_restore(data_dir: &Path) -> Result<(), String> {
         fs::rename(&rollback, data_dir).map_err(error)?;
     } else {
         let parent = app_parent(data_dir)?;
-        let previous = parent.join(unique_name("ReperticaStudio-before-restore"));
+        let previous = parent.join(beside_archive("ReperticaStudio-before-restore"));
         fs::rename(&rollback, &previous).map_err(error)?;
     }
     Ok(())
@@ -650,7 +654,7 @@ pub fn restore_backup_core(db: &Database, folder: &Path) -> Result<RestoreSummar
     if rollback.exists() {
         return Err("Ripristino precedente incompleto: riavvia Repertica Studio prima di procedere".into());
     }
-    let staging = parent.join(unique_name(".repertica-restore-staging"));
+    let staging = parent.join(beside_archive(".repertica-restore-staging"));
     fs::create_dir(&staging).map_err(error)?;
     let preparation = (|| -> Result<(), String> {
         fs::create_dir(staging.join("media")).map_err(error)?;
@@ -694,14 +698,14 @@ pub fn restore_backup_core(db: &Database, folder: &Path) -> Result<RestoreSummar
     match reopened {
         Ok(opened) => {
             *handle = opened.conn.into_inner().map_err(error)?;
-            let previous = parent.join(unique_name("ReperticaStudio-before-restore"));
+            let previous = parent.join(beside_archive("ReperticaStudio-before-restore"));
             // Retain the entire previous archive (including WAL/media) rather than
             // deleting anything. If renaming fails the fixed rollback directory remains.
             let saved = if fs::rename(&rollback, &previous).is_ok() { previous } else { rollback };
             Ok(RestoreSummary { restored: summary, previous_archive: crate::util::display_path(&saved) })
         }
         Err(e) => {
-            let rejected = parent.join(unique_name(".repertica-rejected-restore"));
+            let rejected = parent.join(beside_archive(".repertica-rejected-restore"));
             let removed = fs::rename(&db.directory, &rejected);
             if removed.is_ok() && fs::rename(&rollback, &db.directory).is_ok() {
                 let original = db::open(db.directory.clone()).map_err(error)?;

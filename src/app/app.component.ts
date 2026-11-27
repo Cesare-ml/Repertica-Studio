@@ -463,20 +463,20 @@ export class AppComponent implements OnInit {
   get mcpConfigJson(): string {
     const setup = this.mcpSetup;
     if (!setup) return '';
-    return JSON.stringify({ mcpServers: { 'repertica-studio': { command: setup.command, args: setup.args } } }, null, 2);
+    return JSON.stringify({ mcpServers: { [setup.serverName]: { command: setup.command, args: setup.args } } }, null, 2);
   }
   get mcpTomlSnippet(): string {
     const setup = this.mcpSetup;
     if (!setup) return '';
     // TOML literal strings need no escaping of backslashes.
     const literal = (value: string) => value.includes("'") ? JSON.stringify(value) : `'${value}'`;
-    return `[mcp_servers.repertica-studio]\ncommand = ${literal(setup.command)}\nargs = [${setup.args.map(literal).join(', ')}]`;
+    return `[mcp_servers.${setup.serverName}]\ncommand = ${literal(setup.command)}\nargs = [${setup.args.map(literal).join(', ')}]`;
   }
   get mcpCommands(): string {
     const setup = this.mcpSetup;
     if (!setup) return '';
     const quote = (value: string) => `"${value}"`;
-    const call = `repertica-studio -- ${quote(setup.command)} ${setup.args.map(a => a.startsWith('--') ? a : quote(a)).join(' ')}`;
+    const call = `${setup.serverName} -- ${quote(setup.command)} ${setup.args.map(a => a.startsWith('--') ? a : quote(a)).join(' ')}`;
     return `codex mcp add ${call}\nclaude mcp add ${call}`;
   }
   async copyText(text: string): Promise<void> {

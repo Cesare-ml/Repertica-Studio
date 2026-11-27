@@ -42,7 +42,7 @@ Il collegamento non tocca mai le altre impostazioni o gli altri server MCP: nei 
 }
 ```
 
-Dalla riga di comando (uso avanzato): `"Repertica Studio" --mcp [--data-dir <cartella>]`. Senza `--data-dir` si usa la variabile `REPERTICA_DATA_DIR` e, in mancanza, la cartella standard dell'app (`%LOCALAPPDATA%\it.repertica.studio`, `~/Library/Application Support/it.repertica.studio`, `~/.local/share/it.repertica.studio`).
+Dalla riga di comando (uso avanzato): `"Repertica Studio" --mcp [--data-dir <cartella>]`. Senza `--data-dir` si usa la variabile `REPERTICA_DATA_DIR` e, in mancanza, la cartella standard dell'app (`%LOCALAPPDATA%\it.repertica.studio`, `~/Library/Application Support/it.repertica.studio`, `~/.local/share/it.repertica.studio`). Una build di sviluppo (`npm run tauri:dev`) usa invece la sua cartella `it.repertica.studio.dev` e scrive negli assistenti la voce `repertica-studio-dev`, senza toccare quella della release (vedi [DEV-DATA.md](DEV-DATA.md)).
 
 Se l'archivio non esiste o ha uno schema diverso da quello dell'app (apri prima l'app per aggiornarlo), il processo termina con un messaggio su standard error e codice di uscita 1.
 
