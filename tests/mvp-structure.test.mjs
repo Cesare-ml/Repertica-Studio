@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const get = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 
@@ -8,7 +8,23 @@ test('no cloud or Sites dependency in runtime', () => {
   const cargo = get('src-tauri/Cargo.toml');
   const api = get('src/app/api.ts');
   assert.doesNotMatch(api, /fetch\(|axios|http:\/\/|https:\/\//);
-  assert.doesNotMatch(cargo, /reqwest|sqlx|postgres|aws-sdk/);
+  assert.doesNotMatch(cargo, /sqlx|postgres|aws-sdk/);
+  // The archive never depends on a network service. The only direct HTTP client is the optional Auctions
+  // connection (MVP 2), confined to one module, pinned to the Repertica origins and gated by ONLINE_ENABLED.
+  const sources = readdirSync(new URL('../src-tauri/src/', import.meta.url)).filter(file => file.endsWith('.rs'));
+  for (const file of sources.filter(file => file !== 'auction_online.rs')) {
+    assert.doesNotMatch(get('src-tauri/src/' + file), /reqwest|rustls/, file);
+  }
+  const online = get('src-tauri/src/auction_online.rs');
+  assert.match(online, /pub const ONLINE_ENABLED: bool = (false|true);/);
+  assert.match(online, /const STUDIO_ORIGIN: &str = "https:\/\/studio\.repertica\.com";/);
+  assert.match(online, /const AUCTIONS_ORIGIN: &str = "https:\/\/auctions\.repertica\.com";/);
+  assert.match(online, /if !cfg!\(debug_assertions\) \{\s*return None;/, 'development origins exist only in debug builds');
+  assert.match(online, /if cfg!\(debug_assertions\) \{\s*if let Some\(file\) = std::env::var_os\("REPERTICA_DEV_LOGIN_URL_FILE"\)/,
+    'the test-browser hand-off of the login page exists only in debug builds');
+  for (const file of readdirSync(new URL('../src/app/', import.meta.url)).filter(file => file.endsWith('.ts'))) {
+    assert.doesNotMatch(get('src/app/' + file), /\bfetch\(|XMLHttpRequest|new WebSocket/, file);
+  }
 });
 test('four MVP modules available via typed native IPC', () => {
   const native = get('src-tauri/src/lib.rs');

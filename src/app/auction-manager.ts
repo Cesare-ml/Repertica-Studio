@@ -1,23 +1,29 @@
 /**
  * Orchestration of publication and bid cancellation over an abstract transport.
  *
- * No transport is implemented in the app yet (the online contract is not verified): this module is developed
- * and tested against a simulated one. It never reports success from a transport answer alone; the outcome is
- * decided by re-reading the server state, and a failed re-read leaves the operation "pending confirmation".
- *
- * NOTE: the `.ts` import suffixes let the Node test runner load this file directly. The Angular build does not
- * allow them (TS5096), so drop the suffixes (or inject the parsers) when a component first imports this module.
+ * The contract is "artist-v1" (Repertica-auctions docs/ARTIST_API_V1.md); auction-http-transport.ts maps it over
+ * the native port of auction-native.ts. This module never reports success from a transport answer alone; the
+ * outcome is decided by re-reading the server state, and a failed re-read leaves the operation "pending
+ * confirmation". Tests load it through tests/ts-resolve.mjs (extensionless imports, as the Angular build needs).
  */
-import { parseAuction, parseBidPage, parseCancelResult, type AuctionBid, type AuctionSummary, type CancelResult } from './auction-contract.ts';
-import { afterTransport, beginOperation, confirmCancellation, confirmPublication, retry, type Operation } from './auction-operations.ts';
-import type { PreparedPreview } from './auction-preview.ts';
+import { parseAuction, parseBidPage, type AuctionBid, type AuctionSummary, type CancelResult, CANCEL_REASONS, type CancelRequest } from './auction-contract';
+import { afterTransport, beginOperation, confirmCancellation, confirmPublication, retry, type Operation } from './auction-operations';
+import type { PreparedPreview } from './auction-preview';
 
 export interface AuctionTransport {
   /** Throws (or rejects) when the response is lost. */
-  publish(body: string, idempotencyKey: string): Promise<{ status: number }>;
+  publish(body: string, idempotencyKey: string): Promise<{ status: number; error?: string | null }>;
   listAuctions(): Promise<unknown>;
   listBids(auctionId: string, cursor: string | null): Promise<unknown>;
-  cancelBid(auctionId: string, bidId: string, reason: string | null, idempotencyKey: string): Promise<{ status: number; body?: unknown }>;
+  /** `body` is the contract answer already mapped by the transport (see auction-http-transport.ts). */
+  cancelBid(auctionId: string, bidId: string, request: CancelRequest, idempotencyKey: string): Promise<{ status: number; body?: CancelResult }>;
+}
+
+const CANCEL_OUTCOMES: readonly string[] = ['cancelled', 'already_cancelled', 'not_allowed', 'contested'];
+function cancelAnswer(value: unknown, bidId: string): CancelResult | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Partial<CancelResult>;
+  return v.bidId === bidId && typeof v.outcome === 'string' && CANCEL_OUTCOMES.includes(v.outcome) ? v as CancelResult : null;
 }
 
 export interface OperationOutcome {
@@ -32,7 +38,7 @@ export interface AuctionManager {
   loadAuctions(): Promise<AuctionSummary[]>;
   loadBids(auctionId: string): Promise<AuctionBid[]>;
   publish(prepared: PreparedPreview, previous?: Operation): Promise<OperationOutcome>;
-  cancelBid(auctionId: string, bidId: string, reason: string | null, idempotencyKey: string,
+  cancelBid(auctionId: string, bidId: string, request: CancelRequest, idempotencyKey: string,
     previous?: Operation): Promise<{ outcome: OperationOutcome; bids: AuctionBid[] | null }>;
 }
 
@@ -55,7 +61,8 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
       const { bids, nextCursor } = parseBidPage(await transport.listBids(auctionId, cursor));
       for (const bid of bids) all.set(bid.bidId, bid);
       if (nextCursor === null) {
-        return [...all.values()].sort((a, b) => a.placedAt.localeCompare(b.placedAt) || a.bidId.localeCompare(b.bidId));
+        // The server lists bids in the order it accepted them; a stable sort keeps that order for equal times.
+        return [...all.values()].sort((a, b) => a.placedAt.localeCompare(b.placedAt));
       }
       if (nextCursor === cursor) throw new Error('invalid_response');
       cursor = nextCursor;
@@ -66,15 +73,16 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
   /** Publication of an already reviewed request. Pass the same `prepared` again to retry. */
   async function publish(prepared: PreparedPreview, previous?: Operation): Promise<OperationOutcome> {
     requireOnline();
-    const slug = (JSON.parse(prepared.body) as { slug: string }).slug;
+    const slug = (JSON.parse(prepared.body) as { details: { slug: string } }).details.slug;
     if (previous && (previous.body !== prepared.body || previous.idempotencyKey !== prepared.idempotencyKey)) {
       throw new Error('request_changed');
     }
     let op = previous ? retry(previous) : beginOperation('publish', slug, prepared.idempotencyKey, prepared.body);
     let status = 0;
     try {
-      status = (await transport.publish(prepared.body, prepared.idempotencyKey)).status;
-      op = afterTransport(op, { kind: 'response', status });
+      const answer = await transport.publish(prepared.body, prepared.idempotencyKey);
+      status = answer.status;
+      op = afterTransport(op, { kind: 'response', status, error: answer.error ?? null });
     } catch { op = afterTransport(op, { kind: 'lost' }); }
     if (op.state === 'pending_confirmation') {
       try { op = confirmPublication(op, await loadAuctions()); } catch { /* stays pending */ }
@@ -83,24 +91,31 @@ export function createAuctionManager(transport: AuctionTransport, isOnline: () =
   }
 
   /** Cancellation of a suspect bid; the history is reloaded to learn the official outcome. */
-  async function cancelBid(auctionId: string, bidId: string, reason: string | null, idempotencyKey: string,
+  async function cancelBid(auctionId: string, bidId: string, request: CancelRequest, idempotencyKey: string,
     previous?: Operation): Promise<{ outcome: OperationOutcome; bids: AuctionBid[] | null }> {
     requireOnline();
-    if (reason !== null && (reason.trim().length === 0 || reason.length > 500)) throw new Error('invalid_reason');
-    const body = JSON.stringify({ auctionId, bidId, reason });
+    // Gestionale Opere: one of five reasons, an optional private note of up to 500 characters, an optional block.
+    const note = typeof request?.note === 'string' ? request.note.trim() : '';
+    if (!request || !(CANCEL_REASONS as readonly string[]).includes(request.reason) || note.length > 500
+      || (request.blockEmail !== undefined && typeof request.blockEmail !== 'boolean')) throw new Error('invalid_reason');
+    const sent: CancelRequest = { reason: request.reason, ...(note ? { note } : {}), ...(request.blockEmail ? { blockEmail: true } : {}) };
+    const body = JSON.stringify({ auctionId, bidId, ...sent });
     if (previous && previous.body !== body) throw new Error('request_changed');
     let op = previous ? retry(previous) : beginOperation('cancel_bid', bidId, idempotencyKey, body);
     let answer: CancelResult | null = null;
     let status = 0;
     try {
-      const response = await transport.cancelBid(auctionId, bidId, reason, idempotencyKey);
+      const response = await transport.cancelBid(auctionId, bidId, sent, idempotencyKey);
       status = response.status;
       op = afterTransport(op, { kind: 'response', status });
-      if (response.body !== undefined) { try { answer = parseCancelResult(response.body); } catch { answer = null; } }
+      answer = cancelAnswer(response.body, bidId);
+      // Already cancelled (e.g. by an earlier attempt whose answer was lost): the server history decides.
+      if (answer?.outcome === 'already_cancelled') op = Object.freeze({ ...op, state: 'pending_confirmation' as const, reason: null });
     } catch { op = afterTransport(op, { kind: 'lost' }); }
     let bids: AuctionBid[] | null = null;
     try { bids = await loadBids(auctionId); } catch { bids = null; }
     if (bids !== null && op.state !== 'rejected') op = confirmCancellation(op, bids, answer);
+    else if (op.state === 'rejected' && answer && answer.reason) op = Object.freeze({ ...op, reason: answer.reason });
     return { outcome: { operation: op, needsSignIn: status === 401 }, bids };
   }
 
