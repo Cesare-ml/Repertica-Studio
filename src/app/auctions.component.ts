@@ -6,10 +6,10 @@ import { AuctionOnlineComponent } from './auction-online.component';
 import { AuctionOnlineService } from './auction-online.service';
 import { confirmed } from './confirm-dialog';
 import type { PendingPublication } from './auction-publications';
-import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, loadPaymentDefaults, localInputToUtc, removeDraft, saveDraft,
-  savePaymentDefaults, slugify,
-  utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
+import { NOT_SENT, centsToEuro, euroToCents, loadDrafts, loadSavedBankDetails, loadWinnerDefaults, localInputToUtc, removeDraft,
+  saveDraft, saveWinnerDefaults, utcToLocalInput, type KeyValueStore, type LocalAuctionDraft } from './auction-drafts';
 import { newAuctionDraft, publicArtworkFrom, reviewRows, type AuctionDraft, type ReviewRow } from './auction-preview';
+import { WINNER_PLACEHOLDERS, defaultWinnerEmail, type WinnerMode } from './auction-winner-email';
 import type { AppLanguage } from './i18n';
 import { translate } from './i18n';
 import type { Artwork } from './models';
@@ -17,13 +17,11 @@ import type { Artwork } from './models';
 const ERRORS: Record<string, string> = {
   artwork_not_available: 'Solo un’opera disponibile può avere un’asta',
   artwork_not_selected: 'Scegli l’opera dell’asta',
-  invalid_slug: 'L’indirizzo può contenere solo lettere minuscole, numeri e trattini',
   invalid_title: 'Il titolo deve avere almeno 3 caratteri',
   invalid_description: 'La descrizione è troppo lunga (massimo 1500 caratteri)',
   invalid_schedule: 'Date non valide: l’inizio deve essere futuro, la fine successiva e la durata al massimo 7 giorni',
   invalid_amount: 'Inserisci importi validi per prezzo di partenza e rilancio minimo',
   payload_too_large: 'I dati sono troppo lunghi',
-  invalid_shipping: 'Indica le spese di spedizione in Italia (anche 0)',
   artwork_image_missing: 'Serve la fotografia principale dell’opera: aggiungila nell’archivio prima di pubblicare',
   artwork_image_invalid: 'La fotografia principale dell’opera non è leggibile',
   artwork_image_too_large: 'La fotografia principale è troppo grande anche dopo la riduzione',
@@ -35,13 +33,14 @@ const ERRORS: Record<string, string> = {
   image_not_found: 'La fotografia caricata è scaduta: pubblica di nuovo',
   sign_in_required: 'Sessione scaduta: accedi di nuovo.',
   network_unavailable: 'Server non raggiungibile. Controlla la connessione e riprova.',
-  invalid_iban: 'IBAN non valido: controlla le cifre',
-  invalid_bic: 'BIC/SWIFT non valido (8 o 11 caratteri)',
-  invalid_terms: 'Completa beneficiario e banca per il bonifico del vincitore',
+  invalid_artist_email: 'Inserisci la tua email: riceverà i dati del vincitore',
+  invalid_winner_subject: 'L’oggetto dell’email di vittoria deve avere da 3 a 160 caratteri, su una sola riga',
+  invalid_winner_body: 'Il messaggio per il vincitore deve avere da 20 a 2500 caratteri',
+  invalid_terms: 'Controlla la tua email e il messaggio per il vincitore',
 };
 /** Server refusals of a publication (artist-v1 error codes). */
 const REFUSALS: Record<string, string> = {
-  public_details_exist: 'Esiste già un’asta con questo indirizzo della pagina: se l’hai già pubblicata la trovi tra le aste online, altrimenti cambia l’indirizzo.',
+  public_details_exist: 'Questa asta è già stata pubblicata con un titolo o una descrizione diversi: la trovi tra le aste online.',
   auction_exists: 'Questa richiesta è già stata usata per un’altra asta.',
   idempotency_conflict: 'Questa richiesta è già stata usata con dati diversi.',
   tenant_access_denied: 'Non sei autorizzato a pubblicare per questo profilo artista.',
@@ -120,10 +119,8 @@ const REFUSALS: Record<string, string> = {
           <option *ngFor="let a of available" [value]="a.id">{{ a.title }} ({{ a.code }})</option>
         </select></label>
       <label>{{ tr('Titolo pubblico') }}
-        <input type="text" maxlength="160" [(ngModel)]="editing.title" (ngModelChange)="reviewed = false"></label>
-      <label>{{ tr('Indirizzo della pagina') }}
-        <input type="text" maxlength="60" [(ngModel)]="editing.slug" (ngModelChange)="reviewed = false">
-        <small>{{ tr('Solo lettere minuscole, numeri e trattini') }}</small></label>
+        <input type="text" maxlength="160" [(ngModel)]="editing.title" (ngModelChange)="reviewed = false">
+        <small>{{ tr('L’indirizzo della pagina lo crea il sito a partire dal titolo pubblico.') }}</small></label>
       <label>{{ tr('Descrizione pubblica') }}
         <textarea rows="4" maxlength="1500" [(ngModel)]="editing.description" (ngModelChange)="reviewed = false"></textarea>
         <small>{{ tr('Scrivila apposta: la descrizione privata dell’archivio non viene usata.') }}</small></label>
@@ -143,21 +140,32 @@ const REFUSALS: Record<string, string> = {
       <div class="auctions-two">
         <label>{{ tr('Prezzo di riserva (€, facoltativo)') }}
           <input type="text" inputmode="decimal" [(ngModel)]="reserveText" (ngModelChange)="reviewed = false"></label>
-        <label>{{ tr('Spedizione in Italia (€)') }}
-          <input type="text" inputmode="decimal" [(ngModel)]="shippingText" (ngModelChange)="reviewed = false"></label>
       </div>
       <p class="auctions-muted">{{ tr('Un’offerta negli ultimi 2 minuti prolunga la chiusura di 2 minuti. Sotto il prezzo di riserva l’asta non viene aggiudicata.') }}</p>
       <fieldset class="auctions-payment">
-        <legend>{{ tr('Pagamento del vincitore (bonifico)') }}</legend>
-        <p class="auctions-muted">{{ tr('Questi dati vengono inviati solo al vincitore, nell’email di aggiudicazione. Non compaiono nella pagina pubblica.') }}</p>
-        <label>{{ tr('Beneficiario') }}<input type="text" maxlength="140" [(ngModel)]="editing.bankBeneficiary" (ngModelChange)="reviewed = false"></label>
-        <div class="auctions-two">
-          <label>IBAN<input type="text" maxlength="42" autocomplete="off" [(ngModel)]="editing.bankIban" (ngModelChange)="reviewed = false"></label>
-          <label>BIC/SWIFT<input type="text" maxlength="14" autocomplete="off" [(ngModel)]="editing.bankBicSwift" (ngModelChange)="reviewed = false"></label>
-        </div>
-        <label>{{ tr('Banca e indirizzo') }}<input type="text" maxlength="300" [(ngModel)]="editing.bankNameAndAddress" (ngModelChange)="reviewed = false"></label>
+        <legend>{{ tr('Quando l’asta si chiude con un vincitore') }}</legend>
+        <label>{{ tr('La tua email') }}
+          <input type="email" maxlength="254" autocomplete="email" [(ngModel)]="editing.artistEmail" (ngModelChange)="reviewed = false">
+          <small>{{ tr('Riceve nome ed email del vincitore. Non compare nella pagina pubblica.') }}</small></label>
+        <label class="auctions-choice">
+          <input type="radio" name="auction-winner-mode" value="contact_privately" [ngModel]="editing.winnerMode" (ngModelChange)="setWinnerMode($event)">
+          <span><strong>{{ tr('Ricevo i dati del vincitore e lo contatto io') }}</strong>
+            <small>{{ tr('Il vincitore riceve solo un avviso: lo contatterai tu per pagamento e consegna.') }}</small></span></label>
+        <label class="auctions-choice">
+          <input type="radio" name="auction-winner-mode" value="custom_email" [ngModel]="editing.winnerMode" (ngModelChange)="setWinnerMode($event)">
+          <span><strong>{{ tr('Il vincitore riceve una mia email di vittoria') }}</strong>
+            <small>{{ tr('Scrivi tu il messaggio, ad esempio con i dati per il pagamento. Rispondendo, il compratore scrive direttamente a te.') }}</small></span></label>
+        <ng-container *ngIf="editing.winnerMode === 'custom_email'">
+          <label>{{ tr('Oggetto') }}
+            <input type="text" maxlength="160" [(ngModel)]="editing.winnerSubject" (ngModelChange)="reviewed = false"></label>
+          <label>{{ tr('Messaggio') }}
+            <textarea rows="12" maxlength="2500" [(ngModel)]="editing.winnerBody" (ngModelChange)="reviewed = false"></textarea></label>
+          <p class="auctions-muted">{{ tr('Campi sostituiti all’invio') }}:
+            <span *ngFor="let p of placeholders; let last = last"><code>{{ p.token }}</code> {{ tr(p.label) }}{{ last ? '' : ' · ' }}</span></p>
+          <p class="auctions-muted">{{ tr('In fondo al messaggio Repertica aggiunge una riga che spiega che arriva da te.') }}</p>
+          <div><button type="button" (click)="resetWinnerEmail()">{{ tr('Ripristina il modello') }}</button></div>
+        </ng-container>
       </fieldset>
-      <p class="auctions-muted">{{ tr('Le immagini non sono ancora incluse: l’invio delle foto sarà disponibile con l’interfaccia online verificata.') }}</p>
     </div>
     <div class="auctions-row">
       <button type="button" (click)="cancelEdit()">{{ tr('Annulla') }}</button>
@@ -168,7 +176,7 @@ const REFUSALS: Record<string, string> = {
     <div *ngIf="reviewed" class="auctions-review" role="region" [attr.aria-label]="tr('Dati da inviare')">
       <h4>{{ tr('Dati che verrebbero inviati') }}</h4>
       <table>
-        <tbody><tr *ngFor="let row of rows"><th scope="row">{{ fieldLabel(row.field) }}</th><td>{{ row.field === 'mainImage' ? tr('Dall’archivio, ridotta a 2400 px e senza metadati (EXIF, GPS)') : row.value }}</td></tr></tbody>
+        <tbody><tr *ngFor="let row of rows"><th scope="row">{{ fieldLabel(row.field) }}</th><td [class.auctions-text]="row.field === 'winnerBody'">{{ rowValue(row) }}</td></tr></tbody>
       </table>
       <h4>{{ tr('Non vengono inviati') }}</h4>
       <ul><li *ngFor="let item of notSent">{{ tr(item) }}</li></ul>
@@ -199,6 +207,11 @@ const REFUSALS: Record<string, string> = {
 .auctions-alert{padding:10px 12px;border-radius:8px;background:#fbeaea;color:#8a2b2b;font-size:13px}
 .auctions-payment{border:1px solid #edf0ee;border-radius:8px;padding:10px 12px;display:grid;gap:10px;margin:0}
 .auctions-payment legend{font-size:13px;font-weight:600;padding:0 4px}
+.auctions-form .auctions-choice{display:flex;gap:8px;align-items:flex-start}
+.auctions-form .auctions-choice input{width:auto;margin-top:3px}
+.auctions-choice span{display:grid;gap:2px}
+.auctions-payment code{font-size:11px;background:#eef2ef;border-radius:4px;padding:1px 4px}
+.auctions-review td.auctions-text{white-space:pre-wrap}
 .auctions-review{border-top:1px solid #edf0ee;padding-top:12px;display:grid;gap:8px}
 .auctions-review table{border-collapse:collapse;font-size:13px}
 .auctions-review th{text-align:left;padding:4px 12px 4px 0;color:#4b5d52;font-weight:600;white-space:nowrap;vertical-align:top}
@@ -239,6 +252,7 @@ export class AuctionsComponent implements OnInit, OnChanges {
     return this.online.status.development ? 'servizi locali di prova' : 'collegata';
   }
   readonly notSent = NOT_SENT;
+  readonly placeholders = WINNER_PLACEHOLDERS;
   readonly timeZone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'UTC'; } })();
   drafts: LocalAuctionDraft[] = [];
   editing: AuctionDraft | null = null;
@@ -247,7 +261,6 @@ export class AuctionsComponent implements OnInit, OnChanges {
   startingText = '';
   incrementText = '';
   reserveText = '';
-  shippingText = '';
   rows: ReviewRow[] = [];
   reviewed = false;
   error = '';
@@ -280,8 +293,8 @@ export class AuctionsComponent implements OnInit, OnChanges {
   startNew(): void {
     const free = this.available.find(a => !this.drafts.some(d => d.artworkId === a.id)) ?? this.available[0];
     if (!free) return;
-    // The last payment terms used on this computer prefill the new draft.
-    this.begin({ ...newAuctionDraft(free), ...(this.store ? loadPaymentDefaults(this.store) : {}) });
+    // The last choices for the winner made on this computer prefill the new draft.
+    this.begin({ ...newAuctionDraft(free), ...(this.store ? loadWinnerDefaults(this.store) : {}) });
   }
   edit(d: LocalAuctionDraft): void { this.publishMessage = ''; this.begin({ ...d }); }
   private begin(draft: AuctionDraft): void {
@@ -291,7 +304,7 @@ export class AuctionsComponent implements OnInit, OnChanges {
     this.startingText = centsToEuro(draft.startingAmount);
     this.incrementText = centsToEuro(draft.minimumIncrementAmount);
     this.reserveText = centsToEuro(draft.reserveAmount ?? null);
-    this.shippingText = draft.italyShippingCost === null || draft.italyShippingCost === undefined ? '' : centsToEuro(draft.italyShippingCost) || '0';
+    if (!this.editing.winnerMode) this.editing.winnerMode = 'contact_privately';
     this.reviewed = false; this.error = ''; this.rows = [];
   }
   pickArtwork(id: string): void {
@@ -301,24 +314,42 @@ export class AuctionsComponent implements OnInit, OnChanges {
   }
   cancelEdit(): void { this.editing = null; this.reviewed = false; this.error = ''; }
 
+  /** The template is offered the first time the artist chooses the winner e-mail. */
+  setWinnerMode(mode: WinnerMode): void {
+    if (!this.editing) return;
+    this.editing.winnerMode = mode;
+    this.reviewed = false;
+    if (mode === 'custom_email' && !(this.editing.winnerBody ?? '').trim()) this.fillWinnerTemplate();
+  }
+  async resetWinnerEmail(): Promise<void> {
+    if (!this.editing) return;
+    if ((this.editing.winnerBody ?? '').trim() && !(await confirmed(this.tr('Sostituire oggetto e messaggio con il modello?')))) return;
+    this.fillWinnerTemplate();
+  }
+  private fillWinnerTemplate(): void {
+    if (!this.editing) return;
+    const template = defaultWinnerEmail(this.language, this.store ? loadSavedBankDetails(this.store) : null);
+    this.editing.winnerSubject = template.subject;
+    this.editing.winnerBody = template.body;
+    this.reviewed = false;
+  }
+
   private collect(): AuctionDraft | null {
     const e = this.editing;
     if (!e) return null;
-    if (!e.slug.trim() && e.title.trim()) e.slug = slugify(e.title);
-    return { artworkId: e.artworkId, title: e.title, description: e.description, slug: e.slug.trim(),
+    return { artworkId: e.artworkId, title: e.title, description: e.description,
       startsAt: localInputToUtc(this.startsLocal), endsAt: localInputToUtc(this.endsLocal),
       startingAmount: euroToCents(this.startingText), minimumIncrementAmount: euroToCents(this.incrementText),
       reserveAmount: this.reserveText.trim() ? euroToCents(this.reserveText) ?? -1 : null,
-      italyShippingCost: this.shippingText.trim() === '' ? null : /^0+(?:[.,]0{1,2})?$/.test(this.shippingText.trim()) ? 0 : euroToCents(this.shippingText),
-      bankBeneficiary: e.bankBeneficiary ?? '', bankIban: e.bankIban ?? '', bankBicSwift: e.bankBicSwift ?? '',
-      bankNameAndAddress: e.bankNameAndAddress ?? '' };
+      artistEmail: e.artistEmail ?? '', winnerMode: e.winnerMode ?? 'contact_privately', winnerSubject: e.winnerSubject ?? '',
+      winnerBody: e.winnerBody ?? '' };
   }
 
   save(): void {
     const draft = this.collect(), store = this.store;
     if (!draft) return;
     if (!store) { this.error = this.tr('Impossibile salvare la bozza su questo computer'); return; }
-    try { this.drafts = saveDraft(store, draft); savePaymentDefaults(store, draft); this.error = ''; this.editing = null; this.reviewed = false; }
+    try { this.drafts = saveDraft(store, draft); saveWinnerDefaults(store, draft); this.error = ''; this.editing = null; this.reviewed = false; }
     catch { this.error = this.tr('Impossibile salvare la bozza su questo computer'); }
   }
   async discard(d: LocalAuctionDraft): Promise<void> {
@@ -400,12 +431,20 @@ export class AuctionsComponent implements OnInit, OnChanges {
   }
 
   fieldLabel(field: string): string {
-    const labels: Record<string, string> = { slug: 'Indirizzo della pagina', title: 'Titolo pubblico', description: 'Descrizione pubblica',
+    const labels: Record<string, string> = { title: 'Titolo pubblico', description: 'Descrizione pubblica',
       startsAt: 'Inizio (UTC)', endsAt: 'Fine (UTC)', startingAmount: 'Prezzo di partenza (centesimi)',
       minimumIncrementAmount: 'Rilancio minimo (centesimi)', currency: 'Valuta', reserveAmount: 'Prezzo di riserva (centesimi)',
-      italyShippingCost: 'Spedizione in Italia (centesimi)', bankBeneficiary: 'Beneficiario', bankIban: 'IBAN', bankBicSwift: 'BIC/SWIFT',
-      bankNameAndAddress: 'Banca e indirizzo', mainImage: 'Fotografia principale', year: 'Anno', technique: 'Tecnica',
+      artistEmail: 'La tua email', winnerMode: 'Contatto con il vincitore', winnerSubject: 'Oggetto dell’email di vittoria',
+      winnerBody: 'Messaggio per il vincitore', mainImage: 'Fotografia principale', year: 'Anno', technique: 'Tecnica',
       support: 'Supporto', dimensions: 'Misure' };
     return this.tr(labels[field] ?? field);
+  }
+
+  rowValue(row: ReviewRow): string {
+    if (row.field === 'mainImage') return this.tr('Dall’archivio, ridotta a 2400 px e senza metadati (EXIF, GPS)');
+    if (row.field === 'winnerMode') {
+      return this.tr(row.value === 'custom_email' ? 'Il vincitore riceve una mia email di vittoria' : 'Ricevo i dati del vincitore e lo contatto io');
+    }
+    return row.value;
   }
 }

@@ -118,3 +118,14 @@ Per accendere il collegamento in produzione servono, nell'ordine: unione del ram
 ## Collegamento acceso (27 novembre 2026)
 
 `ONLINE_ENABLED = true`: il provider di identità è in produzione su `https://studio.repertica.com` con la pagina di accesso sotto `/id/login` (accanto al pilot Studio, stesso issuer) e il servizio Auctions su `https://auctions.repertica.com`. Verificato da internet il percorso del client nativo (accesso, autorizzazione, scambio del codice senza Origin, chiamata ad Auctions, revoca dopo l'uscita). Le offerte sono spente lato server; la pubblicazione è aperta al profilo `mirko-lancerotto`. Le build di debug con `REPERTICA_DEV_*` continuano a usare i servizi locali (pagina `/login`). Per gli utenti serve una nuova versione dell'app costruita da `main` dopo l'unione di questa PR e della #174 (conferme): non ancora preparata né distribuita.
+
+## Indirizzo della pagina e contatto con il vincitore (27 novembre 2026)
+
+Decisioni del proprietario, che sostituiscono nel modulo d'asta l'indirizzo scelto a mano, la spedizione e il bonifico:
+
+- **Indirizzo della pagina.** Non lo sceglie mai l'utente: lo crea il server dal titolo pubblico (regola del Gestionale, con `-2`, `-3`… se già usato). Il Desktop non invia più uno `slug` e riconosce una pubblicazione dall'id dell'asta. Le richieste in sospeso salvate dalle versioni precedenti, che usavano l'indirizzo, sono ancora riconosciute.
+- **Contatto con il vincitore.** Nella sezione "Quando l'asta si chiude con un vincitore" l'artista inserisce la propria email, che riceve nome ed email del vincitore. Poi sceglie:
+  - **"Ricevo i dati del vincitore e lo contatto io":** il vincitore riceve solo un avviso;
+  - **"Il vincitore riceve una mia email di vittoria":** oggetto e testo liberi, con `{name}`, `{title}`, `{amount}`, `{link}` e `{artist}`. Rispondendo, il compratore scrive direttamente all'artista.
+- **Modello dell'email.** Viene offerto nella lingua dell'interfaccia (`auction-winner-email.ts`) e contiene già i dati bancari salvati dalle versioni precedenti, se ci sono. "Ripristina il modello" lo ricarica. Le scelte restano su questo computer per le bozze successive.
+- **Contratto.** È in Repertica-auctions `docs/ARTIST_API_V1.md`, sezione "Contatto con il vincitore". Il server deve essere aggiornato prima di distribuire questo Desktop: un server precedente rifiuta il nuovo formato con `invalid_terms`.

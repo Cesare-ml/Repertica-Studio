@@ -1,21 +1,25 @@
-/** Offline-only boundary for one explicitly selected artwork. No transport or credentials. */
+import { WINNER_BODY_MAX, WINNER_BODY_MIN, WINNER_MODES, WINNER_SUBJECT_MAX, type WinnerMode } from './auction-winner-email';
+
+/**
+ * Offline-only boundary for one explicitly selected artwork. No transport or credentials.
+ * The page address is not part of it: the site derives it from the public title.
+ */
 export interface AuctionDraft {
   readonly artworkId: string;
   title: string;
   description: string;
-  slug: string;
   startsAt: string;
   endsAt: string;
   startingAmount: number | null;
   minimumIncrementAmount: number | null;
   /** Optional reserve price in cents (Gestionale Opere). */
   reserveAmount?: number | null;
-  /** Winner's payment terms (Gestionale Opere): shipping within Italy in cents and bank transfer details. */
-  italyShippingCost?: number | null;
-  bankBeneficiary?: string;
-  bankIban?: string;
-  bankBicSwift?: string;
-  bankNameAndAddress?: string;
+  /** The artist's e-mail: it receives the winner's details, and the replies to the custom winner e-mail. */
+  artistEmail?: string;
+  /** How the winner is reached after closing (owner decision, 27 November 2026). */
+  winnerMode?: WinnerMode;
+  winnerSubject?: string;
+  winnerBody?: string;
 }
 
 /** Public artwork details shown on the auction page (Gestionale Opere), taken from the archive. */
@@ -57,9 +61,9 @@ export interface PreparedPreview {
 // Private archive description, location, images, prices and buyer information are not defaults.
 export function newAuctionDraft(artwork: { id: string; title: string; status: string }): AuctionDraft {
   if (!artwork.id || artwork.status !== 'available') throw new Error('artwork_not_available');
-  return { artworkId: artwork.id, title: artwork.title, description: '', slug: '',
+  return { artworkId: artwork.id, title: artwork.title, description: '',
     startsAt: '', endsAt: '', startingAmount: null, minimumIncrementAmount: null, reserveAmount: null,
-    italyShippingCost: null, bankBeneficiary: '', bankIban: '', bankBicSwift: '', bankNameAndAddress: '' };
+    artistEmail: '', winnerMode: 'contact_privately', winnerSubject: '', winnerBody: '' };
 }
 
 function utc(value: string): number {
@@ -78,35 +82,22 @@ function cents(value: number | null | undefined): number {
   return value;
 }
 
-/** IBAN in electronic format with a valid ISO 13616 check (mod 97), as the server checks it. */
-export function normalizeIban(value: string | undefined): string | null {
-  if (typeof value !== 'string') return null;
-  const iban = value.replace(/\s+/g, '').toUpperCase();
-  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return null;
-  const digits = (iban.slice(4) + iban.slice(0, 4)).replace(/[A-Z]/g, c => String(c.charCodeAt(0) - 55));
-  let rest = 0;
-  for (const digit of digits) rest = (rest * 10 + Number(digit)) % 97;
-  return rest === 1 ? iban : null;
-}
+const ADDRESS = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
-const plain = (value: string | undefined, min: number, max: number): string => {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (text.length < min || text.length > max || /[\u0000-\u001f\u007f]/.test(text)) throw new Error('invalid_terms');
-  return text;
-};
-
-/** The payment terms sent to the winner, validated exactly as the server does. */
-export function paymentTerms(draft: AuctionDraft) {
-  const shipping = draft.italyShippingCost;
-  if (typeof shipping !== 'number' || !Number.isSafeInteger(shipping) || shipping < 0 || shipping > 100_000_000) {
-    throw new Error('invalid_shipping');
+/** How the winner is reached, validated exactly as the server does (contract artist-v1, "terms"). */
+export function winnerTerms(draft: AuctionDraft) {
+  const email = (draft.artistEmail ?? '').trim();
+  if (email.length > 254 || !ADDRESS.test(email)) throw new Error('invalid_artist_email');
+  const mode = draft.winnerMode ?? 'contact_privately';
+  if (!WINNER_MODES.includes(mode)) throw new Error('invalid_terms');
+  if (mode === 'contact_privately') return { artistEmail: email.toLowerCase(), winner: { mode } };
+  const subject = (draft.winnerSubject ?? '').trim();
+  if (subject.length < 3 || subject.length > WINNER_SUBJECT_MAX || /[\u0000-\u001f\u007f]/.test(subject)) throw new Error('invalid_winner_subject');
+  const body = (draft.winnerBody ?? '').replace(/\r\n?/g, '\n').trim();
+  if (body.length < WINNER_BODY_MIN || body.length > WINNER_BODY_MAX || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(body)) {
+    throw new Error('invalid_winner_body');
   }
-  const iban = normalizeIban(draft.bankIban);
-  if (!iban) throw new Error('invalid_iban');
-  const bic = (draft.bankBicSwift ?? '').replace(/\s+/g, '').toUpperCase();
-  if (!/^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?$/.test(bic)) throw new Error('invalid_bic');
-  return { italyShippingCostAmount: shipping, bankTransfer: { beneficiary: plain(draft.bankBeneficiary, 2, 140), iban,
-    bicSwift: bic, bankNameAndAddress: plain(draft.bankNameAndAddress, 3, 300) } };
+  return { artistEmail: email.toLowerCase(), winner: { mode, subject, body } };
 }
 
 /** Call only after the user reviews the public fields and chooses a tenant.
@@ -118,7 +109,6 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   if (!draft.artworkId) throw new Error('artwork_not_selected');
   if (!/^[A-Za-z0-9_-]{3,80}$/.test(tenantId)) throw new Error('invalid_tenant');
   if (!/^[A-Za-z0-9_-]{16,96}$/.test(idempotencyKey)) throw new Error('invalid_idempotency_key');
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(draft.slug) || draft.slug.length > 60) throw new Error('invalid_slug');
   if (draft.title.trim().length < 3 || draft.title.length > 160) throw new Error('invalid_title');
   if (draft.description.length > 1500) throw new Error('invalid_description');
   const start = utc(draft.startsAt), end = utc(draft.endsAt);
@@ -127,7 +117,7 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   }
   const startingAmount = cents(draft.startingAmount);
   const reserve = draft.reserveAmount === null || draft.reserveAmount === undefined ? null : cents(draft.reserveAmount);
-  const terms = paymentTerms(draft);
+  const terms = winnerTerms(draft);
   if (media && !/^[a-f0-9]{64}$/.test(media.mainImageId)) throw new Error('image_required');
   const artwork = media?.artwork ? Object.fromEntries(Object.entries(media.artwork).filter(([, v]) => v !== null)) : null;
   const auctionId = `auc-${idempotencyKey}`;
@@ -137,7 +127,7 @@ export function preparePreview(draft: AuctionDraft, tenantId: string, idempotenc
   const body = JSON.stringify({
     auction: { id: auctionId, tenantId, startsAt: start, endsAt: end,
       startingAmount, incrementAmount: cents(draft.minimumIncrementAmount), ...(reserve === null ? {} : { reserveAmount: reserve }) },
-    details: { slug: draft.slug, title: draft.title.trim(), description: draft.description.trim() },
+    details: { title: draft.title.trim(), description: draft.description.trim() },
     terms,
     ...(media ? { images: { main: media.mainImageId }, ...(artwork && Object.keys(artwork).length ? { artwork } : {}) } : {}),
   });
@@ -155,11 +145,10 @@ export interface ReviewRow { readonly field: string; readonly value: string }
 export function reviewRows(draft: AuctionDraft, now: number = Date.now(), artwork: PublicArtwork | null = null): ReviewRow[] {
   const prepared = preparePreview(draft, 'review-offline', 'review-offline-0123456789', now);
   const body = JSON.parse(prepared.body) as { auction: Record<string, number | string>; details: Record<string, string>;
-    terms: { italyShippingCostAmount: number; bankTransfer: Record<string, string> } };
+    terms: { artistEmail: string; winner: { mode: WinnerMode; subject?: string; body?: string } } };
   // Exactly the fields of the request; tenant and generated id are assigned at sign-in / send time.
   return [
     { field: 'title', value: body.details['title'] },
-    { field: 'slug', value: body.details['slug'] },
     { field: 'description', value: body.details['description'] },
     { field: 'startsAt', value: new Date(body.auction['startsAt'] as number).toISOString() },
     { field: 'endsAt', value: new Date(body.auction['endsAt'] as number).toISOString() },
@@ -167,11 +156,10 @@ export function reviewRows(draft: AuctionDraft, now: number = Date.now(), artwor
     { field: 'minimumIncrementAmount', value: String(body.auction['incrementAmount']) },
     ...(body.auction['reserveAmount'] === undefined ? [] : [{ field: 'reserveAmount', value: String(body.auction['reserveAmount']) }]),
     { field: 'currency', value: 'EUR' },
-    { field: 'italyShippingCost', value: String(body.terms.italyShippingCostAmount) },
-    { field: 'bankBeneficiary', value: body.terms.bankTransfer['beneficiary'] },
-    { field: 'bankIban', value: body.terms.bankTransfer['iban'] },
-    { field: 'bankBicSwift', value: body.terms.bankTransfer['bicSwift'] },
-    { field: 'bankNameAndAddress', value: body.terms.bankTransfer['bankNameAndAddress'] },
+    { field: 'artistEmail', value: body.terms.artistEmail },
+    { field: 'winnerMode', value: body.terms.winner.mode },
+    ...(body.terms.winner.mode === 'custom_email' ? [{ field: 'winnerSubject', value: body.terms.winner.subject ?? '' },
+      { field: 'winnerBody', value: body.terms.winner.body ?? '' }] : []),
     // Gestionale Opere: the main image is required; it is re-encoded on this computer when publishing.
     { field: 'mainImage', value: 'main' },
     ...(artwork?.year ? [{ field: 'year', value: String(artwork.year) }] : []),

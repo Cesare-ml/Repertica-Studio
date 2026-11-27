@@ -51,7 +51,7 @@ test('native refusal before sending (no session) asks to sign in; a native error
   const signedOut = createNativeConnection(async () => ({ status: 401, body: { error: 'sign_in_required' } }));
   const manager = createAuctionManager(createArtistV1Transport(signedOut.port, () => 't-1'), () => true);
   const prepared = { artworkId: 'a', auctionId: 'auc-pub-0123456789abcdef', idempotencyKey: 'pub-0123456789abcdef',
-    body: JSON.stringify({ auction: {}, details: { slug: 'opera' } }) };
+    body: JSON.stringify({ auction: { id: 'auc-pub-0123456789abcdef' }, details: { title: 'Opera' } }) };
   const out = await manager.publish(prepared);
   assert.equal(out.needsSignIn, true);
   assert.equal(out.operation.state, 'rejected');
@@ -66,10 +66,11 @@ test('unconfirmed publications survive a restart with the same key and body, and
   const store = memory();
   const key = newIdempotencyKey();
   assert.match(key, /^pub-[0-9a-f]{36}$/);
-  const draft = { ...newAuctionDraft({ id: 'art-1', title: 'Paesaggio', status: 'available' }), slug: 'paesaggio-01', description: 'Olio',
-    startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z', startingAmount: 12000, minimumIncrementAmount: 1000, italyShippingCost: 2500, bankBeneficiary: 'Artista di prova', bankIban: 'IT60 X054 2811 1010 0000 0123 456', bankBicSwift: 'BPMOIT2S', bankNameAndAddress: 'Banca di prova, Milano' };
+  const draft = { ...newAuctionDraft({ id: 'art-1', title: 'Paesaggio', status: 'available' }), description: 'Olio',
+    startsAt: '2027-03-04T10:00:00.000Z', endsAt: '2027-03-06T10:00:00.000Z', startingAmount: 12000, minimumIncrementAmount: 1000,
+    artistEmail: 'studio@example.test', winnerMode: 'contact_privately' };
   const prepared = preparePreview(draft, 'tenant-a', key, Date.parse('2027-03-01T00:00:00.000Z'));
-  const operation = { id: 'publish:' + key, kind: 'publish', target: 'paesaggio-01', idempotencyKey: key, body: prepared.body,
+  const operation = { id: 'publish:' + key, kind: 'publish', target: prepared.auctionId, idempotencyKey: key, body: prepared.body,
     state: 'pending_confirmation', reason: null, attempts: 1 };
   recordPublication(store, { artworkId: 'art-1', tenantId: 'tenant-a', title: 'Paesaggio', prepared, operation });
   const [restored] = loadPublications(store);

@@ -11,7 +11,7 @@ export type OperationState = 'in_flight' | 'pending_confirmation' | 'confirmed' 
 export interface Operation {
   readonly id: string;
   readonly kind: OperationKind;
-  /** Slug for a publication, bid id for a cancellation. */
+  /** Auction id for a publication (page address in versions before 27 November 2026), bid id for a cancellation. */
   readonly target: string;
   readonly idempotencyKey: string;
   readonly body: string;
@@ -48,7 +48,7 @@ export function retry(op: Operation): Operation {
 
 export function confirmPublication(op: Operation, serverAuctions: readonly AuctionSummary[]): Operation {
   if (op.kind !== 'publish') throw new Error('wrong_kind');
-  if (serverAuctions.some(a => a.slug === op.target)) return Object.freeze({ ...op, state: 'confirmed' as const });
+  if (serverAuctions.some(a => a.auctionId === op.target || a.slug === op.target)) return Object.freeze({ ...op, state: 'confirmed' as const });
   return op.state === 'rejected' ? op : Object.freeze({ ...op, state: 'pending_confirmation' as const });
 }
 

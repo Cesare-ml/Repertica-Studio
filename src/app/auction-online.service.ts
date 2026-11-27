@@ -99,7 +99,7 @@ export class AuctionOnlineService {
     if (!store) throw new Error('storage_unavailable');
     // Journal before sending: if the app stops now, the next attempt reuses the same identity.
     const journaled = { ...entry, operation: entry.operation ?? { id: `publish:${entry.prepared.idempotencyKey}`, kind: 'publish' as const,
-      target: (JSON.parse(entry.prepared.body) as { details: { slug: string } }).details.slug, idempotencyKey: entry.prepared.idempotencyKey,
+      target: (JSON.parse(entry.prepared.body) as { auction: { id: string } }).auction.id, idempotencyKey: entry.prepared.idempotencyKey,
       body: entry.prepared.body, state: 'pending_confirmation' as const, reason: null, attempts: 0 } };
     this.publications = recordPublication(store, journaled);
     const outcome = await this.manager.publish(entry.prepared, journaled.operation.attempts > 0 ? journaled.operation : undefined);
