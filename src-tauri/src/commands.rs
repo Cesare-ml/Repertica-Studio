@@ -280,12 +280,15 @@ pub fn save_artwork(db: State<'_, Database>, input: ArtworkInput) -> Result<Artw
     save_artwork_core(&db, input)
 }
 #[tauri::command]
-pub fn delete_artwork(db: State<'_, Database>, id: String, cascade: Option<bool>) -> Result<(), String> {
-    delete_artwork_core(&db, &id, cascade.unwrap_or(false))
+pub fn delete_artwork(db: State<'_, Database>, id: String, cascade: Option<bool>, expected_revision: String) -> Result<(), String> {
+    delete_artwork_checked(&db, &id, cascade.unwrap_or(false), Some(&expected_revision))
 }
 /// With `cascade` the certificates and the sale of the artwork (receipts and attached documents included) are
 /// deleted with it; without it an artwork that has any of them is refused.
 pub(crate) fn delete_artwork_core(db: &Database, id: &str, cascade: bool) -> Result<(), String> {
+    delete_artwork_checked(db, id, cascade, None)
+}
+pub(crate) fn delete_artwork_checked(db: &Database, id: &str, cascade: bool, expected: Option<&str>) -> Result<(), String> {
     let mut conn = db.conn.lock().map_err(err)?;
     let id = id.to_string();
     // Keep the media references, cascading DELETE and final-state check in one
@@ -302,6 +305,7 @@ pub(crate) fn delete_artwork_core(db: &Database, id: &str, cascade: bool) -> Res
     };
     // Do not delete DB rows if a swapped media directory could redirect cleanup.
     let impact = crate::cascade::artwork_impact(&tx, &id)?;
+    crate::cascade::verify_revision(&impact, expected)?;
     if !impact.is_empty() && !cascade {
         return Err("Non puoi eliminare un'opera collegata a vendite o certificati".into());
     }

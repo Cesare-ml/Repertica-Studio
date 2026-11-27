@@ -6,6 +6,7 @@
 use crate::db::Database;
 use rusqlite::{params, Connection, Transaction};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 
@@ -26,10 +27,76 @@ pub struct DeletionImpact {
     pub receipts: i64,
     /// Documents attached to the receipts (their files are removed too).
     pub attachments: i64,
+    /// Opaque fingerprint of the exact local records covered by consent.
+    pub revision: String,
 }
 
 impl DeletionImpact {
     pub fn is_empty(&self) -> bool { self.certificates.is_empty() && self.sales.is_empty() }
+}
+
+// Hash typed, length-prefixed SQLite values, not the human-readable counts.
+// Stable ordering and table boundaries distinguish same-count replacements.
+fn deletion_revision(conn: &Connection, column: &str, id: &str) -> Result<String, String> {
+    use rusqlite::types::ValueRef;
+    let mut digest = Sha256::new();
+    fn field(digest: &mut Sha256, tag: u8, bytes: &[u8]) {
+        digest.update([tag]);
+        digest.update((bytes.len() as u64).to_le_bytes());
+        digest.update(bytes);
+    }
+    field(&mut digest, 1, column.as_bytes());
+    field(&mut digest, 2, id.as_bytes());
+    let mut queries = match column {
+        "artwork_id" => vec![
+            "SELECT * FROM artworks WHERE id=?1".to_string(),
+            "SELECT * FROM artwork_images WHERE artwork_id=?1 ORDER BY id".to_string(),
+            "SELECT * FROM artwork_raw_files WHERE artwork_id=?1".to_string(),
+            "SELECT * FROM certificates WHERE artwork_id=?1 ORDER BY id".to_string(),
+        ],
+        "collector_id" => vec![
+            "SELECT * FROM collectors WHERE id=?1".to_string(),
+            "SELECT * FROM collector_images WHERE collector_id=?1 ORDER BY id".to_string(),
+        ],
+        _ => return Err("Tipo di eliminazione non valido".into()),
+    };
+    queries.extend([
+        format!("SELECT s.* FROM sales s WHERE s.{column}=?1 ORDER BY s.id"),
+        format!("SELECT r.* FROM sale_receipts r JOIN sales s ON s.id=r.sale_id WHERE s.{column}=?1 ORDER BY r.id"),
+        format!("SELECT t.* FROM sale_receipt_attachments t JOIN sale_receipts r ON r.id=t.receipt_id JOIN sales s ON s.id=r.sale_id WHERE s.{column}=?1 ORDER BY t.receipt_id"),
+        format!("SELECT a.* FROM sale_allocations a JOIN sales s ON s.id=a.sale_id WHERE s.{column}=?1 ORDER BY a.sale_id,a.part_id"),
+        format!("SELECT i.* FROM sale_installments i JOIN sales s ON s.id=i.sale_id WHERE s.{column}=?1 ORDER BY i.id"),
+        format!("SELECT f.* FROM sale_finances f JOIN sales s ON s.id=f.sale_id WHERE s.{column}=?1 ORDER BY f.sale_id"),
+        format!("SELECT a.id,a.title,c.id,c.name FROM sales s JOIN artworks a ON a.id=s.artwork_id JOIN collectors c ON c.id=s.collector_id WHERE s.{column}=?1 ORDER BY s.id"),
+    ]);
+    for sql in queries {
+        field(&mut digest, 3, sql.as_bytes());
+        let mut statement = conn.prepare(&sql).map_err(err)?;
+        let columns = statement.column_count();
+        let mut rows = statement.query(params![id]).map_err(err)?;
+        while let Some(row) = rows.next().map_err(err)? {
+            field(&mut digest, 4, &[]);
+            for index in 0..columns {
+                match row.get_ref(index).map_err(err)? {
+                    ValueRef::Null => field(&mut digest, 5, &[]),
+                    ValueRef::Integer(n) => field(&mut digest, 6, &n.to_le_bytes()),
+                    ValueRef::Real(n) => field(&mut digest, 7, &n.to_bits().to_le_bytes()),
+                    ValueRef::Text(bytes) => field(&mut digest, 8, bytes),
+                    ValueRef::Blob(bytes) => field(&mut digest, 9, bytes),
+                }
+            }
+        }
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+pub(crate) fn verify_revision(actual: &DeletionImpact, expected: Option<&str>) -> Result<(), String> {
+    if let Some(expected) = expected {
+        if expected != actual.revision {
+            return Err("L'archivio è cambiato: ripeti la conferma di eliminazione".into());
+        }
+    }
+    Ok(())
 }
 
 /// `column` is `artwork_id` or `collector_id` (never user input).
@@ -38,7 +105,7 @@ fn sales_of(conn: &Connection, column: &str, id: &str) -> Result<(Vec<SaleImpact
         let mut statement = conn.prepare(&format!(
             "SELECT a.title,c.name,s.amount_cents,s.sold_at FROM sales s
              JOIN artworks a ON a.id=s.artwork_id JOIN collectors c ON c.id=s.collector_id
-             WHERE s.{column}=?1 ORDER BY s.sold_at,s.created_at")).map_err(err)?;
+             WHERE s.{column}=?1 ORDER BY s.sold_at,s.created_at,s.id")).map_err(err)?;
         let rows = statement.query_map(params![id], |r| Ok(SaleImpact {
             artwork_title: r.get(0)?, collector_name: r.get(1)?, amount_cents: r.get(2)?, sold_at: r.get(3)? }))
             .map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
@@ -62,12 +129,12 @@ pub(crate) fn artwork_impact(conn: &Connection, id: &str) -> Result<DeletionImpa
         rows
     };
     let (sales, receipts, attachments) = sales_of(conn, "artwork_id", id)?;
-    Ok(DeletionImpact { certificates, sales, receipts, attachments })
+    Ok(DeletionImpact { certificates, sales, receipts, attachments, revision: deletion_revision(conn, "artwork_id", id)? })
 }
 
 pub(crate) fn collector_impact(conn: &Connection, id: &str) -> Result<DeletionImpact, String> {
     let (sales, receipts, attachments) = sales_of(conn, "collector_id", id)?;
-    Ok(DeletionImpact { certificates: vec![], sales, receipts, attachments })
+    Ok(DeletionImpact { certificates: vec![], sales, receipts, attachments, revision: deletion_revision(conn, "collector_id", id)? })
 }
 
 /// Delete the sales of an artwork or collector with their receipts and attachment records; the artwork of each
@@ -137,13 +204,19 @@ fn delete_certificate_core(db: &Database, id: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub fn artwork_deletion_impact(db: tauri::State<'_, Database>, id: String) -> Result<DeletionImpact, String> {
-    let conn = db.conn.lock().map_err(err)?;
-    artwork_impact(&conn, &id)
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let impact = artwork_impact(&tx, &id)?;
+    tx.commit().map_err(err)?;
+    Ok(impact)
 }
 #[tauri::command]
 pub fn collector_deletion_impact(db: tauri::State<'_, Database>, id: String) -> Result<DeletionImpact, String> {
-    let conn = db.conn.lock().map_err(err)?;
-    collector_impact(&conn, &id)
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let impact = collector_impact(&tx, &id)?;
+    tx.commit().map_err(err)?;
+    Ok(impact)
 }
 /// A certificate can be deleted at any time: the artwork and its sale are not touched.
 #[tauri::command]
@@ -193,6 +266,48 @@ mod tests {
         assert_eq!(collector.sales.len(), 1);
         assert!(collector.certificates.is_empty());
         assert!(artwork_impact(&conn, "b").unwrap().is_empty());
+    }
+
+    #[test]
+    fn native_consent_rejects_same_count_receipt_changes_and_keeps_files() {
+        let (dir, db) = fixture();
+        let (artwork, collector) = {
+            let conn = db.conn.lock().unwrap();
+            (artwork_impact(&conn, "a").unwrap(), collector_impact(&conn, "c").unwrap())
+        };
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE sale_receipts SET amount_cents=21000 WHERE id='r'", []).unwrap();
+            let changed = artwork_impact(&conn, "a").unwrap();
+            assert_eq!(changed.sales, artwork.sales);
+            assert_eq!(changed.receipts, artwork.receipts);
+            assert_eq!(changed.attachments, artwork.attachments);
+            assert_ne!(changed.revision, artwork.revision);
+        }
+        assert!(crate::commands::delete_artwork_checked(&db, "a", true, Some(&artwork.revision)).is_err());
+        assert!(crate::collectors::delete_collector_checked(&db, "c", true, Some(&collector.revision)).is_err());
+        assert!(crate::commands::delete_artwork_checked(&db, "a", true, Some("")).is_err());
+        assert_eq!((count(&db, "artworks"), count(&db, "collectors"), count(&db, "sales"), count(&db, "certificates")), (2, 1, 1, 1));
+        assert_eq!((count(&db, "sale_receipts"), count(&db, "sale_receipt_attachments")), (1, 1));
+        assert!(dir.path().join("media/receipt.pdf").exists());
+        let current = { let conn = db.conn.lock().unwrap(); artwork_impact(&conn, "a").unwrap().revision };
+        crate::commands::delete_artwork_checked(&db, "a", true, Some(&current)).unwrap();
+        assert_eq!(count(&db, "sales"), 0);
+        assert!(!dir.path().join("media/receipt.pdf").exists());
+    }
+
+    #[test]
+    fn native_consent_binds_target_and_accepts_unchanged_collector() {
+        let (_dir, db) = fixture();
+        let (a, b, collector) = {
+            let conn = db.conn.lock().unwrap();
+            (artwork_impact(&conn, "a").unwrap(), artwork_impact(&conn, "b").unwrap(), collector_impact(&conn, "c").unwrap())
+        };
+        assert_ne!(a.revision, b.revision);
+        assert!(crate::commands::delete_artwork_checked(&db, "b", false, Some(&a.revision)).is_err());
+        assert_eq!(count(&db, "artworks"), 2);
+        crate::collectors::delete_collector_checked(&db, "c", true, Some(&collector.revision)).unwrap();
+        assert_eq!((count(&db, "collectors"), count(&db, "sales")), (0, 0));
     }
 
     #[test]

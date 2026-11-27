@@ -1273,7 +1273,7 @@ export class AppComponent implements OnInit {
     const current = () => this.artworks.includes(a);
     if (await this.confirmImpactDeletion(current, async () => [await api.artworkDeletionImpact(a.id)],
       async ([impact]) => await confirmed(artworkDeletionMessage(a.title, impact, this.formatters())),
-      async (impact) => api.deleteArtwork(a.id, hasDependents(impact)), 'Opera eliminata')) delete this.thumbnails[a.id];
+      async (impact) => api.deleteArtwork(a.id, hasDependents(impact), impact.revision ?? ''), 'Opera eliminata')) delete this.thumbnails[a.id];
   }
 
   /** One confirmation for the whole selection, then the records are deleted one after the other. */
@@ -1293,7 +1293,7 @@ export class AppComponent implements OnInit {
     const current = () => { const picked = this.pickedArtworks; return picked.length === items.length && items.every((a, i) => picked[i] === a); };
     if (await this.confirmImpactDeletion(current, () => Promise.all(items.map(a => api.artworkDeletionImpact(a.id))),
       async impacts => await confirmed(bulkDeletionMessage('artworks', items.map(a => a.title), mergeImpacts(impacts), this.formatters())),
-      async (impact, i) => api.deleteArtwork(items[i].id, hasDependents(impact)), 'Opere eliminate')) {
+      async (impact, i) => api.deleteArtwork(items[i].id, hasDependents(impact), impact.revision ?? ''), 'Opere eliminate')) {
       items.forEach(a => { delete this.thumbnails[a.id]; this.selectedArtworkIds.delete(a.id); });
     }
   }
@@ -1303,7 +1303,7 @@ export class AppComponent implements OnInit {
     const current = () => { const picked = this.pickedCollectors; return picked.length === items.length && items.every((c, i) => picked[i] === c); };
     if (await this.confirmImpactDeletion(current, () => Promise.all(items.map(c => api.collectorDeletionImpact(c.id))),
       async impacts => await confirmed(bulkDeletionMessage('collectors', items.map(c => c.name), mergeImpacts(impacts), this.formatters())),
-      async (impact, i) => api.deleteCollector(items[i].id, impact.sales.length > 0), 'Contatti eliminati')) {
+      async (impact, i) => api.deleteCollector(items[i].id, impact.sales.length > 0, impact.revision ?? ''), 'Contatti eliminati')) {
       items.forEach(c => this.selectedCollectorIds.delete(c.id));
     }
   }
@@ -1613,7 +1613,7 @@ export class AppComponent implements OnInit {
     const current = () => this.collectors.includes(c);
     await this.confirmImpactDeletion(current, async () => [await api.collectorDeletionImpact(c.id)],
       async ([impact]) => await confirmed(collectorDeletionMessage(c.name, impact, this.formatters())),
-      async (impact) => api.deleteCollector(c.id, impact.sales.length > 0), 'Collezionista eliminato');
+      async (impact) => api.deleteCollector(c.id, impact.sales.length > 0, impact.revision ?? ''), 'Collezionista eliminato');
   }
 
   recalculateDefaultSaleTax(): void {

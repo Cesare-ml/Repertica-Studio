@@ -48,8 +48,8 @@ test('a collector with sales is warned that the sales are deleted too', () => {
 
 test('the interface asks for the impact first and only cascades what was shown', () => {
   const app = get('src/app/app.component.ts');
-  assert.match(app, /api\.artworkDeletionImpact\(a\.id\)[\s\S]*await confirmed\(artworkDeletionMessage[\s\S]*api\.deleteArtwork\(a\.id, hasDependents\(impact\)\)/);
-  assert.match(app, /api\.collectorDeletionImpact\(c\.id\)[\s\S]*await confirmed\(collectorDeletionMessage[\s\S]*api\.deleteCollector\(c\.id, impact\.sales\.length > 0\)/);
+  assert.match(app, /api\.artworkDeletionImpact\(a\.id\)[\s\S]*await confirmed\(artworkDeletionMessage[\s\S]*api\.deleteArtwork\(a\.id, hasDependents\(impact\), impact\.revision \?\? ''\)/);
+  assert.match(app, /api\.collectorDeletionImpact\(c\.id\)[\s\S]*await confirmed\(collectorDeletionMessage[\s\S]*api\.deleteCollector\(c\.id, impact\.sales\.length > 0, impact\.revision \?\? ''\)/);
   assert.match(app, /api\.deleteCertificate\(c\.id\)/);
   assert.match(get('src/app/app.component.html'), /\(click\)="deleteCertificate\(c\)"/);
 });
@@ -133,10 +133,10 @@ async function cascadeScenario(source, action, scenario, askNative) {
     if (scenario === 'read-error') throw Error('read error');
     if (scenario === 'delayed-read' && reads === 1) await new Promise(resolve=>{releaseRead=resolve;});
     if (scenario === 'recheck-error' && changed) throw Error('recheck error');
-    return { certificates: artwork ? ['RS-'+id] : [], sales: artwork ? [] : [sale], receipts: changed && scenario === 'impact' ? 1 : 0, attachments: 0 };
+    return { certificates: artwork ? ['RS-'+id] : [], sales: artwork ? [] : [sale], receipts: changed && scenario === 'impact' ? 1 : 0, attachments: 0, revision: changed && scenario === 'revision' ? 'changed-'+id : 'revision-'+id };
   };
-  const remove = async (id, cascade) => {
-    calls.push([id,cascade]);
+  const remove = async (id, cascade, revision) => {
+    calls.push([id,cascade,revision]);
     if (scenario === 'write-error' && (id === 'B' || !bulk)) throw Error('write error');
   };
   const api = { artworkDeletionImpact:read,collectorDeletionImpact:read,deleteArtwork:remove,deleteCollector:remove };
@@ -171,7 +171,7 @@ async function cascadeScenario(source, action, scenario, askNative) {
     await pending;
   }
   const invoked = ['accept','double','delayed-read','write-error'].includes(scenario);
-  assert.deepEqual(calls,invoked?(bulk?[['A',true],['B',true]]:[['A',true]]):[]);
+  assert.deepEqual(calls,invoked?(bulk?[['A',true,'revision-A'],['B',true,'revision-B']]:[['A',true,'revision-A']]):[]);
   assert.equal(ctx.busy,scenario==='busy');
   assert.equal(refreshes,invoked?1:0);
   if (scenario.endsWith('error')) assert.ok(ctx.errorMessage);
@@ -181,7 +181,7 @@ async function cascadeScenario(source, action, scenario, askNative) {
   }
 }
 for (const action of ['deleteArtwork','deleteCollector','deleteSelectedArtworks','deleteSelectedCollectors']) {
-  for (const scenario of ['accept','cancel','reject','selection','impact','busy','double','delayed-read','read-error','recheck-error','write-error']) {
+  for (const scenario of ['accept','cancel','reject','selection','impact','revision','busy','double','delayed-read','read-error','recheck-error','write-error']) {
     test('cascade consent: '+action+' / '+scenario, async () => {
       try { await cascadeScenario(get('src/app/app.component.ts'),action,scenario,(message,dialog)=>{
         globalThis.window={confirm:dialog};
