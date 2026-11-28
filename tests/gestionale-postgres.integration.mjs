@@ -60,6 +60,7 @@ INSERT INTO vendite_incassi VALUES (30,20,0.29,'2024-03-01','Bonifico','syntheti
 INSERT INTO vendite_scadenze VALUES
  (41,21,1,40.25,'2024-03-31','first'),(42,21,2,60,'2024-04-30',NULL);
 CREATE ROLE fixture_reader LOGIN;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO fixture_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO fixture_reader;
 `;
@@ -68,18 +69,26 @@ test('real PostgreSQL local exporters preserve explicit finance and reject unsaf
   assert.notEqual(process.getuid?.(),0,'initdb must run as a non-root user');
   const root=await mkdtemp('/tmp/repertica-pg-');
   const data=join(root,'data'),socket=join(root,'socket'),log=join(root,'postgres.log');
-  let started=false;
+  let initialized=false;
   try {
     await mkdir(socket,{mode:0o700});
     const port=await freePort();
     // Only the disposable cluster listens on loopback; use its private Unix socket
     // for all setup and mutations. A failed bind aborts before the exporters run.
     command('initdb',['-D',data,'-U','fixture_admin','--auth-local=trust','--auth-host=trust','--encoding=UTF8','--no-locale']);
+    initialized=true;
+    // The admin may connect only through the private socket. TCP trust is
+    // restricted to the SELECT-only fixture role and synthetic database.
+    await writeFile(join(data,'pg_hba.conf'),
+      'local all fixture_admin trust\nhost postgres fixture_reader 127.0.0.1/32 trust\n');
     command('pg_ctl',['-D',data,'-l',log,'-o','-h 127.0.0.1 -p '+port+' -k '+socket,'-w','-t','15','start']);
-    started=true;
     const admin=['-X','-w','-qAt','-h',socket,'-p',port,'-U','fixture_admin','-d','postgres','-v','ON_ERROR_STOP=1'];
     const sql=input=>command('psql',admin,input);
     sql(schema);
+    const denied=spawnSync('psql',['-X','-w','-qAt','-h','127.0.0.1','-p',port,'-U','fixture_admin','-d','postgres','-c','SELECT 1'],{env,encoding:'utf8',timeout:5000});
+    assert.ifError(denied.error);
+    assert.notEqual(denied.status,0,'admin TCP connection must be denied');
+    assert.equal(sql("SELECT has_table_privilege('fixture_reader','public.opere','SELECT'),has_table_privilege('fixture_reader','public.opere','UPDATE');").trim(),'t|f');
     const meta=join(root,'metadata.json'),relations=join(root,'relations.json'),shares=join(root,'shares.json');
     const allShares=['PG-2','PG-3'].map(artwork_code=>({artwork_code,legacy_shares_bp:[5000,3000,2000]}));
     await writeFile(shares,JSON.stringify(allShares));
@@ -135,8 +144,14 @@ test('real PostgreSQL local exporters preserve explicit finance and reject unsaf
     assert.equal(sql('SELECT count(*) FROM opere;').trim(),'6');
     assert.equal(sql('SELECT count(*) FROM vendite;').trim(),'4');
   } finally {
-    try {
-      if(started) command('pg_ctl',['-D',data,'-m','fast','-w','-t','15','stop']);
-    } finally { await rm(root,{recursive:true,force:true}); }
+    // A timed-out startup can still leave a server running. Stop the exact
+    // temporary data directory before removal, and never remove live data.
+    if(initialized) {
+      const status=spawnSync('pg_ctl',['-D',data,'status'],{env,encoding:'utf8',timeout:5000});
+      assert.ifError(status.error);
+      if(status.status===0) command('pg_ctl',['-D',data,'-m','fast','-w','-t','15','stop']);
+      else assert.equal(status.status,3,'could not verify temporary server stopped');
+    }
+    await rm(root,{recursive:true,force:true});
   }
 });
