@@ -23,19 +23,27 @@ export type PriceMode = 'auto' | 'coefficient' | 'fixed';
 /** Sizes used to show what a coefficient means (width × height in cm). */
 export const EXAMPLE_SIZES: readonly { width: number; height: number }[] = [{ width: 30, height: 40 }, { width: 90, height: 120 }];
 
+const MAX_PRICE_CENTS = 100_000_000_000;
 const valid = (n: number | null | undefined): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 100_000;
+const validFixed = (value: number | null | undefined): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= MAX_PRICE_CENTS;
 
 export function priceOf(width: number | null | undefined, height: number | null | undefined, rules: PriceRules,
   ownCoefficient: number | null | undefined, fixedPriceCents: number | null | undefined): Price {
-  const own = valid(ownCoefficient) ? ownCoefficient : null;
+  const own = ownCoefficient ?? null;
   const coefficient = own ?? rules.artistCoefficient;
-  if (typeof fixedPriceCents === 'number' && Number.isFinite(fixedPriceCents) && fixedPriceCents >= 0) {
-    return { cents: Math.round(fixedPriceCents), source: 'fixed', coefficient };
+  // A corrupt/imported fixed amount must not silently fall back to a calculated
+  // estimate. Keep its selected mode visible, but refuse to display false cents.
+  if (fixedPriceCents !== null && fixedPriceCents !== undefined) {
+    return { cents: validFixed(fixedPriceCents) ? fixedPriceCents : null, source: 'fixed', coefficient };
   }
   const source: PriceSource = own !== null ? 'own' : 'artist';
-  if (!valid(width) || !valid(height)) return { cents: null, source, coefficient };
+  if (!valid(width) || !valid(height) || !valid(coefficient)
+    || !Number.isSafeInteger(rules.rateCm2Cents) || rules.rateCm2Cents < 0 || rules.rateCm2Cents > 100_000) {
+    return { cents: null, source, coefficient };
+  }
   const cents = width * height * rules.rateCm2Cents * coefficient;
-  return { cents: Number.isFinite(cents) && cents <= 100_000_000_000 ? Math.round(cents) : null, source, coefficient };
+  return { cents: Number.isFinite(cents) && cents >= 0 && cents <= MAX_PRICE_CENTS ? Math.round(cents) : null, source, coefficient };
 }
 
 /** Which way of setting the price an artwork currently uses. */
@@ -59,9 +67,26 @@ export function priceFieldsFor(mode: PriceMode, ownCoefficient: number | null, f
       : { error: 'Inserisci un coefficiente maggiore di zero oppure scegli un altro modo di calcolare il prezzo' };
   }
   if (mode === 'fixed') {
-    return typeof fixedPriceCents === 'number' && Number.isFinite(fixedPriceCents) && fixedPriceCents >= 0 && fixedPriceCents <= 100_000_000_000
-      ? { artist_coefficient_override: null, fixed_price_cents: Math.round(fixedPriceCents) }
+    return validFixed(fixedPriceCents)
+      ? { artist_coefficient_override: null, fixed_price_cents: fixedPriceCents }
       : { error: 'Inserisci il prezzo fisso oppure scegli un altro modo di calcolare il prezzo' };
   }
   return { artist_coefficient_override: null, fixed_price_cents: null };
+}
+
+/** The editor's selected mode is authoritative even when its input is empty. */
+export function draftPriceFor(mode: PriceMode, width: number | null | undefined, height: number | null | undefined,
+  rules: PriceRules, ownCoefficient: number | null, fixedPriceCents: number | null): Price {
+  const fields = priceFieldsFor(mode, ownCoefficient, fixedPriceCents);
+  if ('error' in fields) {
+    return { cents: null, source: mode === 'fixed' ? 'fixed' : 'own', coefficient: ownCoefficient ?? rules.artistCoefficient };
+  }
+  return priceOf(width, height, rules, fields.artist_coefficient_override, fields.fixed_price_cents);
+}
+
+/** Reject out-of-range euro input before rounding (including negative sub-cent amounts). */
+export function fixedPriceCentsFromEuros(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_PRICE_CENTS / 100) return null;
+  const cents = Math.round(value * 100);
+  return validFixed(cents) ? cents : null;
 }
