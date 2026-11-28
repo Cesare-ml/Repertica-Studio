@@ -9,6 +9,7 @@ mod collectors;
 mod commands;
 pub mod db;
 mod export;
+mod archive_import;
 mod finance;
 mod gallery;
 mod imaging;
@@ -125,6 +126,11 @@ pub fn run() {
             receipt_attachments::remove_sale_receipt_attachment,
             receipt_attachments::export_sale_receipt_attachment,
             export::export_ledger_csv,
+            archive_import::preview_artwork_metadata,
+            archive_import::import_artwork_metadata,
+            archive_import::batches::preflight_archive_batches,
+            archive_import::batches::review_archive_batch,
+            archive_import::batches::commit_archive_batch,
             mcp::mcp_setup_info,
             mcp_client::mcp_clients_status,
             mcp_client::mcp_client_configure,

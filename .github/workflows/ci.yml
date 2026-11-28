@@ -13,6 +13,13 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npm run test:unit
+      - name: Real PostgreSQL local export (disposable cluster)
+        run: |
+          set -eu
+          pg_bin="$(find /usr/lib/postgresql -path '*/bin/initdb' -type f | sort -V | tail -n 1)"
+          test -n "$pg_bin"
+          export PATH="$(dirname "$pg_bin"):$PATH"
+          node --test tests/gestionale-postgres.integration.mjs
   rust:
     runs-on: ubuntu-22.04
     steps:
@@ -26,6 +33,13 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run prepare:icons
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: PostgreSQL export to native SQLite import, backup and restore
+        run: |
+          set -eu
+          pg_bin="$(find /usr/lib/postgresql -path '*/bin/initdb' -type f | sort -V | tail -n 1)"
+          test -n "$pg_bin"
+          export PATH="$(dirname "$pg_bin"):$PATH"
+          REPERTICA_TEST_NATIVE_ROUNDTRIP=1 node --test tests/gestionale-postgres.integration.mjs
   # Windows has different filesystem semantics (open handles block directory renames,
   # canonical paths use the \\?\ prefix); backup and restore must be tested there too.
   rust-windows:

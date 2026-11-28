@@ -7,6 +7,8 @@ import { locale as osLocale } from '@tauri-apps/plugin-os';
 import { AppLanguage, chooseLanguage, translate } from './i18n';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { api } from './api';
+import { readImportFile, importErrorParts, type ArtworkMetadataPreview } from './artwork-metadata-import';
+import { BatchImportSession, type BatchProgress } from './archive-batch-progress';
 import { csvRegisterOptions, type CsvRegisterKind } from './csv-registers';
 import { PaymentPlanComponent } from './payment-plan.component';
 import { MediaCenterComponent } from './media-center.component';
@@ -225,6 +227,9 @@ export class AppComponent implements OnInit {
   galleryCaption = '';
   galleryKind: PhotoKind = 'OTHER';
   readonly photoKinds = PHOTO_KINDS;
+  importPhotoKindLabel(kind: string): string {
+    return this.tr(this.photoKinds.find(item => item.code === kind)?.label ?? kind);
+  }
   editingGalleryCaptionId: string | null = null;
   editingGalleryCaption = '';
   artworkDialog = false;
@@ -410,6 +415,7 @@ export class AppComponent implements OnInit {
     this.navigate('mail');
   }
   navigate(section: Section): void {
+    if (section !== 'settings') this.clearMetadataImport();
     this.section = section;
     this.mediaOpenId = null;
     this.search = '';
@@ -655,6 +661,153 @@ export class AppComponent implements OnInit {
       this.lastBackup = await api.createBackup(this.backupDestination);
     }, 'Backup completato e verificato. Conserva la cartella risultante in un luogo sicuro.');
   }
+  private readonly batchSession = new BatchImportSession<ArtworkMetadataPreview>({
+    preflight: api.preflightArchiveBatches,
+    review: api.reviewArchiveBatch,
+    commit: api.commitArchiveBatch
+  });
+  batchState: BatchProgress | null = null;
+  batchPreview: ArtworkMetadataPreview | null = null;
+  batchError = '';
+
+  private syncBatch(): void {
+    this.batchState = this.batchSession.state;
+    this.batchPreview = this.batchSession.preview;
+  }
+  private async batchAction(action: () => Promise<void>): Promise<void> {
+    if (this.busy || !this.initialized) return;
+    this.busy = true;
+    this.batchError = '';
+    try { await action(); }
+    catch { this.batchError = this.tr('Verifica del pacchetto non riuscita. Controlla la cartella e l’archivio.'); }
+    finally {
+      this.syncBatch();
+      this.busy = false;
+      this.change.detectChanges();
+    }
+  }
+  async chooseBatchFolder(): Promise<void> {
+    if (this.batchState || this.metadataImportUnknown) return;
+    await this.batchAction(async () => {
+      const directory = await open({directory:true, multiple:false, title:this.tr('Scegli cartella di migrazione')});
+      if (typeof directory !== 'string') return;
+      this.clearMetadataImport();
+      await this.batchSession.start(directory);
+    });
+  }
+  async reviewNextBatch(): Promise<void> {
+    if (this.batchState?.phase !== 'review') return;
+    await this.batchAction(() => this.batchSession.reviewNext());
+  }
+  async confirmReviewedBatch(): Promise<void> {
+    if (this.busy || !this.initialized || this.batchState?.phase !== 'confirm') return;
+    const state = this.batchState, preview = this.batchPreview, section = this.section;
+    if (!preview || !(await confirmed(this.tr('Importare solo il pacchetto in anteprima? I pacchetti già importati non saranno annullati.')))) return;
+    if (this.busy || !this.initialized || this.batchState !== state || this.batchPreview !== preview || this.section !== section) return;
+    await this.batchAction(async () => {
+      await this.batchSession.commitReviewed();
+      // Refresh even after a lost IPC response: the database may have changed.
+      this.syncBatch();
+      await this.refresh();
+    });
+  }
+  stopBatchImport(): void {
+    if (this.busy || !['review','confirm'].includes(this.batchState?.phase ?? '')) return;
+    this.batchSession.stop();
+    this.batchError = '';
+    this.syncBatch();
+  }
+  async resetBatchImport(): Promise<void> {
+    if (this.busy || !this.batchState) return;
+    const state = this.batchState, section = this.section;
+    const phase = state.phase;
+    if (!['complete','stopped','unknown'].includes(phase)) return;
+    if (phase === 'unknown' && !(await confirmed(this.tr('Ho controllato manualmente l’archivio e non ripeterò alla cieca il pacchetto incerto.')))) return;
+    if (this.busy || this.batchState !== state || this.section !== section) return;
+    this.batchSession.reset(phase === 'unknown');
+    this.batchError = '';
+    this.syncBatch();
+  }
+
+  metadataImport: ArtworkMetadataPreview | null = null;
+  private metadataSource: string | null = null;
+  metadataImportError = '';
+  metadataImported: number | null = null;
+  metadataImportUnknown = false;
+
+  clearMetadataImport(): void {
+    this.metadataImport = null;
+    this.metadataSource = null;
+    this.metadataImportError = '';
+    this.metadataImported = null;
+  }
+  private showMetadataImportError(error: unknown): void {
+    const {key, row} = importErrorParts(error);
+    const labels: Record<string,string> = {
+      size: 'Il file supera 16 MiB.',
+      format: 'Formato JSON di importazione non valido.',
+      count: 'Il file deve contenere da 1 a 1000 opere.',
+      invalid_row: 'Dati opera non validi. Riga:',
+      duplicate: 'Codice opera già presente. Riga:',
+      changed: 'Il contenuto è cambiato. Ripeti l’anteprima.',
+      relations: 'Relazioni o dati commerciali non validi o non supportati.',
+      collector_conflict: 'Collezionista già presente o ambiguo: nessuna fusione automatica.',
+      database: 'Importazione non riuscita. Verifica l’archivio e ripeti l’anteprima.'
+    };
+    this.metadataImportError = this.tr(labels[key]) + (row ? ' ' + row : '');
+  }
+  async chooseMetadataImport(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file || this.busy || !this.initialized || this.batchState || this.metadataImportUnknown) return;
+    this.clearMetadataImport();
+    this.busy = true;
+    try {
+      const source = await readImportFile(file);
+      const preview = await api.previewArtworkMetadata(source);
+      if (this.section === 'settings') {
+        this.metadataSource = source;
+        this.metadataImport = preview;
+      }
+    } catch (error) { this.showMetadataImportError(error); }
+    finally { this.busy = false; this.change.detectChanges(); }
+  }
+  async confirmMetadataImport(): Promise<void> {
+    if (this.busy || !this.initialized || this.batchState || this.metadataImportUnknown || !this.metadataImport || this.metadataSource === null) return;
+    const source = this.metadataSource, preview = this.metadataImport, section = this.section;
+    const digest = preview.digest;
+    if (!(await confirmed(this.tr('Importare tutti i record in anteprima? Nessun record esistente sarà sostituito.')))) return;
+    if (this.busy || !this.initialized || this.batchState || this.metadataImportUnknown || this.metadataSource !== source || this.metadataImport !== preview || this.section !== section) return;
+    this.busy = true;
+    this.clearMetadataImport();
+    try {
+      // A rejected IPC or inconsistent acknowledgement can hide a committed write.
+      try {
+        const count = await api.importArtworkMetadata(source, digest);
+        if (count === preview.artworks.length && Number.isSafeInteger(count) && count > 0) {
+          this.metadataImported = count;
+        } else {
+          this.metadataImportUnknown = true;
+        }
+      } catch {
+        this.metadataImportUnknown = true;
+      }
+      // Refresh even on an uncertain reply, without losing an acknowledged success.
+      try { await this.refresh(); }
+      catch (error) { this.errorMessage = this.error(error); }
+    } finally { this.busy = false; this.change.detectChanges(); }
+  }
+
+  async acknowledgeMetadataImport(): Promise<void> {
+    if (this.busy || !this.initialized || !this.metadataImportUnknown) return;
+    const section = this.section;
+    if (!(await confirmed(this.tr('Ho controllato manualmente l’archivio e non ripeterò alla cieca il pacchetto incerto.')))) return;
+    if (this.busy || !this.initialized || !this.metadataImportUnknown || this.section !== section) return;
+    this.metadataImportUnknown = false;
+    this.change.detectChanges();
+  }
+
   async exportLedger(kind: CsvRegisterKind): Promise<void> {
     if (this.busy || !this.initialized) return;
     const option = csvRegisterOptions[kind];
@@ -693,11 +846,12 @@ export class AppComponent implements OnInit {
     }
   }
   async restoreSelectedBackup(): Promise<void> {
-    if (this.busy || !this.restoreCandidate) return;
-    const candidate = this.restoreCandidate;
+    if (this.busy || this.batchState || !this.restoreCandidate || this.metadataImportUnknown) return;
+    const candidate = this.restoreCandidate, preview = this.metadataImport, source = this.metadataSource;
     if (!(await confirmed('RIPRISTINO ARCHIVIO\n\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\n\nContinuare?'))) return;
-    // The native dialog is asynchronous: the inspected backup or operation may have changed.
-    if (this.busy || this.restoreCandidate !== candidate) return;
+    // A new backup, import preview or batch may have been selected while the dialog was open.
+    if (this.busy || this.batchState || this.metadataImportUnknown || this.restoreCandidate !== candidate || this.metadataImport !== preview || this.metadataSource !== source) return;
+    if (preview != null || source != null) this.clearMetadataImport();
     this.busy = true; this.errorMessage = ''; this.notice = '';
     try {
       this.lastRestore = await api.restoreBackup(candidate.directory);

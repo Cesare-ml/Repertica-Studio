@@ -481,6 +481,7 @@
         <div class="backup-block">
           <h3>{{ tr('Ripristina o trasferisci un archivio') }}</h3>
           <p>{{ tr('Puoi utilizzare un backup creato su questo computer o proveniente da un altro archivio Repertica Studio compatibile.') }}</p>
+          <p class="hint" *ngIf="batchState || metadataImportUnknown">{{ tr('Chiudi la sessione di importazione prima di ripristinare un backup.') }}</p>
           <div class="backup-actions">
             <button type="button" class="secondary action-glyph action-glyph--folder" (click)="chooseRestoreFolder()" [disabled]="busy || !initialized">{{ tr('Seleziona backup da verificare…') }}</button>
           </div>
@@ -489,13 +490,80 @@
             <p>{{ date(restoreCandidate.createdAt) }} · {{ restoreCandidate.artworks }} opere · {{ restoreCandidate.collectors }} collezionisti · {{ bytes(restoreCandidate.totalBytes) }}</p>
             <code class="path">{{ restoreCandidate.directory }}</code>
             <p class="warning">{{ tr('Il ripristino sostituisce l\'archivio attuale. Repertica conserverà prima una copia dell\'archivio presente, senza cancellarla.') }}</p>
-            <button type="button" class="primary action-glyph action-glyph--restore" (click)="restoreSelectedBackup()" [disabled]="busy">{{ tr('Conferma ripristino') }}</button>
+            <button type="button" class="primary action-glyph action-glyph--restore" (click)="restoreSelectedBackup()" [disabled]="busy || !!batchState || metadataImportUnknown">{{ tr('Conferma ripristino') }}</button>
           </div>
           <p class="backup-note">{{ tr('Prima di eliminare una vecchia copia, verifica di riuscire ad aprire e utilizzare l\'archivio ripristinato.') }}</p>
         </div>
       </div>
       <div class="settings-tab" *ngIf="settingsTab === 'export'" role="tabpanel" [attr.aria-labelledby]="'settings-tab-export'">
         <header class="settings-head"><h3>{{ tr(settingsTabInfo('export').title) }}</h3><p>{{ tr(settingsTabInfo('export').description) }}</p></header>
+        <div class="backup-block">
+          <h3>{{ tr('Importazione opere JSON') }}</h3>
+          <p>{{ tr('Importa metadati oppure opere con collezionisti, vendite, incassi documentati e piccole foto di copertina. Non è un ripristino di backup.') }}</p>
+          <p class="hint">{{ tr('Formati v1 metadati e v2 relazioni; massimo 16 MiB e 1000 opere.') }}</p>
+          <label class="settings-input" *ngIf="!batchState && !metadataImportUnknown">
+            <span>{{ tr('Seleziona il file JSON') }}</span>
+            <input type="file" accept=".json,application/json" (change)="chooseMetadataImport($event)" [disabled]="busy || !initialized">
+          </label>
+          <p role="alert" *ngIf="metadataImportError">{{ metadataImportError }}</p>
+          <div *ngIf="metadataImportUnknown">
+            <p role="alert">{{ tr('Esito incerto: il pacchetto potrebbe essere già stato importato. Controlla l’archivio prima di proseguire.') }}</p>
+            <button type="button" class="secondary" (click)="acknowledgeMetadataImport()" [disabled]="busy || !initialized">{{ tr('Chiudi sessione di importazione') }}</button>
+          </div>
+          <p role="status" *ngIf="metadataImported !== null">{{ tr('Opere importate:') }} {{ metadataImported }}</p>
+          <div>
+            <button type="button" class="secondary" *ngIf="!batchState && !metadataImportUnknown" (click)="chooseBatchFolder()" [disabled]="busy || !initialized">{{ tr('Scegli cartella di migrazione') }}</button>
+            <p>{{ tr('Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.') }}</p>
+            <p role="alert" *ngIf="batchError">{{ batchError }}</p>
+            <div *ngIf="batchState as batch">
+              <p role="status">{{ tr('Pacchetti confermati:') }} {{ batch.next }} / {{ batch.packages.length }} · {{ tr('Opere importate:') }} {{ batch.imported }}</p>
+              <p *ngIf="batch.phase === 'review' || batch.phase === 'confirm' || batch.phase === 'committing'">{{ tr('Pacchetto corrente:') }} {{ batch.next + 1 }} / {{ batch.packages.length }}</p>
+              <p role="status" *ngIf="batch.phase === 'complete'">{{ tr('Importazione della cartella completata.') }}</p>
+              <p role="status" *ngIf="batch.phase === 'stopped'">{{ tr('Importazione interrotta. Le opere confermate restano nell’archivio.') }}</p>
+              <p role="alert" *ngIf="batch.phase === 'unknown'">{{ tr('Esito incerto: il pacchetto potrebbe essere già stato importato. Controlla l’archivio prima di proseguire.') }}</p>
+              <button type="button" class="primary" *ngIf="batch.phase === 'review'" (click)="reviewNextBatch()" [disabled]="busy">{{ tr('Verifica il prossimo pacchetto') }}</button>
+              <button type="button" class="secondary" *ngIf="batch.phase === 'review' || batch.phase === 'confirm'" (click)="stopBatchImport()" [disabled]="busy">{{ tr('Interrompi importazione') }}</button>
+              <button type="button" class="secondary" *ngIf="batch.phase === 'complete' || batch.phase === 'stopped' || batch.phase === 'unknown'" (click)="resetBatchImport()" [disabled]="busy">{{ tr('Chiudi sessione di importazione') }}</button>
+            </div>
+          </div>
+          <div *ngIf="(batchPreview || metadataImport) as plan">
+            <p><strong>{{ tr('Anteprima: opere da importare') }}: {{ plan.artworks.length }}</strong></p>
+            <div style="max-height: 16rem; overflow: auto">
+              <ul><li *ngFor="let row of plan.artworks">{{ row.code }} — {{ row.title }} <span *ngIf="row.year">({{ row.year }})</span> · {{ tr(row.status === 'available' ? 'Disponibile' : row.status === 'reserved' ? 'Riservata' : row.status === 'sold' ? 'Venduta' : 'In archivio') }}</li></ul>
+            </div>
+            <div *ngIf="plan.covers.length">
+              <ul style="max-height: 12rem; overflow: auto"><li *ngFor="let c of plan.covers">{{ tr(c.position === 0 ? 'Copertina di' : 'Galleria di') }} {{ c.artwork_code }}<span *ngIf="c.position > 0"> · #{{ c.position }} · {{ importPhotoKindLabel(c.kind) }}<span *ngIf="c.caption"> · {{ c.caption }}</span></span> · {{ c.size_bytes }} B · SHA-256: <code style="overflow-wrap: anywhere">{{ c.sha256 }}</code></li></ul>
+            </div>
+            <div *ngIf="plan.collectors.length || plan.sales.length">
+              <p>{{ tr('Nuovi collezionisti') }}: {{ plan.collectors.length }} · {{ tr('Vendite') }}: {{ plan.sales.length }}</p>
+              <p>{{ tr('I contatti sono nuovi: nessuna fusione automatica. Sono ammessi solo piani rateali senza incassi; nessuna ripartizione storica attiva.') }}</p>
+              <div style="max-height: 16rem; overflow: auto">
+                <ul><li *ngFor="let c of plan.collectors">{{ c.key }} — {{ c.first_name }} {{ c.last_name }} <span *ngIf="c.email">({{ c.email }})</span>
+                  <div *ngIf="c.birth_date">{{ tr('Data di nascita') }}: {{ c.birth_date }}</div>
+                  <div *ngIf="c.birth_time">{{ tr('Ora di nascita') }}: {{ c.birth_time }}</div>
+                  <div *ngIf="c.birth_place">{{ tr('Luogo di nascita') }}: {{ c.birth_place }}</div>
+                  <div *ngIf="c.instagram">Instagram: {{ c.instagram }}</div>
+                  <div *ngIf="c.facebook">Facebook: {{ c.facebook }}</div>
+                  <div *ngIf="c.tiktok">TikTok: {{ c.tiktok }}</div>
+                  <div *ngIf="c.website">{{ tr('Sito web') }}: {{ c.website }}</div>
+                  <div *ngIf="c.linkedin">LinkedIn: {{ c.linkedin }}</div>
+                </li></ul>
+                <ul><li *ngFor="let sale of plan.sales">{{ sale.artwork_code }} → {{ sale.collector_key }} · {{ sale.sold_at }} · {{ sale.amount_cents / 100 }} EUR
+                  · {{ tr('Imposte importate') }}: {{ sale.tax_cents / 100 }} EUR · {{ tr('Spedizione importata') }}: {{ sale.shipping_cents / 100 }} EUR
+                  · {{ tr('Incassi registrati') }}: {{ sale.receipts.length }}
+                  <ul><li *ngFor="let receipt of sale.receipts">{{ receipt.received_at }} · {{ receipt.amount_cents / 100 }} EUR</li></ul>
+                  <div *ngIf="sale.installments.length">
+                    <p>{{ tr('Piano rateale') }}: {{ sale.installments.length }}</p>
+                    <ul><li *ngFor="let item of sale.installments">{{ tr('Rata') }} {{ item.position }} · {{ item.due_date }} · {{ item.amount_cents / 100 }} EUR <span *ngIf="item.notes">— {{ item.notes }}</span></li></ul>
+                  </div>
+                </li></ul>
+              </div>
+            </div>
+            <button type="button" class="primary" *ngIf="!batchState" (click)="confirmMetadataImport()" [disabled]="busy">{{ tr('Importa archivio selezionato') }}</button>
+            <button type="button" class="secondary" *ngIf="!batchState" (click)="clearMetadataImport()" [disabled]="busy">{{ tr('Annulla') }}</button>
+            <button type="button" class="primary" *ngIf="batchState?.phase === 'confirm'" (click)="confirmReviewedBatch()" [disabled]="busy">{{ tr('Importa pacchetto selezionato') }}</button>
+          </div>
+        </div>
         <div class="backup-block export-block">
           <h3>{{ tr('Esportazioni') }}</h3>
           <p>{{ tr('Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.') }}</p>
