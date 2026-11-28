@@ -5,8 +5,8 @@ import { AppLanguage, translate } from './i18n';
 import { PHOTO_KINDS } from './models';
 import type { Artwork } from './models';
 import { zoomGeometry, type ZoomGeometry } from './viewer-zoom';
+import { loadViewerImages, type ViewerImage } from './viewer-image-loader';
 
-interface ViewerImage { url: string; title: string; caption: string | null; }
 const STATUS: Record<string, string> = { available: 'Disponibile', reserved: 'Riservata', sold: 'Venduta', archived: 'In archivio' };
 /** Pictures kept in memory while browsing (each one is a full-size data URL). */
 const CACHE_LIMIT = 6;
@@ -95,8 +95,9 @@ const CACHE_LIMIT = 6;
                 </div>
                 <div class="av-pane" *ngIf="zoom" [ngStyle]="zoom.pane" [style.backgroundImage]="'url(&quot;' + img.url + '&quot;)'"></div>
               </ng-container>
-              <div class="av-loading" *ngIf="!loading && !image">{{ error || tr('Nessuna fotografia per questa opera.') }}</div>
+              <div class="av-loading" *ngIf="!loading && !image">{{ error ? tr('Immagine non disponibile') : tr('Nessuna fotografia per questa opera.') }}</div>
             </div>
+            <div class="av-hint" role="status" *ngIf="!loading && image && error">{{ tr('Immagine non disponibile') }}</div>
             <div class="av-caption" *ngIf="image as img">{{ img.title }}<small *ngIf="img.caption">{{ img.caption }}</small></div>
             <div class="av-imgnav" *ngIf="images.length > 1">
               <button type="button" [disabled]="imageIndex === 0" (click)="goImage(-1)" [attr.aria-label]="tr('Immagine precedente')" [title]="tr('Immagine precedente') + ' (↑)'">‹</button>
@@ -169,7 +170,9 @@ export class ArtworkViewerComponent implements OnChanges, OnDestroy {
   tr(text: string): string { return translate(text, this.language); }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['startIndex'] || changes['artworks']) {
+    // Cached images and translated labels belong to the previous input snapshot.
+    if (changes['artworks'] || changes['language']) this.cache.clear();
+    if (changes['startIndex'] || changes['artworks'] || changes['language']) {
       const wanted = Math.min(Math.max(this.startIndex, 0), Math.max(this.artworks.length - 1, 0));
       if (changes['startIndex'] || this.index >= this.artworks.length) this.index = wanted;
       void this.load();
@@ -208,7 +211,9 @@ export class ArtworkViewerComponent implements OnChanges, OnDestroy {
     const artwork = this.current;
     const token = ++this.token;
     this.error = '';
-    if (!artwork) { this.images = []; return; }
+    this.imageIndex = 0;
+    this.zoom = null;
+    if (!artwork) { this.images = []; this.loading = false; return; }
     const cached = this.cache.get(artwork.id);
     if (cached) {
       this.images = cached; this.loading = false;
@@ -217,27 +222,28 @@ export class ArtworkViewerComponent implements OnChanges, OnDestroy {
     }
     this.images = []; this.loading = true;
     this.change.detectChanges();
-    const found: ViewerImage[] = [];
-    try {
-      if (artwork.image_path) {
-        const cover = await api.artworkImage(artwork.id);
-        if (cover) found.push({ url: cover, title: this.tr('Copertina'), caption: null });
-      }
-      if (token !== this.token) return;
-      for (const item of await api.listArtworkGallery(artwork.id)) {
-        if (token !== this.token) return;
-        try {
-          const kind = PHOTO_KINDS.find(k => k.code === item.kind);
-          found.push({ url: await api.artworkGalleryImageData(item.id), title: kind ? this.tr(kind.label) : this.tr('Fotografia'), caption: item.caption });
-        } catch { /* a missing or oversized file must not hide the others */ }
-      }
-    } catch (error) {
-      if (token === this.token) this.error = String(error);
-    }
+    const result = await loadViewerImages(
+      artwork.id,
+      Boolean(artwork.image_path),
+      { cover: api.artworkImage, gallery: api.listArtworkGallery, photo: api.artworkGalleryImageData },
+      {
+        cover: this.tr('Copertina'),
+        photograph: this.tr('Fotografia'),
+        kind: kind => {
+          const known = PHOTO_KINDS.find(item => item.code === kind);
+          return known ? this.tr(known.label) : null;
+        },
+      },
+      () => token === this.token,
+    );
     if (token !== this.token) return;
-    this.cache.set(artwork.id, found);
-    while (this.cache.size > CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value as string);
-    this.images = found; this.imageIndex = 0; this.loading = false;
+    // A damaged/missing image is not cached: the next visit can retry it.
+    if (result.complete) {
+      this.cache.set(artwork.id, result.images);
+      while (this.cache.size > CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value as string);
+    }
+    this.error = result.error || (!result.complete ? this.tr('Immagine non disponibile') : '');
+    this.images = result.images; this.imageIndex = 0; this.loading = false;
     this.change.detectChanges();
   }
 
