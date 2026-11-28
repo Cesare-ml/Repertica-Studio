@@ -6,9 +6,12 @@ import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { exportLocalCopy, localEnvironment } from '../scripts/export-gestionale-artwork-metadata.mjs';
 import { exportRelations } from '../scripts/export-gestionale-archive-relations.mjs';
+import { exportArtworkMedia } from '../scripts/export-gestionale-artwork-media.mjs';
+import { verifyArchiveMediaBatches } from '../scripts/verify-archive-media-batches.mjs';
 
 const env=localEnvironment(process.env);
 function command(bin,args,input) {
@@ -40,6 +43,13 @@ CREATE TABLE vendite_incassi (id integer PRIMARY KEY,id_vendita integer,importo 
 CREATE TABLE vendite_scadenze (id integer PRIMARY KEY,id_vendita integer,numero integer,importo_previsto numeric,
  data_scadenza date,note text);
 CREATE TABLE immagini_cliente (id_cliente integer);
+ALTER TABLE opere ADD COLUMN id_upload_immagine_principale integer;
+CREATE TABLE immagini_opera (id integer PRIMARY KEY,id_opera integer,id_upload integer,
+ ordine_visualizzazione integer,tipo text,descrizione text);
+CREATE TABLE uploads (id integer PRIMARY KEY,id_utente_proprietario integer,stato text,current_revision_id integer);
+CREATE TABLE media_revisions (id integer PRIMARY KEY,id_upload integer,status text,result_blob_id integer);
+CREATE TABLE media_blobs (id integer PRIMARY KEY,id_utente_proprietario integer,storage_provider text,status text,
+ storage_key text,sha256 text,dimensione_byte bigint);
 INSERT INTO opere (id,id_utente_proprietario,codice_archivio,titolo,anno_realizzazione,larghezza_cm,altezza_cm,
  stato,firma_presente,cornice_presente,vernice_finale,prezzo_personalizzato,note_private) VALUES
  (1,7,'PG-1','Città 🎨',2024,30.25,40,'DISPONIBILE',true,false,'OPACA',0.29,'never-export-private'),
@@ -65,7 +75,7 @@ GRANT USAGE ON SCHEMA public TO fixture_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO fixture_reader;
 `;
 
-test('real PostgreSQL local exporters preserve explicit finance and reject unsafe selections atomically',async()=>{
+test('real PostgreSQL local exporters preserve explicit finance and active media, rejecting unsafe selections atomically',async()=>{
   assert.notEqual(process.getuid?.(),0,'initdb must run as a non-root user');
   const root=await mkdtemp('/tmp/repertica-pg-');
   const data=join(root,'data'),socket=join(root,'socket'),log=join(root,'postgres.log');
@@ -139,6 +149,94 @@ test('real PostgreSQL local exporters preserve explicit finance and reject unsaf
     sql("DELETE FROM vendite_incassi WHERE id=31; INSERT INTO immagini_cliente VALUES(10);");
     await assert.rejects(exportRelations(relationalArgs('1,2,3',rejected)));
     await missing(rejected);
+    // Real, independently generated 2×2 RGB PNGs, not header-only stubs.
+    const images=[
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGO8I6fBwMDAxMDAwMDAAAAOdgEmkr/FpgAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGMUqbjDwMDAxMDAwMDAAAAQQgFsyLsfzAAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAC0lEQVR4nGNgQAYAAA4AAamRc7EAAAAASUVORK5CYII=',
+    ].map(s=>Buffer.from(s,'base64'));
+    const digest=b=>createHash('sha256').update(b).digest('hex');
+    const mediaRoot=join(root,'media'), mediaOutput=join(root,'with-media.json');
+    const batchOutput=join(root,'media-batches');
+    await mkdir(join(mediaRoot,'blobs'),{recursive:true});
+    for(const [i,b] of images.entries()) {
+      await writeFile(join(mediaRoot,'blobs',i+'.png'),b);
+      // All interpolated values originate from fixed synthetic bytes/integers.
+      sql(`INSERT INTO media_blobs VALUES (${100+i},7,'LOCAL','AVAILABLE','blobs/${i}.png','${digest(b)}',${b.length});`);
+    }
+    sql(`
+      INSERT INTO uploads VALUES (50,7,'READY',60),(51,7,'READY',61),(52,7,'READY',62);
+      INSERT INTO media_revisions VALUES (60,50,'ACTIVE',100),(61,51,'ACTIVE',101),
+        (62,52,'ACTIVE',102),(63,50,'ACTIVE',102);
+      UPDATE opere SET id_upload_immagine_principale=50 WHERE id=1;
+      INSERT INTO immagini_opera VALUES (80,2,52,20,'FIRMA','Firma'),
+        (81,2,51,10,'DETTAGLIO','Dettaglio 🎨');
+    `);
+    const mediaArgs=(ids,out)=>[...metadataArgs(ids,out).slice(0,6),relations,mediaRoot,out];
+    await exportArtworkMedia(mediaArgs('1,2,3',mediaOutput));
+    const mediaBytes=await readFile(mediaOutput), media=JSON.parse(mediaBytes);
+    assert.deepEqual(media.artworks,result.artworks);
+    assert.deepEqual(media.collectors,result.collectors);
+    assert.deepEqual(media.sales,result.sales);
+    assert.equal(media.covers.length,1);
+    assert.equal(media.covers[0].artwork_code,'PG-1');
+    assert.equal(media.covers[0].sha256,digest(images[0]));
+    assert.deepEqual(Buffer.from(media.covers[0].data_base64,'base64'),images[0]);
+    assert.deepEqual(media.gallery.map(p=>[p.artwork_code,p.position,p.kind,p.caption]),[
+      ['PG-2',1,'DETAIL','Dettaglio 🎨'],['PG-2',2,'SIGNATURE','Firma'],
+    ]);
+    for(const [i,p] of media.gallery.entries()) {
+      assert.equal(p.sha256,digest(images[i+1]));
+      assert.deepEqual(Buffer.from(p.data_base64,'base64'),images[i+1]);
+    }
+    assert.ok(!mediaBytes.toString('utf8').includes('blobs/'));
+    await assert.rejects(exportArtworkMedia(mediaArgs('1,2,3',mediaOutput)));
+    assert.deepEqual(await readFile(mediaOutput),mediaBytes);
+    await exportArtworkMedia([...mediaArgs('1,2,3',batchOutput),'--batch-directory']);
+    assert.deepEqual(await verifyArchiveMediaBatches(batchOutput),
+      {packages:1,artworks:3,collectors:1,sales:2,photographs:3});
+    const manifest=JSON.parse(await readFile(join(batchOutput,'manifest.json'),'utf8'));
+    const batchBytes=await readFile(join(batchOutput,manifest.packages[0].file));
+    assert.equal(digest(batchBytes),manifest.packages[0].sha256);
+    const batch=JSON.parse(batchBytes);
+    for(const key of ['artworks','collectors','sales','covers','gallery']) {
+      const sorted=rows=>rows.map(r=>JSON.stringify(r)).sort();
+      assert.deepEqual(sorted(batch[key]),sorted(media[key]));
+    }
+
+    const badMedia=join(root,'bad-media.json'),badBatch=join(root,'bad-media-batch');
+    for(const ids of ['1,2,4','1,2,999','1,2','1,2,2']) {
+      await assert.rejects(exportArtworkMedia(mediaArgs(ids,badMedia)));
+      await missing(badMedia);
+    }
+    // Keep the actual PostgreSQL joins in the test: each corruption must fail
+    // even though the input package and the other registered media are valid.
+    for(const [corrupt,restore] of [
+      ["UPDATE uploads SET id_utente_proprietario=8 WHERE id=50","UPDATE uploads SET id_utente_proprietario=7 WHERE id=50"],
+      ["UPDATE uploads SET stato='PENDING' WHERE id=50","UPDATE uploads SET stato='READY' WHERE id=50"],
+      ["UPDATE uploads SET current_revision_id=61 WHERE id=50","UPDATE uploads SET current_revision_id=60 WHERE id=50"],
+      ["UPDATE media_revisions SET status='INACTIVE' WHERE id=60","UPDATE media_revisions SET status='ACTIVE' WHERE id=60"],
+      ["UPDATE media_blobs SET id_utente_proprietario=8 WHERE id=100","UPDATE media_blobs SET id_utente_proprietario=7 WHERE id=100"],
+      ["UPDATE media_blobs SET storage_provider='S3' WHERE id=100","UPDATE media_blobs SET storage_provider='LOCAL' WHERE id=100"],
+      ["UPDATE media_blobs SET status='MISSING' WHERE id=100","UPDATE media_blobs SET status='AVAILABLE' WHERE id=100"],
+      ["UPDATE media_blobs SET storage_key='blobs/missing.png' WHERE id=100","UPDATE media_blobs SET storage_key='blobs/0.png' WHERE id=100"],
+      ["UPDATE media_blobs SET sha256=repeat('0',64) WHERE id=100",`UPDATE media_blobs SET sha256='${digest(images[0])}' WHERE id=100`],
+      ["UPDATE immagini_opera SET tipo='UNKNOWN' WHERE id=81","UPDATE immagini_opera SET tipo='DETTAGLIO' WHERE id=81"],
+    ]) {
+      sql(corrupt);
+      await assert.rejects(exportArtworkMedia(mediaArgs('1,2,3',badMedia)));
+      await missing(badMedia);
+      await assert.rejects(exportArtworkMedia([...mediaArgs('1,2,3',badBatch),'--batch-directory']));
+      await missing(join(badBatch,'manifest.json'));
+      await missing(badBatch);
+      sql(restore);
+    }
+    // Re-export from the restored fixture proves the negative cases did not
+    // accidentally poison the source or leave partial destination files.
+    await exportArtworkMedia(mediaArgs('1,2,3',badMedia));
+    assert.deepEqual(JSON.parse(await readFile(badMedia,'utf8')),media);
+    assert.deepEqual(await readFile(mediaOutput),mediaBytes);
+    assert.equal(sql('SELECT count(*) FROM media_blobs;').trim(),'3');
     // Existing package is still intact after all rejected exports.
     assert.deepEqual(JSON.parse(await readFile(relations,'utf8')),result);
     assert.equal(sql('SELECT count(*) FROM opere;').trim(),'6');
