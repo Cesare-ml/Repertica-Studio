@@ -258,6 +258,124 @@ mod tests {
         conn.query_row("SELECT count(*) FROM artworks", [], |r| r.get(0)).unwrap()
     }
 
+    // This gate is explicitly invoked by the real PostgreSQL exporter test.
+    // Ordinary cargo tests have no PostgreSQL source fixture; an explicit gate
+    // invocation without the fixture must fail, never silently pass.
+    #[test]
+    #[ignore = "requires the disposable PostgreSQL exporter fixture"]
+    fn postgres_export_native_roundtrip() {
+        use crate::backup::{create_backup_core, inspect_backup_core, restore_backup_core};
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let export = PathBuf::from(std::env::var_os("REPERTICA_TEST_BATCH_DIRECTORY")
+            .expect("missing disposable PostgreSQL fixture"));
+        let root = tempfile::tempdir().unwrap();
+        let active = root.path().join("active");
+        let destination = root.path().join("backup");
+        fs::create_dir(&destination).unwrap();
+        let db = crate::db::open(active.clone()).unwrap();
+        let plan = {
+            let conn = db.conn.lock().unwrap();
+            let plan = preflight(&conn, &export).unwrap();
+            assert_eq!((plan.packages.len(), plan.artworks, plan.collectors, plan.sales, plan.photographs),
+                       (1, 3, 1, 2, 3));
+            assert_eq!(count(&conn), 0);
+            plan
+        };
+        let source = fs::read_to_string(export.join("package-0001.json")).unwrap();
+        let package: serde_json::Value = serde_json::from_str(&source).unwrap();
+        let cover = STANDARD.decode(package["covers"][0]["data_base64"].as_str().unwrap()).unwrap();
+        let gallery: Vec<Vec<u8>> = package["gallery"].as_array().unwrap().iter()
+            .map(|p| STANDARD.decode(p["data_base64"].as_str().unwrap()).unwrap()).collect();
+        assert_eq!(gallery.len(), 2);
+
+        let assert_archive = |conn: &Connection| -> Vec<String> {
+            for (table, expected) in [("artworks",3),("collectors",1),("sales",2),
+                ("sale_receipts",1),("sale_installments",2),("artwork_images",2)] {
+                let n: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap();
+                assert_eq!(n, expected, "{table}");
+            }
+            let art: (String, f64, i64, String) = conn.query_row(
+                "SELECT title,width_cm,fixed_price_cents,image_path FROM artworks WHERE code='PG-1' AND status='available'",
+                [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
+            assert_eq!((art.0.as_str(), art.1, art.2), ("Città 🎨", 30.25, 29));
+            assert_eq!(fs::read(active.join(&art.3)).unwrap(), cover);
+            let buyer: (String,String,String) = conn.query_row(
+                "SELECT name,birth_date,birth_time FROM collectors", [],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+            assert_eq!(buyer, ("Synthetic Collector".into(),"1980-02-29".into(),"07:45".into()));
+            let sale: (i64,i64,i64,i64,i64,i64,i64,String) = conn.query_row(
+                "SELECT s.amount_cents,f.tax_cents,f.shipping_cents,f.personal_bp,f.activity_bp,f.savings_bp,r.amount_cents,r.method
+                 FROM sales s JOIN artworks a ON a.id=s.artwork_id JOIN sale_finances f ON f.sale_id=s.id
+                 JOIN sale_receipts r ON r.sale_id=s.id WHERE a.code='PG-2' AND a.status='sold'",
+                [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?))).unwrap();
+            assert_eq!(sale,(10025,1000,525,5000,3000,2000,29,"bank_transfer".into()));
+            let linked: i64 = conn.query_row("SELECT count(DISTINCT collector_id) FROM sales", [], |r| r.get(0)).unwrap();
+            assert_eq!(linked, 1);
+            let mut stmt = conn.prepare(
+                "SELECT i.position,i.due_date,i.amount_cents,i.notes FROM sale_installments i
+                 JOIN sales s ON s.id=i.sale_id JOIN artworks a ON a.id=s.artwork_id
+                 WHERE a.code='PG-3' AND a.status='sold' AND s.amount_cents=10025
+                 AND NOT EXISTS(SELECT 1 FROM sale_receipts r WHERE r.sale_id=s.id) ORDER BY i.position").unwrap();
+            let installments: Vec<(i64,String,i64,Option<String>)> = stmt.query_map([], |r|
+                Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap().collect::<Result<_,_>>().unwrap();
+            assert_eq!(installments, vec![(1,"2024-03-31".into(),4025,Some("first".into())),
+                                         (2,"2024-04-30".into(),6000,None)]);
+            let mut stmt = conn.prepare(
+                "SELECT g.image_path,g.sort_order,g.kind,g.caption FROM artwork_images g
+                 JOIN artworks a ON a.id=g.artwork_id WHERE a.code='PG-2' ORDER BY g.sort_order").unwrap();
+            let rows: Vec<(String,i64,String,String)> = stmt.query_map([], |r|
+                Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap().collect::<Result<_,_>>().unwrap();
+            assert_eq!(rows.len(),2);
+            assert_eq!((rows[0].1,rows[0].2.as_str(),rows[0].3.as_str()),(1,"DETAIL","Dettaglio 🎨"));
+            assert_eq!((rows[1].1,rows[1].2.as_str(),rows[1].3.as_str()),(2,"SIGNATURE","Firma"));
+            let mut paths = vec![art.3];
+            for (i,row) in rows.iter().enumerate() {
+                assert_eq!(fs::read(active.join(&row.0)).unwrap(), gallery[i]);
+                paths.push(row.0.clone());
+            }
+            assert_eq!(paths.iter().collect::<HashSet<_>>().len(),3);
+            assert_eq!(conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get::<_,i64>(0)).unwrap(),0);
+            paths
+        };
+        let paths = {
+            let mut conn = db.conn.lock().unwrap();
+            let reviewed = review(&conn, &export, &plan.manifest_digest, 0).unwrap();
+            assert_eq!(count(&conn), 0);
+            assert_eq!(commit(&mut conn, &active, &export, &plan.manifest_digest, 0, &reviewed.digest).unwrap(),3);
+            assert!(commit(&mut conn, &active, &export, &plan.manifest_digest, 0, &reviewed.digest).is_err());
+            assert_archive(&conn)
+        };
+
+        let backup = create_backup_core(&db, &destination).unwrap();
+        let folder = Path::new(&backup.directory);
+        inspect_backup_core(folder).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            assert_eq!(conn.execute("UPDATE artworks SET title='later local edit' WHERE code='PG-1'", []).unwrap(),1);
+        }
+        let backed_cover = folder.join(&paths[0]);
+        fs::write(&backed_cover, b"damaged").unwrap();
+        assert!(inspect_backup_core(folder).is_err());
+        assert!(restore_backup_core(&db, folder).is_err());
+        {
+            let conn = db.conn.lock().unwrap();
+            let title: String = conn.query_row("SELECT title FROM artworks WHERE code='PG-1'", [], |r| r.get(0)).unwrap();
+            assert_eq!(title,"later local edit");
+        }
+        assert_eq!(fs::read(active.join(&paths[0])).unwrap(),cover);
+        fs::write(&backed_cover, &cover).unwrap();
+        let restored = restore_backup_core(&db, folder).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            assert_eq!(assert_archive(&conn), paths);
+        }
+        let previous = Connection::open_with_flags(Path::new(&restored.previous_archive).join("repertica.sqlite"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let title: String = previous.query_row("SELECT title FROM artworks WHERE code='PG-1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(title, "later local edit");
+        assert_eq!(fs::read_to_string(export.join("package-0001.json")).unwrap(),source);
+    }
+
     #[test]
     fn preflight_and_review_do_not_write_and_commit_is_explicit_per_package() {
         let export = tempfile::tempdir().unwrap();

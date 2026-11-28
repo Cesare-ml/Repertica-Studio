@@ -241,6 +241,22 @@ test('real PostgreSQL local exporters preserve explicit finance and active media
     assert.deepEqual(JSON.parse(await readFile(relations,'utf8')),result);
     assert.equal(sql('SELECT count(*) FROM opere;').trim(),'6');
     assert.equal(sql('SELECT count(*) FROM vendite;').trim(),'4');
+    // Explicit CI gate: hand the actual exporter output (not a recreated JSON
+    // fixture) to native Studio while this private temporary directory exists.
+    if (process.env.REPERTICA_TEST_NATIVE_ROUNDTRIP === '1') {
+      const native=spawnSync('cargo',[
+        'test','--manifest-path','src-tauri/Cargo.toml',
+        'archive_import::batches::tests::postgres_export_native_roundtrip',
+        '--','--ignored','--exact','--nocapture',
+      ],{env:{...process.env,REPERTICA_TEST_BATCH_DIRECTORY:batchOutput},
+        encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024});
+      process.stdout.write(native.stdout??'');
+      process.stderr.write(native.stderr??'');
+      assert.ifError(native.error);
+      assert.equal(native.status,0,'native import/backup/restore test failed');
+      assert.match(native.stdout,/test archive_import::batches::tests::postgres_export_native_roundtrip \.\.\. ok/);
+      assert.match(native.stdout,/1 passed; 0 failed; 0 ignored/);
+    }
   } finally {
     // A timed-out startup can still leave a server running. Stop the exact
     // temporary data directory before removal, and never remove live data.
