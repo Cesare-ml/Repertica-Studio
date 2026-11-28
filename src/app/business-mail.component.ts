@@ -8,6 +8,7 @@ import type { AppLanguage } from './i18n';
 import type { Collector, MailAccount, MailAccountInput, MailDetail, MailDraft, MailDraftInput, MailFolder, MailHeader, MailList, MailOverview, MailSyncState } from './models';
 import { MailIconComponent } from './mail-icons';
 import { mailText } from './mail-i18n';
+import type { WinnerMailDraft } from './auction-winner-mail';
 import { badgeText, filterMessages, folderLabel, inboxStamp, messageDate, senderName, splitFolders, splitInbox } from './mail-sync';
 
 type MailView = 'mail' | 'drafts' | 'settings';
@@ -56,6 +57,9 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
   /** Show a system notification when new mail arrives (setting saved by the application). */
   @Input() notifications = true;
   @Output() notificationsChange = new EventEmitter<boolean>();
+  /** A draft prepared elsewhere (e-mail to an auction winner): opened in the compose window, never sent by itself. */
+  @Input() prefill: WinnerMailDraft | null = null;
+  @Output() prefillUsed = new EventEmitter<void>();
 
   accounts: MailAccount[] = [];
   selectedId = '';
@@ -127,10 +131,23 @@ export class BusinessMailComponent implements OnInit, OnChanges, OnDestroy {
 
   async ngOnInit():Promise<void>{
     await this.loadAccounts();
+    if(this.prefill)await this.applyPrefill();
     this.timer = setInterval(()=>void this.autoRefresh(), REFRESH_MS);
   }
   ngOnDestroy():void { this.destroyed=true; if (this.timer) clearInterval(this.timer); }
+  /** Opens the compose window with the draft; the artist reads, edits and sends it as any other message. */
+  private async applyPrefill():Promise<void>{
+    const draft=this.prefill;
+    if(!draft)return;
+    this.prefillUsed.emit();
+    if(!this.selectedId){this.error=this.t('To write to the winner, first add a mail account.');return;}
+    if(!(await this.canLeave()))return;
+    const signature=this.selected?.signature??'';
+    this.composer={...blankComposer(),to:draft.to,subject:draft.subject,body:(signature?signature+'\n\n':'')+draft.body};
+    this.openComposer();
+  }
   ngOnChanges(changes: SimpleChanges):void {
+    if (changes['prefill'] && !changes['prefill'].firstChange && this.prefill) void this.applyPrefill();
     if (!changes['sync'] || !this.selectedId) return;
     const stamp = inboxStamp(this.sync, this.selectedId);
     const failed = this.sync?.accounts.find(a=>a.account_id===this.selectedId)?.error ?? false;

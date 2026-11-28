@@ -16,6 +16,7 @@ import { MediaEditorComponent } from './media-editor.component';
 import { BrochuresComponent } from './brochures.component';
 import { AuctionsComponent } from './auctions.component';
 import { BusinessMailComponent } from './business-mail.component';
+import type { WinnerMailDraft } from './auction-winner-mail';
 import { ArtworkViewerComponent } from './artwork-viewer.component';
 import { CertificateSheetComponent } from './certificate-sheet.component';
 import { emptyPayment, installmentRows, paymentToInput, toCents, type PaymentDraft } from './payments';
@@ -406,6 +407,12 @@ export class AppComponent implements OnInit {
   startAuction(artwork: Artwork): void {
     this.auctionArtworkId = artwork.id;
     this.navigate('auctions');
+  }
+  /** Draft of an e-mail to an auction winner: opens the mail window to read and edit it; nothing is sent. */
+  mailPrefill: WinnerMailDraft | null = null;
+  startWinnerMail(draft: WinnerMailDraft): void {
+    this.mailPrefill = draft;
+    this.navigate('mail');
   }
   navigate(section: Section): void {
     if (section !== 'settings') this.clearMetadataImport();

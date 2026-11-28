@@ -129,3 +129,20 @@ Decisioni del proprietario, che sostituiscono nel modulo d'asta l'indirizzo scel
   - **"Il vincitore riceve una mia email di vittoria":** oggetto e testo liberi, con `{name}`, `{title}`, `{amount}`, `{link}` e `{artist}`. Rispondendo, il compratore scrive direttamente all'artista.
 - **Modello dell'email.** Viene offerto nella lingua dell'interfaccia (`auction-winner-email.ts`) e contiene già i dati bancari salvati dalle versioni precedenti, se ci sono. "Ripristina il modello" lo ricarica. Le scelte restano su questo computer per le bozze successive.
 - **Contratto.** È in Repertica-auctions `docs/ARTIST_API_V1.md`, sezione "Contatto con il vincitore". Il server deve essere aggiornato prima di distribuire questo Desktop: un server precedente rifiuta il nuovo formato con `invalid_terms`.
+
+## Gestione completa dell'asta pubblicata (27 novembre 2026)
+
+Richiesta del proprietario: una volta pubblicata, l'asta si gestisce tutta dal Desktop, con la stessa interfaccia del Gestionale Opere (letto, mai modificato). Dalla lista delle aste, "Gestisci" apre la schermata dell'asta:
+
+- **Riepilogo e comunicazioni.** Stato, offerta in testa, partecipanti, ultimo aggiornamento ("Aggiorna dal server"). "Email dei partecipanti" produce l'elenco da incollare nel campo Ccn, solo di chi ha verificato l'email, con "Escludi chi è in testa" e "Escludi gli indirizzi bloccati".
+- **Offerte.** Cronologia con nome ed email dell'offerente, "Annulla offerta" e "Annulla e blocca" (motivo tra i cinque del Gestionale, nota riservata, blocco facoltativo dell'email), possibili anche dopo la chiusura.
+- **Partecipanti.** Nome, email, stato (verificato o bloccato), offerte valide, data di verifica, "In testa". Se il server non può leggere i contatti lo dice e non mostra elenchi vuoti.
+- **Dettagli e impostazioni.** Indirizzi pubblici italiano e inglese con "Copia indirizzo", prezzi, rilancio minimo, riserva, proroga finale, versione del regolamento, visibilità dell'asta conclusa, contatto con il vincitore (la sola lettura delle condizioni scelte alla pubblicazione).
+- **Email bloccate.** Blocco per indirizzo, con motivo facoltativo, e "Rimuovi blocco"; il server restituisce solo l'indirizzo mascherato (`b***@dominio`). L'elenco dei domini temporanei è della piattaforma, uguale per tutti: da qui si consulta soltanto.
+- **Scrivi al vincitore.** Con l'asta aggiudicata e l'email del vincitore leggibile, apre la finestra Posta con la bozza del Gestionale (`auction-winner-mail.ts`): destinatario, oggetto e testo si leggono e si modificano, nulla parte da solo. Senza un account di posta compare "Per scrivere al vincitore aggiungi prima un account di posta".
+
+Contratto: Repertica-auctions `docs/ARTIST_API_V1.md`, sezione "Gestione completa" (`GET /api/artist/auctions/:id/participants`, `GET …/terms`, `GET /api/artist/email-policy`, `POST …/email-policy/blocks`, `POST …/blocks/:id/removal`); nel lato nativo sono le sole nuove voci della lista fissa `allowed_request`. Il server deve essere distribuito prima di questo Desktop.
+
+Prova: unità 306, Rust `auction_online`, build Angular; nella finestra Tauri isolata (identificatore `it.repertica.studio.e2e`, dati di esempio con indirizzi `example.test` simulati nel servizio Angular) la schermata si disegna e il percorso "Gestisci → Scrivi al vincitore → Posta" funziona con soli clic reali. Non ancora provato contro il server distribuito.
+
+Non coperto rispetto al Gestionale: modifica, ripubblicazione ed eliminazione di un'asta prima dell'inizio; cronologia degli eventi; blocco o sblocco per singolo dominio temporaneo; pulsante "Apri la pagina pubblica" (c'è l'indirizzo con "Copia"); link all'informativa privacy nella finestra di offerta della pagina pubblica, da aggiungere quando l'informativa sarà pubblicata.

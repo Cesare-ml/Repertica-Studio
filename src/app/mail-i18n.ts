@@ -126,6 +126,7 @@ const dictionary: Record<string,Variants> = {
   'new emails':['nuove email','correos nuevos','nouveaux e-mails','neue E-Mails'],
   'unread':['non letti','sin leer','non lus','ungelesen'],
   'Only one mailbox can be connected. Remove it to use a different one.':['Si può collegare una sola casella. Rimuovila per usarne un’altra.','Solo se puede conectar un buzón. Elimínalo para usar otro.','Une seule boîte peut être connectée. Supprimez-la pour en utiliser une autre.','Es kann nur ein Postfach verbunden werden. Entfernen Sie es, um ein anderes zu verwenden.'],
+  'To write to the winner, first add a mail account.':['Per scrivere al vincitore aggiungi prima un account di posta.','Para escribir al ganador, añade primero una cuenta de correo.','Pour écrire au gagnant, ajoutez d’abord un compte de messagerie.','Um dem Gewinner zu schreiben, fügen Sie zuerst ein E-Mail-Konto hinzu.'],
   'Updating…':['Aggiornamento in corso…','Actualizando…','Mise à jour en cours…','Aktualisierung läuft…'],
 };
 export function mailText(language:AppLanguage,key:string):string {

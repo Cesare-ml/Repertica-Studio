@@ -186,6 +186,77 @@ export function parseTenants(input: unknown): ArtistTenant[] {
   });
 }
 
+/** A bidder who verified the e-mail for one auction. Private: for the authorised artist only, never stored on disk. */
+export interface AuctionParticipant {
+  readonly name: string | null;
+  readonly email: string;
+  readonly status: 'verified' | 'blocked';
+  readonly validBidCount: number;
+  readonly isLeading: boolean;
+  /** When the bidder confirmed the code. */
+  readonly verifiedAt: string | null;
+}
+
+/** GET /api/artist/auctions/:id/participants */
+export function parseParticipants(input: unknown): { participants: AuctionParticipant[]; contactsAvailable: boolean } {
+  const o = record(input);
+  if (!Array.isArray(o['items']) || o['items'].length > 500) fail();
+  const participants = (o['items'] as unknown[]).map(item => {
+    const p = record(item);
+    const status = p['status'];
+    if (status !== 'verified' && status !== 'blocked') fail();
+    const email = text(p['email'], 254, 3);
+    if (!/^[^\s@]+@[^\s@]+$/.test(email)) fail();
+    return Object.freeze({ name: nullable(p['name'], v => text(v, 80)), email, status: status as 'verified' | 'blocked',
+      validBidCount: count(p['validBidCount']), isLeading: bool(p['isLeading']), verifiedAt: nullable(p['verifiedAt'], utcInstant) });
+  });
+  return { participants, contactsAvailable: bool(o['contactsAvailable']) };
+}
+
+export type WinnerTerms = { readonly mode: 'contact_privately' } | { readonly mode: 'custom_email'; readonly subject: string; readonly body: string };
+/** The terms an auction was published under (private, for the artist). */
+export interface AuctionTermsView {
+  readonly rulesVersion: string;
+  readonly showClosedPublicly: boolean;
+  readonly artistEmail: string;
+  readonly winner: WinnerTerms;
+}
+
+/** GET /api/artist/auctions/:id/terms: null when the server has no terms for the auction. */
+export function parseTerms(input: unknown): AuctionTermsView | null {
+  const o = record(input);
+  if (o['terms'] === null) return null;
+  const t = record(o['terms']), w = record(t['winner']);
+  const winner: WinnerTerms = w['mode'] === 'custom_email'
+    ? { mode: 'custom_email', subject: text(w['subject'], 300, 3), body: text(w['body'], 6000) }
+    : w['mode'] === 'contact_privately' ? { mode: 'contact_privately' } : fail();
+  return Object.freeze({ rulesVersion: text(t['rulesVersion'], 40), showClosedPublicly: bool(t['showClosedPublicly']),
+    artistEmail: text(t['artistEmail'], 254, 3), winner: Object.freeze(winner) });
+}
+
+/** An address the artist blocked: the server returns only a hint ("a***@example.com"), never the address. */
+export interface BlockedEmail { readonly id: string; readonly emailHint: string | null; readonly reason: string; readonly blockedAt: string }
+export interface EmailPolicy {
+  readonly blockedEmails: readonly BlockedEmail[];
+  /** The platform's list of temporary-address domains: read only, the same for every artist. */
+  readonly disposableDomains: { readonly count: number; readonly syncedAt: string | null };
+}
+
+/** GET /api/artist/email-policy?tenantId= */
+export function parseEmailPolicy(input: unknown): EmailPolicy {
+  const o = record(input);
+  if (!Array.isArray(o['blockedEmails']) || o['blockedEmails'].length > 200) fail();
+  const blockedEmails = (o['blockedEmails'] as unknown[]).map(item => {
+    const b = record(item);
+    const blockId = text(b['id'], 24, 24);
+    if (!/^[a-f0-9]{24}$/.test(blockId)) fail();
+    return Object.freeze({ id: blockId, emailHint: nullable(b['emailHint'], v => text(v, 260)), reason: text(b['reason'], 200),
+      blockedAt: utcInstant(b['blockedAt']) });
+  });
+  const d = record(o['disposableDomains']);
+  return Object.freeze({ blockedEmails, disposableDomains: Object.freeze({ count: count(d['count']), syncedAt: nullable(d['syncedAt'], utcInstant) }) });
+}
+
 /** The server's leading bid versus the history it returned. A mismatch is reported, never "fixed" locally. */
 export function leadingConsistency(auction: AuctionSummary, bids: readonly AuctionBid[]): 'consistent' | 'mismatch' | 'unknown' {
   if (auction.leadingBidId === null) return bids.some(b => b.state === 'valid') ? 'mismatch' : 'consistent';
