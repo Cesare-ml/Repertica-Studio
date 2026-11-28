@@ -230,11 +230,38 @@ fn create_collector_full_core(db: &Database, input: NewCollectorInput) -> Result
         let id = Uuid::new_v4().to_string();
         let stamp = now();
         insert(&tx, &id, &fields, &stamp)?;
+        let mut inserted_images = Vec::with_capacity(staged.len());
         for (kind, relative) in &staged {
-            tx.execute("INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
-                params![Uuid::new_v4().to_string(), id, *kind, relative, stamp]).map_err(err)?;
+            let image_id = Uuid::new_v4().to_string();
+            let affected = tx.execute(
+                "INSERT INTO collector_images(id,collector_id,kind,image_path,created_at) VALUES(?1,?2,?3,?4,?5)",
+                params![image_id, id, *kind, relative, stamp],
+            ).map_err(err)?;
+            // Imported SQLite archives may have BEFORE INSERT triggers using
+            // RAISE(IGNORE): execute() returns Ok(0) without creating the link.
+            if affected != 1 {
+                return Err("Fotografia del collezionista non registrata: verifica l'archivio SQLite".into());
+            }
+            inserted_images.push(image_id);
+        }
+        // AFTER INSERT triggers can delete or redirect a photo even when
+        // execute() reported a successful write. Check every actual link
+        // before committing; otherwise the staged files would be orphaned.
+        for ((kind, relative), image_id) in staged.iter().zip(&inserted_images) {
+            let linked: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM collector_images
+                 WHERE id=?1 AND collector_id=?2 AND kind=?3 AND image_path=?4)",
+                params![image_id, id, *kind, relative],
+                |row| row.get(0),
+            ).map_err(err)?;
+            if !linked {
+                return Err("Fotografia del collezionista non registrata: verifica l'archivio SQLite".into());
+            }
         }
         let saved = by_id(&tx, &id)?;
+        if saved.photo_count != staged.len() as i64 {
+            return Err("Galleria del collezionista non coerente: verifica l'archivio SQLite".into());
+        }
         tx.commit().map_err(err)?;
         Ok(saved)
     })();
@@ -826,6 +853,56 @@ mod tests {
         }
         let count: i64 = db.conn.lock().unwrap().query_row("SELECT count(*) FROM collectors", [], |r| r.get(0)).unwrap();
         assert_eq!((count, media_count(&db)), (1, 3));
+    }
+
+    #[test]
+    fn full_creation_rolls_back_when_imported_sqlite_silently_ignores_or_removes_photos() {
+        let (dir, db) = setup();
+        let profile = picture(dir.path(), "portrait.jpg", 1);
+        let photo = picture(dir.path(), "detail.jpg", 2);
+
+        // RAISE(IGNORE) is not a SQL error: without an affected-row check
+        // a collector would be saved while its staged photo was orphaned.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_new_collector_photo BEFORE INSERT ON collector_images
+             WHEN NEW.kind='PHOTO' BEGIN SELECT RAISE(IGNORE); END;",
+        ).unwrap();
+        let error = create_collector_full_core(&db, NewCollectorInput {
+            collector: input("Anna"), profile_path: Some(profile.clone()),
+            photo_paths: vec![photo.clone()],
+        }).unwrap_err();
+        assert!(error.contains("non registrata"), "{error}");
+        assert_eq!(media_count(&db), 0, "rollback removes both staged files");
+        assert_eq!(db.conn.lock().unwrap().query_row(
+            "SELECT count(*) FROM collectors", [], |r| r.get::<_, i64>(0),
+        ).unwrap(), 0);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER ignore_new_collector_photo").unwrap();
+
+        // An AFTER INSERT trigger can remove the row even though execute()
+        // reported one affected row. Verify the stored links before commit.
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER remove_new_collector_photo AFTER INSERT ON collector_images
+             WHEN NEW.kind='PHOTO'
+             BEGIN DELETE FROM collector_images WHERE id=NEW.id; END;",
+        ).unwrap();
+        let error = create_collector_full_core(&db, NewCollectorInput {
+            collector: input("Anna"), profile_path: Some(profile.clone()),
+            photo_paths: vec![photo.clone()],
+        }).unwrap_err();
+        assert!(error.contains("non registrata"), "{error}");
+        assert_eq!(media_count(&db), 0);
+        assert_eq!(db.conn.lock().unwrap().query_row(
+            "SELECT count(*) FROM collectors", [], |r| r.get::<_, i64>(0),
+        ).unwrap(), 0);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER remove_new_collector_photo").unwrap();
+
+        let saved = create_collector_full_core(&db, NewCollectorInput {
+            collector: input("Anna"), profile_path: Some(profile),
+            photo_paths: vec![photo],
+        }).unwrap();
+        assert_eq!(saved.photo_count, 2);
+        assert!(saved.profile_image_id.is_some());
+        assert_eq!(media_count(&db), 2);
     }
 
     #[test]
