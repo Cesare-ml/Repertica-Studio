@@ -43,6 +43,22 @@ pub struct Encoded {
 
 fn unit(v: f64) -> bool { v.is_finite() && (0.0..=1.0).contains(&v) }
 
+// Reject self-intersecting, concave and almost-collinear selections before
+// computing a homography. Corner coordinates are normalized to [0, 1], so
+// the same threshold works for previews and full-resolution exports.
+fn convex_quad(points: &[Point]) -> bool {
+    if points.len() != 4 { return false; }
+    let mut winding = 0.0_f64;
+    for i in 0..4 {
+        let (a, b, c) = (&points[i], &points[(i + 1) % 4], &points[(i + 2) % 4]);
+        let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        if !cross.is_finite() || cross.abs() <= 1e-8 { return false; }
+        if i == 0 { winding = cross.signum(); }
+        else if cross.signum() != winding { return false; }
+    }
+    true
+}
+
 pub fn validate(operations: &[Operation]) -> Result<(), String> {
     if operations.is_empty() { return Err("Nessuna modifica da applicare".into()); }
     if operations.len() > 12 { return Err("Troppe operazioni di modifica".into()); }
@@ -52,6 +68,7 @@ pub fn validate(operations: &[Operation]) -> Result<(), String> {
                 && unit(*width) && unit(*height) && x + width <= 1.0 + 1e-9 && y + height <= 1.0 + 1e-9,
             Operation::Perspective { points, output_aspect_ratio } => points.len() == 4
                 && points.iter().all(|p| unit(p.x) && unit(p.y))
+                && convex_quad(points)
                 && output_aspect_ratio.is_none_or(|r| r.is_finite() && (0.1..=10.0).contains(&r)),
             Operation::Rotate { degrees } => [0, 90, 180, 270, -90, -180, -270].contains(degrees),
             Operation::Flip { .. } => true,
@@ -240,10 +257,10 @@ pub fn process(bytes: &[u8], operations: &[Operation]) -> Result<Encoded, String
 
 /// A JPEG preview no larger than `max_side`; edits are applied to the reduced copy.
 pub fn preview(bytes: &[u8], max_side: u32, operations: &[Operation]) -> Result<Encoded, String> {
+    if !operations.is_empty() { validate(operations)?; }
     let (image, _) = decode(bytes)?;
     let mut image = limit_side(image, max_side);
     if !operations.is_empty() {
-        validate(operations)?;
         image = limit_side(apply(image, operations)?, max_side);
     }
     encode(&image, false)
@@ -376,6 +393,42 @@ mod tests {
         assert!(close(*result.get_pixel(30, 20), source.get_pixel(30, 20).0, 3));
         let degenerate = vec![Point { x: 0.2, y: 0.2 }; 4];
         assert!(process(&png(&source), &[Operation::Perspective { points: degenerate, output_aspect_ratio: None }]).is_err());
+    }
+
+    #[test]
+    fn perspective_refuses_crossed_or_concave_corners_before_rendering() {
+        let square = vec![
+            Point { x: 0.1, y: 0.1 }, Point { x: 0.9, y: 0.1 },
+            Point { x: 0.9, y: 0.9 }, Point { x: 0.1, y: 0.9 },
+        ];
+        assert!(validate(&[Operation::Perspective {
+            points: square.clone(), output_aspect_ratio: None,
+        }]).is_ok());
+
+        // Both winding directions are valid, but the four corners must
+        // traverse a convex perimeter rather than cross or fold inward.
+        let mut reversed = square.clone();
+        reversed.reverse();
+        assert!(validate(&[Operation::Perspective {
+            points: reversed, output_aspect_ratio: None,
+        }]).is_ok());
+
+        let crossed = vec![square[0], square[2], square[1], square[3]];
+        let concave = vec![square[0], square[1], Point { x: 0.4, y: 0.4 }, square[3]];
+        let collinear = vec![
+            square[0], Point { x: 0.5, y: 0.1 },
+            square[1], square[3],
+        ];
+        let source = png(&gradient(40, 40));
+        let nearly_collinear = vec![square[0], Point { x: 0.5, y: 0.1 - 1e-10 }, square[1], square[3]];
+        let repeated = vec![square[0], square[1], square[1], square[3]];
+        for corners in [crossed, concave, collinear, nearly_collinear, repeated] {
+            let edits = [Operation::Perspective { points: corners, output_aspect_ratio: None }];
+            assert!(validate(&edits).is_err(), "invalid quadrilateral must fail validation");
+            assert!(process(&source, &edits).is_err(), "full-size export must refuse it");
+            assert!(preview(&source, 20, &edits).is_err(), "preview must refuse it too");
+            assert_eq!(preview(b"not an image", 20, &edits).unwrap_err(), "Parametri di modifica non validi", "preview validates before decoding");
+        }
     }
 
     #[test]
