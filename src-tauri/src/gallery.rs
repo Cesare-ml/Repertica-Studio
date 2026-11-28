@@ -237,16 +237,25 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
     // The catalogue link travels with the picture it describes.
     let new_media: Option<String> = tx.query_row("SELECT media_id FROM artwork_images WHERE id=?1", params![image_id], |r| r.get(0)).map_err(err)?;
     let old_media: Option<String> = tx.query_row("SELECT image_media_id FROM artworks WHERE id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
-    tx.execute("UPDATE artworks SET image_path=?2,image_media_id=?4,updated_at=?3 WHERE id=?1",
+    // An imported archive can contain BEFORE triggers that silently suppress
+    // a write with RAISE(IGNORE). All parts of the swap must actually change
+    // one row, otherwise commit would leave the cover/gallery out of sync.
+    let changed_cover = tx.execute("UPDATE artworks SET image_path=?2,image_media_id=?4,updated_at=?3 WHERE id=?1",
         params![artwork_id, new_primary, Utc::now().to_rfc3339(), new_media]).map_err(err)?;
-    if let Some(old_path) = old_primary {
+    if changed_cover != 1 {
+        return Err("Promozione incompleta: aggiornamento copertina rifiutato da SQLite".into());
+    }
+    let changed_gallery = if let Some(old_path) = old_primary {
         // The old cover has no caption. Do not retain the promoted photo's
         // potentially misleading caption on a different image.
         tx.execute("UPDATE artwork_images SET image_path=?2,caption=NULL,kind='OTHER',media_id=?3 WHERE id=?1",
-            params![image_id, old_path, old_media]).map_err(err)?;
+            params![image_id, old_path, old_media]).map_err(err)?
     } else {
         // No old cover to swap: the gallery reference becomes the primary one.
-        tx.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+        tx.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?
+    };
+    if changed_gallery != 1 {
+        return Err("Promozione incompleta: modifica della galleria rifiutata da SQLite".into());
     }
     tx.commit().map_err(err)
 }
@@ -1039,6 +1048,95 @@ mod tests {
         let other: Option<String> = conn.query_row(
             "SELECT image_path FROM artworks WHERE id='b'", [], |r| r.get(0)).unwrap();
         assert_eq!(other, None);
+    }
+
+    #[test]
+    fn promotion_rolls_back_when_imported_triggers_silently_ignore_a_swap() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(temp.path().join("app")).unwrap();
+        let cover = "media/cover.png";
+        let gallery = "media/gallery.png";
+        let png = [137, 80, 78, 71, 13, 10, 26, 10];
+        fs::write(db.directory.join(cover), png).unwrap();
+        fs::write(db.directory.join(gallery), png).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+                VALUES('art','A','Art',?1,'t','t')", params![cover]).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at)
+                VALUES('photo','art',?1,'Back','t')", params![gallery]).unwrap();
+        }
+
+        // With a cover, both the artwork UPDATE and the gallery UPDATE can
+        // independently be suppressed. Neither must commit a half-swap.
+        for (create, drop_trigger) in [
+            ("CREATE TRIGGER block_cover BEFORE UPDATE ON artworks
+              BEGIN SELECT RAISE(IGNORE); END;", "DROP TRIGGER block_cover;"),
+            ("CREATE TRIGGER block_gallery BEFORE UPDATE ON artwork_images
+              BEGIN SELECT RAISE(IGNORE); END;", "DROP TRIGGER block_gallery;"),
+        ] {
+            db.conn.lock().unwrap().execute_batch(create).unwrap();
+            let error = promote_core(&db, "art", "photo").unwrap_err();
+            assert!(error.contains("Promozione incompleta"), "{error}");
+            {
+                let conn = db.conn.lock().unwrap();
+                let primary: String = conn.query_row(
+                    "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+                let (extra, caption): (String, String) = conn.query_row(
+                    "SELECT image_path,caption FROM artwork_images WHERE id='photo'",
+                    [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+                let updated: String = conn.query_row(
+                    "SELECT updated_at FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+                assert_eq!((primary.as_str(), extra.as_str(), caption.as_str(), updated.as_str()),
+                    (cover, gallery, "Back", "t"));
+            }
+            assert!(db.directory.join(cover).is_file());
+            assert!(db.directory.join(gallery).is_file());
+            db.conn.lock().unwrap().execute_batch(drop_trigger).unwrap();
+        }
+        promote_core(&db, "art", "photo").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let primary: String = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+        assert_eq!(primary, gallery);
+    }
+
+    #[test]
+    fn first_cover_promotion_rolls_back_when_gallery_delete_is_ignored() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(temp.path().join("app")).unwrap();
+        let photo = "media/first.png";
+        fs::write(db.directory.join(photo), [137, 80, 78, 71, 13, 10, 26, 10]).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','A','Art','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('photo','art',?1,'t')", params![photo]).unwrap();
+            conn.execute_batch("CREATE TRIGGER block_gallery_delete BEFORE DELETE ON artwork_images
+                BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+        let error = promote_core(&db, "art", "photo").unwrap_err();
+        assert!(error.contains("Promozione incompleta"), "{error}");
+        {
+            let conn = db.conn.lock().unwrap();
+            let primary: Option<String> = conn.query_row(
+                "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+            let remaining: i64 = conn.query_row(
+                "SELECT count(*) FROM artwork_images WHERE id='photo'", [], |r| r.get(0)).unwrap();
+            let updated: String = conn.query_row(
+                "SELECT updated_at FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+            assert_eq!((primary, remaining, updated.as_str()), (None, 1, "t"));
+            conn.execute_batch("DROP TRIGGER block_gallery_delete;").unwrap();
+        }
+        assert!(db.directory.join(photo).is_file());
+        promote_core(&db, "art", "photo").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let primary: String = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+        let remaining: i64 = conn.query_row(
+            "SELECT count(*) FROM artwork_images WHERE id='photo'", [], |r| r.get(0)).unwrap();
+        assert_eq!((primary.as_str(), remaining), (photo, 0));
     }
 
     #[test]
