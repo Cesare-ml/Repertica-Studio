@@ -29,7 +29,7 @@ fn append_text_cell(output: &mut String, value: &str) {
 // Only check the date actually represented by the requested register.
 fn validate_export_dates(conn: &Connection, kind: &str) -> Result<(), String> {
     let (table, date_column, label) = match kind {
-        "sales" | "balances" | "allocations" => ("sales", "sold_at", "vendita"),
+        "artworks" | "sales" | "balances" | "allocations" => ("sales", "sold_at", "vendita"),
         "receipts" => ("sale_receipts", "received_at", "incasso"),
         "expenses" => ("expenses", "expense_date", "spesa"),
         "installments" => ("sale_installments", "due_date", "scadenza rata"),
@@ -56,6 +56,68 @@ fn validate_export_dates(conn: &Connection, kind: &str) -> Result<(), String> {
     Ok(())
 }
 
+// SQLite's INTEGER affinity is not a strict type constraint. Match the
+// backup's financial invariants before publishing human-readable registers.
+// No rows in sale_allocations or sale_installments is a valid optional state.
+fn validate_export_financial_values(conn: &Connection, kind: &str) -> Result<(), String> {
+    let checks = [
+        // A fixed price is optional, but if present it must be integer cents.
+        // An externally edited archive may also contain an invalid coefficient.
+        (kind == "artworks",
+            "SELECT id FROM artworks
+             WHERE (fixed_price_cents IS NOT NULL AND
+                    (typeof(fixed_price_cents) != 'integer' OR fixed_price_cents NOT BETWEEN 0 AND 100000000000))
+                OR (artist_coefficient_override IS NOT NULL AND
+                    (typeof(artist_coefficient_override) NOT IN ('integer','real')
+                     OR artist_coefficient_override <= 0 OR artist_coefficient_override > 100000))
+             ORDER BY id LIMIT 1", "prezzo o coefficiente dell'opera non valido"),
+        (matches!(kind, "balances" | "receipts" | "sales" | "allocations" | "installments"),
+            "SELECT id FROM sales
+             WHERE typeof(amount_cents) != 'integer' OR amount_cents NOT BETWEEN 1 AND 100000000000
+             ORDER BY id LIMIT 1", "importo di vendita non valido"),
+        (matches!(kind, "balances" | "receipts"),
+            "SELECT sale_id FROM sale_receipts
+             WHERE typeof(amount_cents) != 'integer' OR amount_cents NOT BETWEEN 1 AND 100000000000
+             ORDER BY sale_id,id LIMIT 1", "incassi incoerenti"),
+        (kind == "expenses",
+            "SELECT id FROM expenses
+             WHERE typeof(amount_cents) != 'integer' OR amount_cents NOT BETWEEN 1 AND 100000000000
+             ORDER BY id LIMIT 1", "importo di spesa non valido"),
+        (matches!(kind, "sales" | "allocations"),
+            "SELECT sale_id FROM sale_allocations
+             WHERE typeof(share_bp) != 'integer' OR share_bp NOT BETWEEN 0 AND 10000
+             ORDER BY sale_id,part_id LIMIT 1", "ripartizione non valida"),
+        (matches!(kind, "sales" | "allocations"),
+            "SELECT sale_id FROM sale_allocations GROUP BY sale_id
+             HAVING SUM(share_bp) != 10000 ORDER BY sale_id LIMIT 1", "ripartizione non valida"),
+        (kind == "installments",
+            "SELECT sale_id FROM sale_installments
+             WHERE typeof(position) != 'integer' OR position NOT BETWEEN 1 AND 60
+                OR typeof(amount_cents) != 'integer' OR amount_cents NOT BETWEEN 1 AND 100000000000
+             ORDER BY sale_id,id LIMIT 1", "piano rateale non valido"),
+        (kind == "installments",
+            "SELECT i.sale_id FROM sale_installments i JOIN sales s ON s.id=i.sale_id
+             GROUP BY i.sale_id HAVING COUNT(*) NOT BETWEEN 2 AND 60
+                 OR MIN(i.position) != 1 OR MAX(i.position) != COUNT(*)
+                 OR COUNT(DISTINCT i.position) != COUNT(*) OR SUM(i.amount_cents) != MAX(s.amount_cents)
+             ORDER BY i.sale_id LIMIT 1", "piano rateale non valido"),
+        (kind == "installments",
+            "SELECT i.sale_id FROM sale_installments i JOIN sale_installments next
+                 ON next.sale_id=i.sale_id AND next.position=i.position+1
+             WHERE next.due_date < i.due_date ORDER BY i.sale_id LIMIT 1", "piano rateale non valido"),
+    ];
+    for (applies, sql, label) in checks {
+        if applies {
+            let invalid: Option<String> = conn.query_row(sql, [], |r| r.get(0))
+                .optional().map_err(error)?;
+            if let Some(id) = invalid {
+                return Err(format!("Esportazione annullata: {label} ({id}). Verifica l'archivio prima di esportare."));
+            }
+        }
+    }
+    Ok(())
+}
+
 // CSV must not silently lose records when foreign keys were disabled during
 // an external SQLite import. INNER JOIN would otherwise omit orphaned rows.
 fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String> {
@@ -69,6 +131,20 @@ fn validate_export_relations(conn: &Connection, kind: &str) -> Result<(), String
         ));
     }
     validate_export_dates(conn, kind)?;
+    validate_export_financial_values(conn, kind)?;
+    // current_revision_id is not a foreign key: an external edit can leave
+    // a missing or cross-item current revision even with foreign_key_check OK.
+    if matches!(kind, "media_items" | "media_revisions") {
+        let broken_media: Option<String> = conn.query_row(
+            "SELECT m.id FROM media_items m WHERE NOT EXISTS
+                (SELECT 1 FROM media_revisions r WHERE r.id=m.current_revision_id AND r.media_id=m.id)
+             ORDER BY m.id LIMIT 1",
+            [], |row| row.get(0)
+        ).optional().map_err(error)?;
+        if let Some(id) = broken_media {
+            return Err(format!("Esportazione annullata: versione corrente non valida per il media {id}. Verifica l'archivio."));
+        }
+    }
     // Missing dependent sale_finances rows do not violate foreign keys. Do not
     // use COALESCE to invent taxes and shipping in financial exports.
     if matches!(kind, "sales" | "allocations") {
@@ -139,10 +215,15 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
     // carries its date; no historic record is silently omitted.
     let (header, query) = match kind {
         "artworks" => (
-            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at;signed;final_varnish;framed;artist_coefficient_override;fixed_price_cents",
-            "SELECT id,code,title,year,technique,support,width_cm,height_cm,depth_cm,
-                    description,location,status,image_path,created_at,updated_at,signed,final_varnish,framed,artist_coefficient_override,fixed_price_cents
-             FROM artworks ORDER BY code COLLATE NOCASE,id"
+            "artwork_id;code;title;year;technique;support;width_cm;height_cm;depth_cm;description;location;status;image_path;created_at;updated_at;signed;final_varnish;framed;artist_coefficient_override;fixed_price_cents;sale_id;collector_id;collector_name;sold_at",
+            "SELECT a.id,a.code,a.title,a.year,a.technique,a.support,a.width_cm,a.height_cm,a.depth_cm,
+                    a.description,a.location,a.status,a.image_path,a.created_at,a.updated_at,
+                    a.signed,a.final_varnish,a.framed,a.artist_coefficient_override,a.fixed_price_cents,
+                    s.id,s.collector_id,c.name,s.sold_at
+             FROM artworks a
+             LEFT JOIN sales s ON s.artwork_id=a.id
+             LEFT JOIN collectors c ON c.id=s.collector_id
+             ORDER BY a.code COLLATE NOCASE,a.id"
         ),
         "gallery" => (
             "image_id;artwork_id;artwork_code;artwork_title;image_path;caption;sort_order;created_at;kind",
@@ -241,6 +322,20 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
              LEFT JOIN sale_finances f ON f.sale_id=s.id
              ORDER BY s.sold_at,s.id,p.position,p.id"
         ),
+        // Separate catalog and revision rows keep original UUID relationships,
+        // including trashed media and earlier (non-current) image versions.
+        "media_items" => (
+            "media_id;title;description;alt_text;credits;copyright_status;original_name;state;current_revision_id;dhash;dhash_revision_id;created_at;updated_at",
+            "SELECT id,title,description,alt_text,credits,copyright_status,
+                    original_name,state,current_revision_id,dhash,dhash_revision_id,created_at,updated_at
+             FROM media_items ORDER BY created_at,id"
+        ),
+        "media_revisions" => (
+            "revision_id;media_id;revision_number;kind;image_path;width_px;height_px;size_bytes;sha256;operations_json;created_at",
+            "SELECT id,media_id,number,kind,image_path,width,height,size_bytes,
+                    sha256,operations_json,created_at
+             FROM media_revisions ORDER BY media_id,number,id"
+        ),
         _ => return Err("Tipo di registro CSV non riconosciuto".into()),
     };
     validate_export_relations(conn, kind)?;
@@ -272,6 +367,19 @@ fn render_csv(conn: &Connection, kind: &str) -> Result<String, String> {
     Ok(out)
 }
 
+// The process-local mutex cannot exclude another SQLite connection (e.g. an
+// external archive tool). Keep integrity checks and CSV reads on the same
+// deferred read transaction, including in WAL mode.
+fn with_export_snapshot(
+    conn: &mut Connection,
+    render: impl FnOnce(&Connection) -> Result<String, String>,
+) -> Result<String, String> {
+    let snapshot = conn.transaction().map_err(error)?;
+    let csv = render(&snapshot)?;
+    snapshot.commit().map_err(error)?;
+    Ok(csv)
+}
+
 fn export_file(db: &Database, kind: &str, destination: &Path) -> Result<String, String> {
     if !destination.extension().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("csv")) {
         return Err("Seleziona un percorso con estensione .csv".into());
@@ -287,8 +395,8 @@ fn export_file(db: &Database, kind: &str, destination: &Path) -> Result<String, 
     // Export a consistent point-in-time view while holding the same application
     // mutex as the backup and all CRUD commands. The file write is outside it.
     let csv = {
-        let conn = db.conn.lock().map_err(error)?;
-        render_csv(&conn, kind)?
+        let mut conn = db.conn.lock().map_err(error)?;
+        with_export_snapshot(&mut conn, |snapshot| render_csv(snapshot, kind))?
     };
     let target = parent.join(filename);
     // Never truncate an existing document, DB, or an external backup by mistake.
@@ -341,7 +449,7 @@ mod tests {
             DROP TRIGGER certificates_no_update;
         "#).unwrap();
         for (table, column, id, kinds) in [
-            ("sales", "sold_at", "s", &["sales", "balances", "allocations"][..]),
+            ("sales", "sold_at", "s", &["artworks", "sales", "balances", "allocations"][..]),
             ("sale_receipts", "received_at", "r", &["receipts"][..]),
             ("expenses", "expense_date", "e", &["expenses"][..]),
             ("sale_installments", "due_date", "i1", &["installments"][..]),
@@ -371,6 +479,84 @@ mod tests {
     }
 
     #[test]
+    fn artworks_csv_rejects_invalid_imported_prices_without_creating_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','ART-1','Opera','t','t');
+                PRAGMA ignore_check_constraints=ON;
+            ").unwrap();
+            for (price, coefficient) in [
+                ("1.5", "NULL"), ("-1", "NULL"), ("100000000001", "NULL"),
+                ("'bad'", "NULL"), ("NULL", "0"), ("NULL", "-1"),
+                ("NULL", "100001"), ("NULL", "'bad'"), ("NULL", "1e999"),
+            ] {
+                conn.execute_batch(&format!(
+                    "UPDATE artworks SET fixed_price_cents={price},artist_coefficient_override={coefficient} WHERE id='a';"
+                )).unwrap();
+                let failure = render_csv(&conn, "artworks").unwrap_err();
+                assert!(failure.contains("prezzo o coefficiente"), "{price}/{coefficient}: {failure}");
+                assert!(failure.contains("(a)"), "{failure}");
+                assert!(render_csv(&conn, "gallery").is_ok(), "unrelated register remains available");
+            }
+            conn.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+        }
+        let target = dir.path().join("artworks.csv");
+        assert!(export_file(&db, "artworks", &target).is_err());
+        assert!(!target.exists());
+        {
+            let conn = db.conn.lock().unwrap();
+            for (price, coefficient) in [
+                ("NULL", "NULL"), ("0", "NULL"), ("100000000000", "NULL"),
+                ("NULL", "0.01"), ("NULL", "100000"),
+            ] {
+                conn.execute_batch(&format!(
+                    "UPDATE artworks SET fixed_price_cents={price},artist_coefficient_override={coefficient} WHERE id='a';"
+                )).unwrap();
+                assert!(render_csv(&conn, "artworks").is_ok(), "{price}/{coefficient}");
+            }
+            conn.execute("UPDATE artworks SET fixed_price_cents=0,artist_coefficient_override=NULL WHERE id='a'", []).unwrap();
+        }
+        export_file(&db, "artworks", &target).unwrap();
+        let csv = fs::read_to_string(target).unwrap();
+        assert!(csv.contains("artist_coefficient_override;fixed_price_cents;"));
+        assert!(csv.lines().any(|line| line.starts_with("\"a\";") && line.ends_with(";\"\";0;\"\";\"\";\"\";\"\"")), "{csv}");
+    }
+
+    #[test]
+    fn artworks_csv_links_sold_works_to_collectors_without_dropping_unsold_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a1','ART-1','Sold','t','t'),
+                      ('a2','ART-2','Available','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('buyer','=Test Buyer','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('sale-1','a1','buyer',15000,'2026-11-21','t');
+        "#).unwrap();
+
+        let csv = render_csv(&conn, "artworks").unwrap();
+        assert!(csv.starts_with("\u{feff}artwork_id;code;title;"));
+        assert!(csv.contains(";fixed_price_cents;sale_id;collector_id;collector_name;sold_at\r\n"));
+        let sold = csv.lines().find(|row| row.starts_with("\"a1\";")).unwrap();
+        assert!(sold.ends_with(";\"sale-1\";\"buyer\";\"'=Test Buyer\";\"2026-11-21\""), "{sold}");
+        let available = csv.lines().find(|row| row.starts_with("\"a2\";")).unwrap();
+        assert!(available.ends_with(";\"\";\"\";\"\";\"\""), "{available}");
+        assert_eq!(csv.matches("\r\n").count(), 3, "header plus one row per artwork");
+
+        // Buyer identity comes from the current collector record, not a sale snapshot.
+        conn.execute("UPDATE collectors SET name='Updated Buyer' WHERE id='buyer'", []).unwrap();
+        let updated = render_csv(&conn, "artworks").unwrap();
+        assert!(updated.contains(";\"sale-1\";\"buyer\";\"Updated Buyer\";\"2026-11-21\"\r\n"));
+    }
+
+    #[test]
     fn csv_rejects_orphaned_sale_instead_of_omitting_it_from_joined_registers() {
         let dir = tempfile::tempdir().unwrap();
         let db = db::open(dir.path().join("archive")).unwrap();
@@ -396,6 +582,53 @@ mod tests {
             VALUES('missing-collector','Anna','t','t')", []).unwrap();
         let restored = render_csv(&conn, "balances").unwrap();
         assert!(restored.contains("\"s\";\"2026-11-01\";\"a\";"), "{restored}");
+    }
+
+    #[test]
+    fn csv_validation_and_rows_share_one_wal_snapshot_across_connections() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let mut conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','ART-1','Opera','t','t'),('b','ART-2','Altra','t','t');
+            INSERT INTO collectors(id,name,created_at,updated_at)
+                VALUES('c','Anna','t','t');
+            INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                VALUES('s','a','c',4200,'2026-11-01','t');
+        "#).unwrap();
+        let external = Connection::open(db.directory.join("repertica.sqlite")).unwrap();
+        external.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA busy_timeout=5000;").unwrap();
+
+        let csv = with_export_snapshot(&mut conn, |snapshot| {
+            validate_export_relations(snapshot, "balances")?;
+            // A third-party connection commits a broken relation after validation.
+            external.execute(
+                "INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                 VALUES('broken','b','missing',1000,'2026-11-02','t')", [],
+            ).map_err(error)?;
+            render_csv(snapshot, "balances")
+        }).unwrap();
+        assert!(csv.contains("\"s\";\"2026-11-01\";\"a\";"), "{csv}");
+        assert_eq!(csv.matches("\r\n").count(), 2);
+        assert!(conn.is_autocommit(), "successful snapshot must end");
+
+        let failure = with_export_snapshot(&mut conn, |snapshot| {
+            render_csv(snapshot, "balances")
+        }).unwrap_err();
+        assert!(failure.contains("relazione SQLite non valida"), "{failure}");
+        assert!(conn.is_autocommit(), "failed snapshot must roll back");
+        drop(conn);
+
+        let destination = dir.path().join("balances.csv");
+        assert!(export_file(&db, "balances", &destination).is_err());
+        assert!(!destination.exists(), "no partial CSV on invalid snapshot");
+        external.execute("INSERT INTO collectors(id,name,created_at,updated_at)
+            VALUES('missing','Bea','t','t')", []).unwrap();
+        export_file(&db, "balances", &destination).unwrap();
+        let repaired = fs::read_to_string(destination).unwrap();
+        assert_eq!(repaired.matches("\r\n").count(), 3);
+        assert!(repaired.contains("\"broken\";\"2026-11-02\";\"b\";"));
     }
 
     #[test]
@@ -643,6 +876,74 @@ seconda riga','t','t')", []).unwrap();
     }
 
     #[test]
+    fn csv_rejects_fractional_cents_and_inconsistent_frozen_financial_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(r#"
+                INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES('a','A-1','Opera','t','t'),('b','A-2','Altra','t','t');
+                INSERT INTO collectors(id,name,created_at,updated_at) VALUES('c','Cliente','t','t');
+                INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                    VALUES('s','a','c',5000,'2026-11-01','t'),('unpaid','b','c',1000,'2026-11-01','t');
+                INSERT INTO sale_finances(sale_id,personal_bp,activity_bp,savings_bp)
+                    VALUES('s',3334,3333,3333),('unpaid',3334,3333,3333);
+                INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+                    VALUES('r1','s','2026-11-02',500,'cash','t'),('r2','s','2026-11-02',400,'cash','t');
+                INSERT INTO sale_allocations(sale_id,part_id,share_bp)
+                    VALUES('s','personal',10000),('s','activity',0);
+                INSERT INTO sale_installments(id,sale_id,position,due_date,amount_cents)
+                    VALUES('i1','s',1,'2026-11-02',2500),('i2','s',2,'2026-12-02',2500);
+                INSERT INTO expenses(id,expense_date,category,description,amount_cents,created_at,updated_at)
+                    VALUES('e','2026-11-02','materiali','Cornice',100,'t','t');
+            "#).unwrap();
+            let kinds = ["sales", "allocations", "balances", "receipts", "installments", "expenses"];
+            for kind in kinds { assert!(render_csv(&conn, kind).is_ok(), "{kind}"); }
+            for (sql, rejected, label) in [
+                ("UPDATE sale_receipts SET amount_cents=500.5 WHERE id='r1'; UPDATE sale_receipts SET amount_cents=399.5 WHERE id='r2'",
+                    &["balances", "receipts"][..], "incassi incoerenti"),
+                ("UPDATE sales SET amount_cents=5000.5 WHERE id='s'",
+                    &["sales", "allocations", "balances", "receipts", "installments"][..], "importo di vendita"),
+                ("UPDATE expenses SET amount_cents=100.5 WHERE id='e'",
+                    &["expenses"][..], "importo di spesa"),
+                ("UPDATE sale_allocations SET share_bp=9999.5 WHERE part_id='personal'; UPDATE sale_allocations SET share_bp=0.5 WHERE part_id='activity'",
+                    &["sales", "allocations"][..], "ripartizione non valida"),
+                ("UPDATE sale_allocations SET share_bp=9000 WHERE part_id='personal'",
+                    &["sales", "allocations"][..], "ripartizione non valida"),
+                ("UPDATE sale_installments SET amount_cents=2500.5 WHERE id='i1'; UPDATE sale_installments SET amount_cents=2499.5 WHERE id='i2'",
+                    &["installments"][..], "piano rateale non valido"),
+                ("UPDATE sale_installments SET amount_cents=2499 WHERE id='i1'",
+                    &["installments"][..], "piano rateale non valido"),
+                ("UPDATE sale_installments SET position=3 WHERE id='i2'",
+                    &["installments"][..], "piano rateale non valido"),
+                ("DELETE FROM sale_installments WHERE id='i2'; UPDATE sale_installments SET amount_cents=5000 WHERE id='i1'",
+                    &["installments"][..], "piano rateale non valido"),
+                ("UPDATE sale_installments SET due_date='2026-10-02' WHERE id='i2'",
+                    &["installments"][..], "piano rateale non valido"),
+            ] {
+                conn.execute_batch("SAVEPOINT corrupt").unwrap();
+                conn.execute_batch(sql).unwrap();
+                for kind in rejected {
+                    let failure = render_csv(&conn, kind).unwrap_err();
+                    assert!(failure.contains(label), "{kind}: {failure}");
+                }
+                conn.execute_batch("ROLLBACK TO corrupt; RELEASE corrupt").unwrap();
+                for kind in kinds { assert!(render_csv(&conn, kind).is_ok(), "{kind}"); }
+            }
+            conn.execute("UPDATE sale_installments SET due_date='2026-11-02' WHERE id='i2'", []).unwrap();
+            assert!(render_csv(&conn, "installments").is_ok(), "equal due dates remain valid");
+            conn.execute("UPDATE sale_allocations SET share_bp=9000 WHERE part_id='personal'", []).unwrap();
+        }
+        let target = dir.path().join("allocations.csv");
+        assert!(export_file(&db, "allocations", &target).is_err());
+        assert!(!target.exists(), "validation must precede file creation");
+        db.conn.lock().unwrap().execute("UPDATE sale_allocations SET share_bp=10000 WHERE part_id='personal'", []).unwrap();
+        assert!(export_file(&db, "allocations", &target).is_ok());
+        assert!(target.is_file());
+    }
+
+    #[test]
     fn balances_csv_preserves_partial_full_and_unpaid_sales_without_inventing_receipts() {
         let dir = tempfile::tempdir().unwrap();
         let db = db::open(dir.path().join("archive")).unwrap();
@@ -791,7 +1092,7 @@ seconda riga','t','t')", []).unwrap();
         assert!(certificates.contains("\"'+ARTIST\""));
         assert!(certificates.lines().next().unwrap().ends_with(";language;issued_place;declarant_name"));
         let artworks = render_csv(&conn, "artworks").unwrap();
-        assert!(artworks.lines().next().unwrap().ends_with(";artist_coefficient_override;fixed_price_cents"), "{artworks}");
+        assert!(artworks.lines().next().unwrap().ends_with(";artist_coefficient_override;fixed_price_cents;sale_id;collector_id;collector_name;sold_at"), "{artworks}");
         assert!(certificates.contains("\"{\"\"title\"\":\"\"Titolo originario\"\"}\""));
     }
 
@@ -806,6 +1107,55 @@ seconda riga','t','t')", []).unwrap();
             assert!(export_file(&db, kind, &csv).is_err());
         }
         assert!(export_file(&db, "artworks", &db.directory.join("artworks.csv")).is_err());
+    }
+
+
+    #[test]
+    fn media_registers_include_trashed_assets_and_historical_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::open(dir.path().join("archive")).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.execute_batch(r#"
+            INSERT INTO media_items(id,title,original_name,state,current_revision_id,created_at,updated_at)
+                VALUES('m2','=suspicious','second.png','TRASHED','r3','t2','t2'),
+                      ('m1','First','first.jpg','ACTIVE','r2','t1','t1');
+        "#).unwrap();
+        let sha = "b".repeat(64);
+        for (id, media_id, number, kind, path, width, height, size, operations) in [
+            ("r1","m1",1,"ORIGINAL","media/source.jpg",100,200,400,None),
+            ("r2","m1",2,"EDIT","media/edited.png",80,160,300,Some(r#"[{"op":"rotate","value":"=90"}]"#)),
+            ("r3","m2",1,"ORIGINAL","media/second.png",20,20,80,None),
+        ] {
+            conn.execute(
+                "INSERT INTO media_revisions(id,media_id,number,kind,image_path,width,height,size_bytes,sha256,operations_json,created_at)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'t')",
+                rusqlite::params![id,media_id,number,kind,path,width,height,size,sha,operations],
+            ).unwrap();
+        }
+        let items = render_csv(&conn, "media_items").unwrap();
+        assert!(items.starts_with("\u{feff}media_id;title;description;alt_text;credits;copyright_status;original_name;state;current_revision_id;dhash;dhash_revision_id;created_at;updated_at\r\n"));
+        assert!(items.contains("\"m2\";\"'=suspicious\";"));
+        assert!(items.contains(";\"TRASHED\";\"r3\";"));
+        assert!(items.find("\"m1\"").unwrap() < items.find("\"m2\"").unwrap());
+        assert_eq!(items.matches("\r\n").count(), 3);
+        let revisions = render_csv(&conn, "media_revisions").unwrap();
+        assert!(revisions.starts_with("\u{feff}revision_id;media_id;revision_number;kind;image_path;width_px;height_px;size_bytes;sha256;operations_json;created_at\r\n"));
+        let original = format!("\"r1\";\"m1\";1;\"ORIGINAL\";\"media/source.jpg\";100;200;400;\"{sha}\";");
+        let edit = format!("\"r2\";\"m1\";2;\"EDIT\";\"media/edited.png\";80;160;300;\"{sha}\";");
+        assert!(revisions.find(&original).unwrap() < revisions.find(&edit).unwrap());
+        assert!(revisions.contains("rotate"));
+        assert_eq!(revisions.matches("\r\n").count(), 4);
+
+        // No export may report a dangling/cross-item current revision.
+        for invalid in ["r3", "missing"] {
+            conn.execute("UPDATE media_items SET current_revision_id=?1 WHERE id='m1'", [invalid]).unwrap();
+            for kind in ["media_items", "media_revisions"] {
+                assert!(render_csv(&conn, kind).unwrap_err().contains("versione corrente non valida"));
+            }
+        }
+        conn.execute("UPDATE media_items SET current_revision_id='r2' WHERE id='m1'", []).unwrap();
+        assert_eq!(render_csv(&conn, "media_items").unwrap(), items);
+        assert_eq!(render_csv(&conn, "media_revisions").unwrap(), revisions);
     }
 
     #[test]

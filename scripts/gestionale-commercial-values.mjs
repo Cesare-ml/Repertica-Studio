@@ -1,0 +1,82 @@
+// Exact, locale-independent values for the selected local archive export.
+export function money(value, positive=false) {
+  if (typeof value !== 'string') throw Error('Expected exact decimal amount');
+  const m=/^(\d{1,10})(?:\.(\d{1,2}))?$/.exec(value);
+  if (!m) throw Error('Invalid monetary amount');
+  const n=BigInt(m[1])*100n+BigInt((m[2]||'').padEnd(2,'0'));
+  if (n>100000000000n || (positive && n===0n)) throw Error('Amount outside supported range');
+  return Number(n);
+}
+export function date(value) {
+  if (typeof value!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+      !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0,10)!==value)
+    throw Error('Invalid date');
+  return value;
+}
+
+// Shared with the batch preflight: validate the original Unicode length before
+// trimming; null represents an absent note, not an invalid value.
+export function validateInstallmentNotes(value) {
+  if (value!==null && (typeof value!=='string' || Array.from(value).length>500 || value.includes('\0')))
+    throw Error('Invalid installment notes');
+}
+
+// Legacy receipts can be assigned to particular installments; Studio instead applies
+// receipts in due-date order. Until those semantics can be reconciled, accept only
+// unpaid plans. Preserve source positions, do not sort or regenerate a schedule.
+export function unpaidInstallments(rows, receipts, saleCents) {
+  if (!Array.isArray(rows) || !Array.isArray(receipts) || !Number.isSafeInteger(saleCents) || saleCents<1 || saleCents>100000000000)
+    throw Error('Invalid installment projection');
+  if (!rows.length) return [];
+  if (rows.length<2 || rows.length>60 || receipts.length) throw Error('Unsupported installment history');
+  let previous='', total=0;
+  const plan=rows.map((r,i)=>{
+    if (!r || typeof r!=='object' || Array.isArray(r) || Object.keys(r).length!==4 ||
+        !['position','amount','due_date','notes'].every(k=>Object.hasOwn(r,k)) || r.position!==i+1)
+      throw Error('Invalid installment position or projection');
+    const due_date=date(r.due_date), amount_cents=money(r.amount,true);
+    if (due_date<previous) throw Error('Installment order conflicts with due dates');
+    validateInstallmentNotes(r.notes);
+    previous=due_date;
+    total+=amount_cents;
+    if (total>saleCents) throw Error('Installments exceed sale');
+    return {position:r.position,due_date,amount_cents,notes:r.notes?.trim()||null};
+  });
+  if (total!==saleCents) throw Error('Installments must total the sale');
+  return plan;
+}
+
+// Mirror native clean_relation: optional text, Unicode scalar length before
+// trimming (whitespace-only values are empty), and no embedded NUL.
+// Rust str::trim uses Unicode White_Space, not JavaScript's trim set.
+export function validateCommercialText(value, limit) {
+  if (value == null) return;
+  if (typeof value !== 'string' || value.includes('\0') ||
+      (!/^\p{White_Space}*$/u.test(value) && Array.from(value).length > limit))
+    throw Error('Invalid commercial text');
+}
+
+// Match native collector validation without modifying the exported record.
+export function validateCollectorProfile(c) {
+  const limits={last_name:240,email:320,phone:120,address:2000,notes:15000,
+    birth_date:10,birth_time:5,birth_place:300,instagram:300,facebook:300,tiktok:300,website:500,linkedin:500};
+  const fail=()=>{throw Error('Invalid collector profile');};
+  const trim=value=>value?.replace(/^\p{White_Space}+|\p{White_Space}+$/gu,'')||null;
+  if (!c || typeof c!=='object' || Array.isArray(c) ||
+      Object.keys(c).some(k=>k!=='key' && k!=='first_name' && !Object.hasOwn(limits,k)) ||
+      typeof c.first_name!=='string') fail();
+  validateCommercialText(c.first_name,240);
+  const first=trim(c.first_name);
+  if (!first || /\p{Cc}/u.test(first)) fail();
+  const values={};
+  for (const [key,limit] of Object.entries(limits)) {
+    validateCommercialText(c[key],limit);
+    values[key]=trim(c[key]);
+  }
+  const {last_name:last,email,birth_date,birth_time}=values;
+  if ((last && /\p{Cc}/u.test(last)) ||
+      (email && (!email.includes('@') || /[\p{White_Space}\p{Cc}]/u.test(email)))) fail();
+  if (birth_date) date(birth_date);
+  if (birth_time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(birth_time)) fail();
+  return {name:last?first+' '+last:first,email};
+}

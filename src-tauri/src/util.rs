@@ -1,6 +1,20 @@
 //! Small helpers shared by every command module.
 use std::path::Path;
 
+/// Advance a record revision even if the system clock stalls or moves backwards.
+/// Legacy non-RFC3339 stamps are replaced with the current canonical timestamp.
+pub(crate) fn next_archive_revision(previous: &str) -> Result<String, String> {
+    let now = chrono::Utc::now();
+    let next = match chrono::DateTime::parse_from_rfc3339(previous) {
+        Ok(old) if old.with_timezone(&chrono::Utc) >= now => old.with_timezone(&chrono::Utc)
+            .checked_add_signed(chrono::Duration::nanoseconds(1))
+            .ok_or_else(|| "Revisione dell'archivio non valida".to_string())?,
+        _ => now,
+    };
+    Ok(next.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+}
+
+
 /// Turn low-level SQLite / operating-system failures into messages a person can act on.
 /// Unknown errors are returned unchanged so no diagnostic detail is lost.
 pub fn friendly(error: impl std::fmt::Display) -> String {

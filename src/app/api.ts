@@ -17,6 +17,11 @@ import type { CsvRegisterKind } from './csv-registers';
 
 // No HTTP endpoint, API token or cloud state exists in the desktop MVP.
 export const api = {
+  previewArtworkMetadata: (source: string) => invoke<import('./artwork-metadata-import').ArtworkMetadataPreview>('preview_artwork_metadata', {source}),
+  importArtworkMetadata: (source: string, expectedDigest: string) => invoke<number>('import_artwork_metadata', {source, expectedDigest}),
+  preflightArchiveBatches: (directory: string) => invoke<import('./archive-batch-progress').BatchPlan>('preflight_archive_batches', {directory}),
+  reviewArchiveBatch: (directory: string, expectedManifest: string, index: number) => invoke<import('./artwork-metadata-import').ArtworkMetadataPreview>('review_archive_batch', {directory, expectedManifest, index}),
+  commitArchiveBatch: (directory: string, expectedManifest: string, index: number, expectedPreview: string) => invoke<number>('commit_archive_batch', {directory, expectedManifest, index, expectedPreview}),
   mailListAccounts: () => invoke<MailAccount[]>('mail_list_accounts'),
   mailSaveAccount: (input: MailAccountInput) => invoke<MailAccount>('mail_save_account', {input}),
   mailRemoveAccount: (accountId: string) => invoke<void>('mail_remove_account', {accountId}),
@@ -41,7 +46,7 @@ export const api = {
   exportBrochurePdf: (brochureId: string, destination: string) =>
     invoke<string>('export_brochure_pdf', { brochureId, destination }),
   listArtworks: () => invoke<Artwork[]>('list_artworks'),
-  saveArtwork: (input: ArtworkInput) => invoke<Artwork>('save_artwork', { input }),
+  saveArtwork: ({ expected_updated_at, ...input }: ArtworkInput) => invoke<Artwork>('save_artwork', { input, expectedUpdatedAt: expected_updated_at ?? null }),
   createArtworkFull: (input: NewArtworkInput) => invoke<Artwork>('create_artwork_full', { input }),
   /** `cascade` also deletes the certificates and the sale of the artwork: only after the user confirmed the impact. */
   deleteArtwork: (id: string, cascade: boolean, expectedRevision: string) => invoke<void>('delete_artwork', { id, cascade, expectedRevision }),
@@ -76,7 +81,7 @@ export const api = {
   deleteArtworkGalleryImage: (imageId: string) => invoke<void>('delete_artwork_gallery_image', { imageId }),
   auditArtworkMedia: () => invoke<MediaAudit>('audit_artwork_media'),
   listCollectors: () => invoke<Collector[]>('list_collectors'),
-  saveCollector: (input: CollectorInput) => invoke<Collector>('save_collector', { input }),
+  saveCollector: ({ expected_updated_at, ...input }: CollectorInput) => invoke<Collector>('save_collector', { input, expectedUpdatedAt: expected_updated_at ?? null }),
   createCollectorFull: (input: NewCollectorInput) => invoke<Collector>('create_collector_full', { input }),
   deleteCollector: (id: string, cascade: boolean, expectedRevision: string) => invoke<void>('delete_collector', { id, cascade, expectedRevision }),
   listCollectorImages: (collectorId: string) => invoke<CollectorImage[]>('list_collector_images', { collectorId }),

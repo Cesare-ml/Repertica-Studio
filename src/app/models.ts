@@ -106,7 +106,7 @@ export interface Artwork {
 export type ArtworkInput = Pick<Artwork,
   'title' | 'year' | 'technique' | 'support' | 'width_cm' |
   'height_cm' | 'depth_cm' | 'description' | 'location' | 'status' | 'signed' | 'final_varnish' | 'framed' | 'artist_coefficient_override' | 'fixed_price_cents'
-> & { id?: string; code?: string | null };
+> & { id?: string; code?: string | null; expected_updated_at?: string };
 /** For a new artwork the archive code is assigned by the application. */
 export type NewArtworkRecord = ArtworkInput;
 export interface NewSaleInput {
@@ -192,7 +192,7 @@ export interface Collector {
   created_at: string; updated_at: string;
 }
 export type CollectorInput = Pick<Collector, 'first_name' | 'last_name' | 'email' | 'phone' | 'address' | 'notes' |
-  'birth_date' | 'birth_time' | 'birth_place' | 'instagram' | 'facebook' | 'tiktok' | 'website' | 'linkedin'> & { id?: string };
+  'birth_date' | 'birth_time' | 'birth_place' | 'instagram' | 'facebook' | 'tiktok' | 'website' | 'linkedin'> & { id?: string; expected_updated_at?: string };
 export interface CollectorImage {
   id: string; collector_id: string; kind: 'PROFILE' | 'PHOTO'; image_path: string; created_at: string;
 }
