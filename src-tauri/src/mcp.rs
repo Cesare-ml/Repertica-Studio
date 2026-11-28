@@ -3,7 +3,7 @@
 //! Started as `Repertica Studio --mcp`. It reads JSON-RPC messages (one per line) from
 //! standard input and answers on standard output; it never opens a network port, never
 //! writes to the archive and never exposes personal contact details or image bytes.
-use crate::{db::Database, util::display_path};
+use crate::{db::Database, util::{display_path, fold}};
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::{json, Map, Value};
 use std::{
@@ -62,44 +62,32 @@ fn sql<T>(result: rusqlite::Result<T>) -> Result<T, String> {
     result.map_err(|e| format!("Errore di lettura dell'archivio: {e}"))
 }
 
-/// Lower-case and strip common Latin accents so that "Cafè" matches "cafe".
-fn fold(text: &str) -> String {
-    text.chars()
-        .flat_map(char::to_lowercase)
-        .map(|c| match c {
-            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
-            'ç' => 'c',
-            'è' | 'é' | 'ê' | 'ë' => 'e',
-            'ì' | 'í' | 'î' | 'ï' => 'i',
-            'ñ' => 'n',
-            'ò' | 'ó' | 'ô' | 'õ' | 'ö' => 'o',
-            'ù' | 'ú' | 'û' | 'ü' => 'u',
-            'ý' | 'ÿ' => 'y',
-            other => other,
-        })
-        .collect()
-}
-
 /// Words are matched anywhere; text in double quotes is matched as consecutive words.
 fn search_terms(query: &str) -> Vec<String> {
     let mut terms = Vec::new();
     let mut current = String::new();
     let mut quoted = false;
-    for c in query.chars().chain(std::iter::once(' ')) {
+    // Fold before tokenising so pasted smart/fullwidth quotes are delimiters too.
+    let query = fold(query);
+    for c in query.chars() {
         if c == '"' {
             if !current.trim().is_empty() {
-                terms.push(fold(current.trim()));
+                terms.push(current.trim().to_owned());
             }
             current.clear();
             quoted = !quoted;
         } else if c.is_whitespace() && !quoted {
             if !current.is_empty() {
-                terms.push(fold(&current));
+                terms.push(current.clone());
             }
             current.clear();
         } else {
             current.push(c);
         }
+    }
+    // An unfinished final quote is still a search term, not an unfiltered query.
+    if !current.trim().is_empty() {
+        terms.push(current.trim().to_owned());
     }
     terms
 }
@@ -283,6 +271,41 @@ fn get_artwork(archive: &Archive, args: &Value) -> Result<Value, String> {
 fn list_collectors(archive: &Archive, args: &Value) -> Result<Value, String> {
     let terms = text_arg(args, "query").map(search_terms).unwrap_or_default();
     let limit = limit_arg(args, 50, 200)?;
+
+    // Match acquired artworks as well as the collector's name, like the desktop
+    // archive. Only sale-linked works count; unrelated works must never make a
+    // collector appear in the results. Read metadata solely for filtering:
+    // no artwork description or collector contact is included in the reply.
+    let mut purchased_by_collector = std::collections::HashMap::<String, String>::new();
+    if !terms.is_empty() {
+        let mut works = sql(archive.conn.prepare(
+            "SELECT s.collector_id,a.code,a.title,a.year,a.technique,a.support,
+                    a.description,a.location,a.width_cm,a.height_cm,a.depth_cm
+             FROM sales s JOIN artworks a ON a.id=s.artwork_id",
+        ))?;
+        let rows = sql(works.query_map([], |r| {
+            let mut fields = [
+                r.get::<_, Option<String>>(1)?, r.get(2)?, r.get(3)?, r.get(4)?,
+                r.get(5)?, r.get(6)?, r.get(7)?,
+            ].into_iter().flatten().collect::<Vec<_>>().join("\n");
+            let dimensions = [
+                r.get::<_, Option<f64>>(8)?, r.get(9)?, r.get(10)?,
+            ];
+            if dimensions.iter().any(Option::is_some) {
+                fields.push('\n');
+                fields.push_str(&dimensions.iter().flatten()
+                    .map(ToString::to_string).collect::<Vec<_>>().join(" x "));
+                fields.push_str(" cm");
+            }
+            Ok((r.get::<_, String>(0)?, fields))
+        }))?;
+        for row in rows {
+            let (collector_id, fields) = sql(row)?;
+            let searchable = purchased_by_collector.entry(collector_id).or_default();
+            searchable.push('\n');
+            searchable.push_str(&fields);
+        }
+    }
     let mut statement = sql(archive.conn.prepare(
         "SELECT c.id,c.name,
                 (SELECT count(*) FROM sales s WHERE s.collector_id=c.id),
@@ -295,7 +318,10 @@ fn list_collectors(archive: &Archive, args: &Value) -> Result<Value, String> {
     let (mut total, mut items) = (0_usize, Vec::new());
     for row in rows {
         let (id, name, purchases, spent) = sql(row)?;
-        if !matches_all(&name, &terms) {
+        if !terms.is_empty() && !matches_all(
+            &format!("{name}\n{}", purchased_by_collector.get(&id).map(String::as_str).unwrap_or("")),
+            &terms,
+        ) {
             continue;
         }
         total += 1;
@@ -389,7 +415,7 @@ fn tool_definitions() -> Value {
             "id": {"type": "string"}, "code": {"type": "string", "description": "Codice opera, senza distinzione di maiuscole"}},
             "additionalProperties": false}, "annotations": read_only},
         {"name": "list_collectors", "title": "Elenco collezionisti",
-         "description": "Nomi dei collezionisti con numero e totale degli acquisti. I contatti non sono esposti.",
+         "description": "Nomi dei collezionisti con numero e totale degli acquisti. Ricerca anche nelle opere effettivamente acquistate (codice, titolo e metadati). I contatti non sono esposti.",
          "inputSchema": {"type": "object", "properties": {
             "query": {"type": "string"}, "limit": limit(200)}, "additionalProperties": false}, "annotations": read_only},
         {"name": "list_sales", "title": "Elenco vendite",
@@ -678,6 +704,64 @@ mod tests {
         let (_, certificates) = call(&archive, "list_certificates", json!({}));
         assert_eq!(certificates["total"], 1);
         assert_eq!(eur(-5), "-0.05");
+    }
+
+    #[test]
+    fn search_terms_keep_pasted_quotes_and_unfinished_phrases() {
+        assert_eq!(search_terms("“Olio su tela” Ａ４"), vec!["olio su tela", "a4"]);
+        assert_eq!(search_terms("\"olio su tela"), vec!["olio su tela"]);
+        assert_eq!(search_terms("perez \"olio su tela"), vec!["perez", "olio su tela"]);
+        assert_eq!(search_terms("  José  Pérez "), vec!["jose", "perez"]);
+        let (_dir, archive) = fixture();
+        for query in ["“tela su olio”", "\"tela su olio"] {
+            for tool in ["search_artworks", "list_collectors"] {
+                let (error, result) = call(&archive, tool, json!({"query": query}));
+                assert!(!error, "{tool}: {query}");
+                assert_eq!(result["total_matches"], 0, "{tool}: {query}");
+            }
+        }
+        let (_, hits) = call(&archive, "list_collectors", json!({"query": "“olio su tela”"}));
+        assert_eq!(hits["total_matches"], 1);
+    }
+
+    #[test]
+    fn collector_search_matches_only_purchased_artworks_with_european_names() {
+        let (dir, archive) = fixture();
+        // The unsold artwork and private collector fields must not become filters.
+        for query in ["Mattino", "segreto@example.org", "Via Segreta", "nota privata"] {
+            let (error, result) = call(&archive, "list_collectors", json!({"query": query}));
+            assert!(!error, "{query}");
+            assert_eq!(result["total_matches"], 0, "{query}");
+        }
+        drop(archive);
+        {
+            let writer = Connection::open(dir.path().join("repertica.sqlite")).unwrap();
+            writer.execute_batch(
+                "UPDATE artworks SET title='Œuvre Łódź',description='Straße',
+                        width_cm=30,height_cm=40 WHERE id='a1';
+                 UPDATE artworks SET title='Dvořák',status='sold' WHERE id='a2';
+                 INSERT INTO collectors(id,name,created_at,updated_at)
+                        VALUES('c2','Altra Persona','t','t');
+                 INSERT INTO sales(id,artwork_id,collector_id,amount_cents,sold_at,created_at)
+                        VALUES('s2','a2','c2',5000,'2026-10-10','t');",
+            ).unwrap();
+        }
+        let archive = Archive::open(dir.path()).unwrap();
+        for query in ["oeuvre lodz", "strasse", "perez oeuvre",
+                      "\"oeuvre lodz\"", "30 x 40 cm", "op-001"] {
+            let (error, result) = call(&archive, "list_collectors", json!({"query": query}));
+            assert!(!error, "{query}");
+            assert_eq!(result["total_matches"], 1, "{query}");
+            assert_eq!(result["collectors"][0]["id"], "c1", "{query}");
+            assert!(result["collectors"][0].get("description").is_none());
+        }
+        let (_, other) = call(&archive, "list_collectors", json!({"query": "dvorak"}));
+        assert_eq!(other["collectors"][0]["id"], "c2");
+        let (_, unrelated) = call(&archive, "list_collectors", json!({"query": "perez dvorak"}));
+        assert_eq!(unrelated["total_matches"], 0, "do not join unrelated purchases");
+        let (_, artworks) = call(&archive, "search_artworks", json!({"query": "STRASSE"}));
+        assert_eq!(artworks["artworks"][0]["code"], "OP-001",
+            "the MCP artwork search should share the desktop's Unicode folding");
     }
 
     #[test]

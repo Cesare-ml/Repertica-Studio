@@ -51,9 +51,9 @@ Se l'archivio non esiste o ha uno schema diverso da quello dell'app (apri prima 
 | Strumento | Descrizione |
 |---|---|
 | `archive_overview` | Conteggi (opere per stato, collezionisti, vendite, certificati) e totali venduto, incassato e da incassare. |
-| `search_artworks` | Ricerca per parole, senza distinzione di maiuscole e accenti, in codice, titolo, anno, tecnica, supporto, descrizione e acquirente. `"frasi tra virgolette"` = parole consecutive. Filtri `status` e `limit` (max 50). |
+| `search_artworks` | Ricerca per parole, senza distinzione di maiuscole e accenti, in codice, titolo, anno, tecnica, supporto, descrizione e acquirente. `"frasi tra virgolette"` = parole consecutive (anche virgolette tipografiche; una frase finale non chiusa rimane un termine di ricerca). Filtri `status` e `limit` (max 50). |
 | `get_artwork` | Scheda completa per `id` o `code`, con vendita, saldo, certificati, numero di fotografie e caratteristiche (`signed`, `final_varnish_applied`, `framed`). |
-| `list_collectors` | Nomi con numero e totale degli acquisti; filtro `query`, `limit` (max 200). Nessun contatto. |
+| `list_collectors` | Nomi con numero e totale degli acquisti; `query` cerca anche codice, titolo, tecnica, supporto, anno, descrizione, ubicazione e dimensioni delle **sole opere acquistate** dal collezionista; `limit` (max 200). Non restituisce contatti né descrizioni delle opere. |
 | `list_sales` | Vendite dalla più recente con incassato e residuo; filtro `year`, `limit` (max 200). |
 | `list_certificates` | Certificati emessi (seriale, data, opera, artista). |
 
