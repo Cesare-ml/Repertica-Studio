@@ -24,7 +24,7 @@ import { buildSaleIndexes, filterArtworks, filterCollectors } from './archive-fi
 import type { ArtworkOrder, CollectorFilter } from './archive-filters';
 import { PHOTO_KINDS } from './models';
 import { MenuState, SUPPORTS, TECHNIQUES, menuStateFor, valueFor } from './artwork-options';
-import { EXAMPLE_SIZES, examplePriceCents, priceFieldsFor, priceModeOf, priceOf } from './pricing';
+import { EXAMPLE_SIZES, draftPriceFor, examplePriceCents, fixedPriceCentsFromEuros, priceFieldsFor, priceModeOf, priceOf } from './pricing';
 import type { PriceMode } from './pricing';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { badgeText, notificationContent } from './mail-sync';
@@ -1068,13 +1068,11 @@ export class AppComponent implements OnInit {
   /** Price of the artwork in the form, recalculated as the measures, coefficient or fixed price change. */
   get draftPrice() {
     const d = this.artworkDraft;
-    const fixed = this.priceMode === 'fixed' ? d.fixed_price_cents : null;
-    const own = this.priceMode === 'coefficient' ? d.artist_coefficient_override : null;
-    return priceOf(d.width_cm, d.height_cm, this.priceRules, own, fixed);
+    return draftPriceFor(this.priceMode, d.width_cm, d.height_cm, this.priceRules, d.artist_coefficient_override, d.fixed_price_cents);
   }
   get fixedPriceEur(): number | null { return this.artworkDraft.fixed_price_cents === null ? null : this.artworkDraft.fixed_price_cents / 100; }
   setFixedPriceEur(value: number | null): void {
-    this.artworkDraft.fixed_price_cents = value === null || value === undefined || !Number.isFinite(value) ? null : Math.round(value * 100);
+    this.artworkDraft.fixed_price_cents = fixedPriceCentsFromEuros(value);
   }
   setPriceMode(mode: PriceMode): void {
     const d = this.artworkDraft;
