@@ -341,6 +341,19 @@ mod tests {
             let mut conn = db.conn.lock().unwrap();
             let reviewed = review(&conn, &export, &plan.manifest_digest, 0).unwrap();
             assert_eq!(count(&conn), 0);
+            // Fail late in a real exported package, after the transaction has
+            // reached its commercial records. Verify both SQLite and media
+            // cleanup before the same reviewed package is committed normally.
+            conn.execute_batch("CREATE TRIGGER roundtrip_reject_receipt BEFORE INSERT ON sale_receipts BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+            assert!(commit(&mut conn, &active, &export, &plan.manifest_digest, 0, &reviewed.digest).is_err());
+            for table in ["artworks","collectors","sales","sale_finances","sale_receipts",
+                          "sale_installments","artwork_images","archive_code_sequences"] {
+                let n: i64 = conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap();
+                assert_eq!(n, 0, "rollback: {table}");
+            }
+            assert_eq!(fs::read_dir(active.join("media")).unwrap().count(), 0);
+            assert_eq!(fs::read_to_string(export.join("package-0001.json")).unwrap(), source);
+            conn.execute_batch("DROP TRIGGER roundtrip_reject_receipt;").unwrap();
             assert_eq!(commit(&mut conn, &active, &export, &plan.manifest_digest, 0, &reviewed.digest).unwrap(),3);
             assert!(commit(&mut conn, &active, &export, &plan.manifest_digest, 0, &reviewed.digest).is_err());
             assert_archive(&conn)
