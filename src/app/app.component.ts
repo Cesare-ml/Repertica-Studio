@@ -594,7 +594,16 @@ export class AppComponent implements OnInit {
     }
   }
   private error(error: unknown): string {
-    return typeof error === 'string' ? error : error instanceof Error ? error.message : 'Operazione non riuscita';
+    const message = typeof error === 'string' ? error : error instanceof Error ? error.message : 'Operazione non riuscita';
+    return message === 'La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.' ? this.tr(message) : message;
+  }
+  private async refreshAfterStaleEdit(): Promise<void> {
+    const message = this.tr('La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.');
+    if (this.errorMessage !== message || this.busy) return;
+    // Refresh the list only: keep the unsaved draft and its original revision.
+    await this.refresh();
+    this.errorMessage = message;
+    this.change.detectChanges();
   }
   private async run(action: () => Promise<unknown>, success: string): Promise<boolean> {
     if (this.busy) return false;
@@ -1187,7 +1196,7 @@ export class AppComponent implements OnInit {
   }
   editArtwork(a: Artwork): void {
     this.artworkDraft = {
-      id: a.id, code: a.code, title: a.title, year: a.year, technique: a.technique,
+      id: a.id, expected_updated_at: a.updated_at, code: a.code, title: a.title, year: a.year, technique: a.technique,
       support: a.support, width_cm: a.width_cm, height_cm: a.height_cm,
       depth_cm: a.depth_cm, description: a.description, location: a.location, status: a.status,
       signed: a.signed, final_varnish: a.final_varnish, framed: a.framed,
@@ -1203,6 +1212,7 @@ export class AppComponent implements OnInit {
     this.artworkDraft = { ...this.artworkDraft, ...priced };
     if (this.artworkDraft.id) {
       if (await this.run(() => api.saveArtwork(this.artworkDraft), this.tr('Opera salvata'))) this.artworkDialog = false;
+      else await this.refreshAfterStaleEdit();
       return;
     }
     let sale: NewArtworkInput['sale'] = null;
@@ -1525,7 +1535,7 @@ export class AppComponent implements OnInit {
   }
   editCollector(c: Collector): void {
     this.collectorDraft = {
-      id: c.id, first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone,
+      id: c.id, expected_updated_at: c.updated_at, first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone,
       address: c.address, notes: c.notes, birth_date: c.birth_date, birth_time: c.birth_time,
       birth_place: c.birth_place, instagram: c.instagram, facebook: c.facebook, tiktok: c.tiktok,
       website: c.website, linkedin: c.linkedin
@@ -1556,6 +1566,7 @@ export class AppComponent implements OnInit {
   async saveCollector(): Promise<void> {
     if (this.collectorDraft.id) {
       if (await this.run(() => api.saveCollector(this.collectorDraft), this.tr('Collezionista salvato'))) this.collectorDialog = false;
+      else await this.refreshAfterStaleEdit();
       return;
     }
     const { id: _unused, ...record } = this.collectorDraft;
