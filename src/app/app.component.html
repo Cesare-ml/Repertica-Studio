@@ -481,7 +481,7 @@
         <div class="backup-block">
           <h3>{{ tr('Ripristina o trasferisci un archivio') }}</h3>
           <p>{{ tr('Puoi utilizzare un backup creato su questo computer o proveniente da un altro archivio Repertica Studio compatibile.') }}</p>
-          <p class="hint" *ngIf="batchState">{{ tr('Chiudi la sessione di importazione prima di ripristinare un backup.') }}</p>
+          <p class="hint" *ngIf="batchState || metadataImportUnknown">{{ tr('Chiudi la sessione di importazione prima di ripristinare un backup.') }}</p>
           <div class="backup-actions">
             <button type="button" class="secondary action-glyph action-glyph--folder" (click)="chooseRestoreFolder()" [disabled]="busy || !initialized">{{ tr('Seleziona backup da verificare…') }}</button>
           </div>
@@ -490,7 +490,7 @@
             <p>{{ date(restoreCandidate.createdAt) }} · {{ restoreCandidate.artworks }} opere · {{ restoreCandidate.collectors }} collezionisti · {{ bytes(restoreCandidate.totalBytes) }}</p>
             <code class="path">{{ restoreCandidate.directory }}</code>
             <p class="warning">{{ tr('Il ripristino sostituisce l\'archivio attuale. Repertica conserverà prima una copia dell\'archivio presente, senza cancellarla.') }}</p>
-            <button type="button" class="primary action-glyph action-glyph--restore" (click)="restoreSelectedBackup()" [disabled]="busy || !!batchState">{{ tr('Conferma ripristino') }}</button>
+            <button type="button" class="primary action-glyph action-glyph--restore" (click)="restoreSelectedBackup()" [disabled]="busy || !!batchState || metadataImportUnknown">{{ tr('Conferma ripristino') }}</button>
           </div>
           <p class="backup-note">{{ tr('Prima di eliminare una vecchia copia, verifica di riuscire ad aprire e utilizzare l\'archivio ripristinato.') }}</p>
         </div>
@@ -501,14 +501,18 @@
           <h3>{{ tr('Importazione opere JSON') }}</h3>
           <p>{{ tr('Importa metadati oppure opere con collezionisti, vendite, incassi documentati e piccole foto di copertina. Non è un ripristino di backup.') }}</p>
           <p class="hint">{{ tr('Formati v1 metadati e v2 relazioni; massimo 16 MiB e 1000 opere.') }}</p>
-          <label class="settings-input" *ngIf="!batchState">
+          <label class="settings-input" *ngIf="!batchState && !metadataImportUnknown">
             <span>{{ tr('Seleziona il file JSON') }}</span>
             <input type="file" accept=".json,application/json" (change)="chooseMetadataImport($event)" [disabled]="busy || !initialized">
           </label>
           <p role="alert" *ngIf="metadataImportError">{{ metadataImportError }}</p>
+          <div *ngIf="metadataImportUnknown">
+            <p role="alert">{{ tr('Esito incerto: il pacchetto potrebbe essere già stato importato. Controlla l’archivio prima di proseguire.') }}</p>
+            <button type="button" class="secondary" (click)="acknowledgeMetadataImport()" [disabled]="busy || !initialized">{{ tr('Chiudi sessione di importazione') }}</button>
+          </div>
           <p role="status" *ngIf="metadataImported !== null">{{ tr('Opere importate:') }} {{ metadataImported }}</p>
           <div>
-            <button type="button" class="secondary" *ngIf="!batchState" (click)="chooseBatchFolder()" [disabled]="busy || !initialized">{{ tr('Scegli cartella di migrazione') }}</button>
+            <button type="button" class="secondary" *ngIf="!batchState && !metadataImportUnknown" (click)="chooseBatchFolder()" [disabled]="busy || !initialized">{{ tr('Scegli cartella di migrazione') }}</button>
             <p>{{ tr('Ogni pacchetto richiede una conferma separata. I pacchetti già importati restano nell’archivio anche se interrompi la procedura.') }}</p>
             <p role="alert" *ngIf="batchError">{{ batchError }}</p>
             <div *ngIf="batchState as batch">

@@ -100,7 +100,7 @@ test('import confirmation handlers wait, refuse cancellation and reject stale pr
       const api={importArtworkMetadata:async()=>{writes++;return 1;},restoreBackup:async()=>{writes++;return {previousArchive:'synthetic'};}};
       const state = {phase:name==='resetBatchImport'?'unknown':'confirm'};
       const host = {busy:false, initialized:true, section:'settings', batchState:name.includes('Batch')?state:null,
-        batchPreview:{digest:'a'}, metadataImport:{digest:'b'}, metadataSource:'source', restoreCandidate:{directory:'synthetic'},
+        batchPreview:{digest:'a'}, metadataImport:{digest:'b',artworks:[{}]}, metadataSource:'source', restoreCandidate:{directory:'synthetic'},
         tr:x=>x, batchAction:async f=>f(), batchSession:{commitReviewed:async()=>{writes++;},reset:()=>{writes++;}},
         syncBatch(){}, refresh:async()=>{}, loadAllocationPlan:async()=>{}, loadSchedule:async()=>{}, closeGallery(){},
         clearMetadataImport(){cleared++;this.metadataImport=null;this.metadataSource=null;},
@@ -119,4 +119,52 @@ test('import confirmation handlers wait, refuse cancellation and reject stale pr
       assert.equal(cleared,scenario==='accept'&&!name.includes('Batch')?1:0,name+' clear '+scenario);
     }
   }
+});
+
+test('single import requires exact acknowledgement and prevents blind retry after uncertain IPC', async () => {
+  const {readFileSync} = await import('node:fs');
+  const source = readFileSync(new URL('../src/app/app.component.ts', import.meta.url), 'utf8');
+  const extract = name => {
+    const start = source.indexOf('  async '+name+'(): Promise<void> {');
+    assert.ok(start >= 0, name);
+    return source.slice(start, source.indexOf('\n  }', start)+4).replace('(): Promise<void>', '()');
+  };
+  for (const scenario of ['lost','zero','wrong','string','accepted','refresh-failed']) {
+    let writes=0, refreshes=0, answer=true;
+    const api={importArtworkMetadata:async()=>{
+      writes++;
+      if(scenario==='lost') throw Error('IPC disconnected');
+      if(scenario==='zero') return 0;
+      if(scenario==='wrong') return 2;
+      if(scenario==='string') return '1';
+      return 1;
+    }};
+    const handlers=new Function('confirmed','api','return ({'+extract('confirmMetadataImport')+','+extract('acknowledgeMetadataImport')+'})')(()=>Promise.resolve(answer),api);
+    const host={busy:false,initialized:true,section:'settings',batchState:null,metadataImportUnknown:false,
+      metadataImport:{digest:'synthetic',artworks:[{}]},metadataSource:'source',metadataImported:null,tr:x=>x,
+      clearMetadataImport(){this.metadataImport=null;this.metadataSource=null;this.metadataImported=null;},
+      refresh:async()=>{refreshes++;if(scenario==='refresh-failed')throw Error('refresh failed');},
+      error:e=>String(e),change:{detectChanges(){}}};
+    await handlers.confirmMetadataImport.call(host);
+    const accepted=['accepted','refresh-failed'].includes(scenario);
+    assert.equal(host.metadataImportUnknown,!accepted,scenario);
+    assert.equal(host.metadataImported,accepted?1:null,scenario);
+    assert.equal(refreshes,1,scenario);
+    assert.equal(host.busy,false);
+    if(scenario==='refresh-failed') assert.match(host.errorMessage,/refresh failed/);
+    if(!accepted){
+      host.metadataImport={digest:'new',artworks:[{}]};host.metadataSource='new';
+      await handlers.confirmMetadataImport.call(host);
+      assert.equal(writes,1,scenario+' no retry');
+      answer=false;await handlers.acknowledgeMetadataImport.call(host);
+      assert.equal(host.metadataImportUnknown,true);
+      answer=true;await handlers.acknowledgeMetadataImport.call(host);
+      assert.equal(host.metadataImportUnknown,false);
+      assert.equal(writes,1,scenario+' acknowledgement never writes');
+    }
+  }
+  const html = readFileSync(new URL('../src/app/app.component.html',import.meta.url),'utf8');
+  assert.ok(html.includes('!batchState && !metadataImportUnknown'));
+  assert.ok(html.includes('(click)="acknowledgeMetadataImport()"'));
+  assert.ok(html.includes('busy || !!batchState || metadataImportUnknown'));
 });
