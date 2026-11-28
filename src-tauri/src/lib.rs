@@ -27,9 +27,14 @@ mod updater;
 mod reveal;
 mod mail_watch;
 mod auction_online;
+mod identity;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Err(message) = identity::startup_check(cfg!(debug_assertions), identity::IDENTIFIER) {
+        eprintln!("{message}");
+        std::process::exit(1);
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
@@ -40,6 +45,15 @@ pub fn run() {
         .manage(auction_online::AuctionSession::default())
         .setup(|app| {
             use tauri::Manager;
+            // The data folder comes from Tauri's identifier, the other scoped names from the compiled one.
+            if app.config().identifier != identity::IDENTIFIER {
+                return Err(format!("Identificatore incoerente: {} / {}", app.config().identifier, identity::IDENTIFIER).into());
+            }
+            if !identity::is_release() {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_title(&identity::window_title())?;
+                }
+            }
             let directory = app.path().app_local_data_dir()?;
             backup::recover_interrupted_restore(&directory).map_err(std::io::Error::other)?;
             let database = db::open(directory)?;

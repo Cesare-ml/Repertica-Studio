@@ -33,6 +33,8 @@ npm install
 npm run tauri:dev
 ```
 
+`npm run tauri:dev` usa l'identificatore `it.repertica.studio.dev`: archivio, impostazioni, portachiavi della posta e voce MCP sono separati da quelli della Repertica Studio installata (`%LOCALAPPDATA%\it.repertica.studio.dev` invece di `%LOCALAPPDATA%\it.repertica.studio`), quindi una build di sviluppo non può aprire né aggiornare l'archivio reale. Una build di debug avviata con l'identificatore della release (`npx tauri dev` senza `--config`, `cargo run`) si ferma subito. Dove stanno i dati di sviluppo e come provare con una copia anonimizzata dell'archivio: [docs/DEV-DATA.md](docs/DEV-DATA.md).
+
 Esegui `npm run test:unit` per i test locali di struttura e filtri dell'archivio (Node.js 22+).
 
 Per verificare il solo frontend: `npm run build`. `npm start` da browser non può accedere all'archivio nativo e mostra intenzionalmente un messaggio di avvio Tauri.

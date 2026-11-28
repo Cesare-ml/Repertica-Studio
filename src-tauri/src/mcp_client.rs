@@ -2,7 +2,8 @@
 //! computer, so nobody has to edit configuration files by hand.
 //!
 //! Supported: Claude Desktop, Codex (OpenAI), Cursor, Windsurf, Gemini CLI and VS Code. Only the
-//! `repertica-studio` entry is ever added, updated or removed: every other setting and server in
+//! `repertica-studio` entry (`repertica-studio-dev` from a development build, so it never replaces the
+//! release's entry) is ever added, updated or removed: every other setting and server in
 //! the file is preserved (comments and layout too, for TOML), a copy of the original file is
 //! kept, and a file that cannot be parsed is never modified.
 use crate::{db::Database, util::display_path};
@@ -15,7 +16,10 @@ use std::{
 use tauri::State;
 use toml_edit::{value, Array, DocumentMut, Item, Table};
 
-const SERVER_KEY: &str = "repertica-studio";
+const SERVER_NAME: &str = "repertica-studio";
+
+/// The entry this build owns in the assistants' configuration: the release keeps `repertica-studio`.
+pub fn server_key() -> String { crate::identity::scoped(SERVER_NAME) }
 const BACKUP_SUFFIX: &str = ".repertica-backup";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -193,12 +197,12 @@ pub fn status_at(client: &Client, path: &Path, command: &str, data_dir: &str) ->
     let (configured, up_to_date) = match client.format {
         Format::Json { key, .. } => {
             let config = read_json(path)?;
-            let existing = json_servers(&config, key, path)?.and_then(|s| s.get(SERVER_KEY));
+            let existing = json_servers(&config, key, path)?.and_then(|s| s.get(&server_key()));
             (existing.is_some(), existing == Some(&json_entry(client, command, data_dir)))
         }
         Format::Toml => {
             let doc = read_toml(path)?;
-            let existing = doc.get("mcp_servers").and_then(Item::as_table_like).and_then(|t| t.get(SERVER_KEY));
+            let existing = doc.get("mcp_servers").and_then(Item::as_table_like).and_then(|t| t.get(&server_key()));
             (existing.is_some(), existing.is_some_and(|e| toml_matches(e, command, data_dir)))
         }
     };
@@ -215,7 +219,7 @@ pub fn configure_at(client: &Client, path: &Path, command: &str, data_dir: &str)
             let mut config = read_json(path)?;
             json_servers(&config, key, path)?; // reject an invalid section before changing anything
             let servers = config.entry(key).or_insert_with(|| json!({}));
-            servers.as_object_mut().expect("checked above").insert(SERVER_KEY.into(), json_entry(client, command, data_dir));
+            servers.as_object_mut().expect("checked above").insert(server_key(), json_entry(client, command, data_dir));
             back_up(path)?;
             write_atomically(path, &format!("{}\n", serde_json::to_string_pretty(&Value::Object(config)).map_err(crate::util::friendly)?))?;
         }
@@ -228,7 +232,7 @@ pub fn configure_at(client: &Client, path: &Path, command: &str, data_dir: &str)
                 doc["mcp_servers"] = Item::Table(servers);
             }
             let servers = doc["mcp_servers"].as_table_like_mut().expect("checked above");
-            servers.insert(SERVER_KEY, Item::Table(toml_entry(command, data_dir)));
+            servers.insert(&server_key(), Item::Table(toml_entry(command, data_dir)));
             back_up(path)?;
             write_atomically(path, &doc.to_string())?;
         }
@@ -241,7 +245,7 @@ pub fn remove_at(client: &Client, path: &Path, command: &str, data_dir: &str) ->
         Format::Json { key, .. } => {
             let mut config = read_json(path)?;
             json_servers(&config, key, path)?;
-            let removed = config.get_mut(key).and_then(Value::as_object_mut).and_then(|s| s.shift_remove(SERVER_KEY));
+            let removed = config.get_mut(key).and_then(Value::as_object_mut).and_then(|s| s.shift_remove(&server_key()));
             if removed.is_some() {
                 back_up(path)?;
                 write_atomically(path, &format!("{}\n", serde_json::to_string_pretty(&Value::Object(config)).map_err(crate::util::friendly)?))?;
@@ -250,7 +254,7 @@ pub fn remove_at(client: &Client, path: &Path, command: &str, data_dir: &str) ->
         Format::Toml => {
             let mut doc = read_toml(path)?;
             if doc.get("mcp_servers").is_some_and(|i| !i.is_table_like()) { return Err(invalid(path, "una sezione «mcp_servers»")); }
-            let removed = doc.get_mut("mcp_servers").and_then(Item::as_table_like_mut).and_then(|t| t.remove(SERVER_KEY));
+            let removed = doc.get_mut("mcp_servers").and_then(Item::as_table_like_mut).and_then(|t| t.remove(&server_key()));
             if removed.is_some() {
                 back_up(path)?;
                 write_atomically(path, &doc.to_string())?;
@@ -342,7 +346,7 @@ mod tests {
             assert!(status.configured && status.up_to_date, "{id}");
             let config = read_json_value(&path);
             assert_eq!(config["mcpServers"]["filesystem"]["command"], "npx");
-            assert_eq!(config["mcpServers"][SERVER_KEY]["args"], json!(["--mcp", "--data-dir", DATA]));
+            assert_eq!(config["mcpServers"][SERVER_NAME]["args"], json!(["--mcp", "--data-dir", DATA]));
             assert_eq!(config.as_object().unwrap().keys().collect::<Vec<_>>(), ["theme", "mcpServers", "zeta"], "key order is preserved");
             assert_eq!(fs::read_to_string(backup_of(&path)).unwrap(), original);
             let removed = remove_at(by_id(id), &path, COMMAND, DATA).unwrap();
@@ -357,7 +361,7 @@ mod tests {
         fs::write(&path, r#"{"inputs": [], "servers": {"other": {"type": "http", "url": "https://x.test"}}}"#).unwrap();
         configure_at(by_id("vscode"), &path, COMMAND, DATA).unwrap();
         let config = read_json_value(&path);
-        assert_eq!(config["servers"][SERVER_KEY]["type"], "stdio");
+        assert_eq!(config["servers"][SERVER_NAME]["type"], "stdio");
         assert_eq!(config["servers"]["other"]["url"], "https://x.test");
         assert!(config.get("mcpServers").is_none());
         assert!(status_at(by_id("vscode"), &path, COMMAND, DATA).unwrap().up_to_date);
@@ -377,7 +381,7 @@ mod tests {
         assert!(text.contains("[features]\nx = true"));
         assert!(text.contains("[mcp_servers.repertica-studio]"));
         let parsed: DocumentMut = text.parse().unwrap();
-        let ours = &parsed["mcp_servers"][SERVER_KEY];
+        let ours = &parsed["mcp_servers"][SERVER_NAME];
         assert_eq!(ours["command"].as_str(), Some(COMMAND), "backslashes survive");
         assert_eq!(ours["args"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect::<Vec<_>>(), ["--mcp", "--data-dir", DATA]);
         assert_eq!(fs::read_to_string(backup_of(&path)).unwrap(), original);

@@ -48,7 +48,8 @@ fn allowed_artifact(url: &tauri::Url) -> bool {
 }
 /// Pre-releases (`1.2.0-beta.1`) never reach people using the normal feed.
 fn is_stable(version: &str) -> bool { !version.contains('-') }
-fn is_configured() -> bool { !PUBLIC_KEY.trim().is_empty() }
+/// Only the published identifier installs updates: a development build never replaces itself with the release.
+fn is_configured() -> bool { crate::identity::is_release() && !PUBLIC_KEY.trim().is_empty() }
 fn limit_notes(notes: &str) -> String { notes.chars().take(4000).collect() }
 fn failure_status(error: &str) -> &'static str {
     let error = error.to_lowercase();

@@ -93,8 +93,11 @@ pub(crate) fn account_by_id(db:&Database,id:&str)->Result<MailAccount,String>{
         .ok_or_else(|| "Account email non trovato".to_string())?;
     serde_json::from_str(&json).map_err(db_error)
 }
+/// The release keeps `repertica-studio-mail`; other builds (`tauri:dev`) use their own service, so an archive
+/// restored there can never read, overwrite or delete the release's passwords.
+fn keyring_service()->String{ crate::identity::scoped(KEYRING_SERVICE) }
 fn key(id:&str,protocol:&str)->Result<Entry,String>{
-    Entry::new(KEYRING_SERVICE,&format!("{id}:{protocol}")).map_err(|_|credentials_error())
+    Entry::new(&keyring_service(),&format!("{id}:{protocol}")).map_err(|_|credentials_error())
 }
 fn read_key(id:&str,protocol:&str)->Result<String,String>{
     key(id,protocol)?.get_password().map_err(|_|credentials_error())

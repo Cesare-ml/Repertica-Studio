@@ -9,7 +9,7 @@
     "prepare:icons": "tauri icon branding/icon.png --output src-tauri/icons",
     "pretauri:dev": "npm run prepare:icons",
     "pretauri:build": "npm run prepare:icons",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build": "tauri build",
     "test:unit": "node --experimental-strip-types --import ./tests/ts-resolve.mjs --test tests/*.test.mjs"
   },
