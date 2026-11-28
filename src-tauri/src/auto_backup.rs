@@ -360,9 +360,22 @@ fn record_outcome(
 
 /// Run a backup now and record the outcome. Used by the timer and by "Run now".
 pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, String> {
+    run_core_inner(db, now, false).map(|(status, _)| status)
+}
+
+/// The updater needs the outcome of this attempt, not a historical schedule status.
+/// Only a successfully read, explicitly disabled schedule can skip a backup.
+pub fn backup_for_update(db: &Database, now: NaiveDateTime) -> bool {
+    run_core_inner(db, now, true).map(|(_, safe)| safe).unwrap_or(false)
+}
+
+fn run_core_inner(db: &Database, now: NaiveDateTime, only_if_enabled: bool) -> Result<(ScheduleStatus, bool), String> {
     let (started, run_id) = {
         let conn = db.conn.lock().map_err(err)?;
         let snapshot = status(&conn, now)?;
+        if only_if_enabled && !snapshot.enabled {
+            return Ok((snapshot, true));
+        }
         // Allocate while the SQLite mutex is held, preserving snapshot/start order.
         let id = db.auto_backup_next_run.fetch_add(1, Ordering::Relaxed) + 1;
         (snapshot, id)
@@ -384,7 +397,13 @@ pub fn run_core(db: &Database, now: NaiveDateTime) -> Result<ScheduleStatus, Str
         if let Some(d) = &destination { let _ = apply_retention(db, Path::new(d), keep); }
     }
     let conn = db.conn.lock().map_err(err)?;
-    status(&conn, now)
+    let current = status(&conn, now)?;
+    // A failed attempt can leave an older OK visible (for example, a newer
+    // overlapping run already recorded its outcome, or SQLite ignored a write).
+    // Never use that status as proof of this backup. Also require the destination
+    // and schedule not to have changed while making the pre-update copy.
+    let safe = outcome.is_ok() && same_configuration(&started, &current);
+    Ok((current, safe))
 }
 
 /// One timer tick: run the backup if the schedule says it is due.
@@ -544,6 +563,48 @@ mod tests {
         let saved = save_core(&db, good, now).unwrap();
         assert!(saved.enabled);
         assert_eq!(saved.next_run_at.as_deref(), Some("2026-11-22T09:00:00"));
+    }
+
+    #[test]
+    fn pre_update_backup_requires_a_readable_schedule() {
+        let (_dir, db, destination) = setup();
+        let now = at("2026-11-21 10:00");
+        assert!(backup_for_update(&db, now)); // default is explicitly disabled
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
+        db.conn.lock().unwrap().execute("DELETE FROM backup_schedule WHERE singleton=1", []).unwrap();
+        assert!(!backup_for_update(&db, now));
+    }
+
+    #[test]
+    fn pre_update_backup_uses_this_attempt_not_an_old_success() {
+        let (_dir, db, destination) = setup();
+        let now = at("2026-11-21 10:00");
+        save_core(&db, input(&destination, 0), now).unwrap();
+        assert!(backup_for_update(&db, now));
+        let saved = status(&db.conn.lock().unwrap(), now).unwrap();
+        assert_eq!(saved.last_status.as_deref(), Some("OK"));
+        let folder = saved.last_directory.as_ref().unwrap();
+        assert!(backup::inspect_backup_core(Path::new(folder)).is_ok());
+        // Simulate an unavailable external disk and an imported trigger that
+        // prevents recording the failed attempt. The old OK is still present.
+        fs::rename(&destination, destination.with_file_name("disconnected")).unwrap();
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_backup_result BEFORE UPDATE ON backup_schedule
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        let later = at("2026-11-21 11:00");
+        assert!(!backup_for_update(&db, later));
+        assert_eq!(status(&db.conn.lock().unwrap(), later).unwrap().last_status.as_deref(), Some("OK"));
+    }
+
+    #[test]
+    fn pre_update_backup_does_not_skip_an_enabled_schedule_without_destination() {
+        let (_dir, db, destination) = setup();
+        let now = at("2026-11-21 10:00");
+        save_core(&db, input(&destination, 0), now).unwrap();
+        db.conn.lock().unwrap().execute("UPDATE backup_schedule SET destination=NULL WHERE singleton=1", []).unwrap();
+        assert!(!backup_for_update(&db, now));
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
     }
 
     #[test]

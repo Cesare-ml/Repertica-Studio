@@ -94,12 +94,7 @@ pub async fn check_for_update(app: AppHandle) -> UpdateReply {
 /// Make a fresh backup first when the automatic backup is on. Returns `false` if that failed.
 fn backup_before_update(app: &AppHandle) -> bool {
     let db = app.state::<Database>();
-    let enabled = db.conn.lock().ok()
-        .and_then(|conn| crate::auto_backup::status(&conn, chrono::Local::now().naive_local()).ok())
-        .is_some_and(|status| status.enabled && status.destination.as_deref().is_some_and(|d| !d.trim().is_empty()));
-    if !enabled { return true; }
-    crate::auto_backup::run_core(&db, chrono::Local::now().naive_local())
-        .map(|status| status.last_status.as_deref() == Some("OK")).unwrap_or(false)
+    crate::auto_backup::backup_for_update(&db, chrono::Local::now().naive_local())
 }
 
 /// Download the update announced by the last check, verify its signature and install it.
