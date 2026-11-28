@@ -696,7 +696,7 @@ export class AppComponent implements OnInit {
     }
   }
   async chooseBatchFolder(): Promise<void> {
-    if (this.batchState) return;
+    if (this.batchState || this.metadataImportUnknown) return;
     await this.batchAction(async () => {
       const directory = await open({directory:true, multiple:false, title:this.tr('Scegli cartella di migrazione')});
       if (typeof directory !== 'string') return;
@@ -742,6 +742,7 @@ export class AppComponent implements OnInit {
   private metadataSource: string | null = null;
   metadataImportError = '';
   metadataImported: number | null = null;
+  metadataImportUnknown = false;
 
   clearMetadataImport(): void {
     this.metadataImport = null;
@@ -768,7 +769,7 @@ export class AppComponent implements OnInit {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    if (!file || this.busy || !this.initialized || this.batchState) return;
+    if (!file || this.busy || !this.initialized || this.batchState || this.metadataImportUnknown) return;
     this.clearMetadataImport();
     this.busy = true;
     try {
@@ -782,18 +783,38 @@ export class AppComponent implements OnInit {
     finally { this.busy = false; this.change.detectChanges(); }
   }
   async confirmMetadataImport(): Promise<void> {
-    if (this.busy || !this.initialized || this.batchState || !this.metadataImport || this.metadataSource === null) return;
+    if (this.busy || !this.initialized || this.batchState || this.metadataImportUnknown || !this.metadataImport || this.metadataSource === null) return;
     const source = this.metadataSource, preview = this.metadataImport, section = this.section;
     const digest = preview.digest;
     if (!(await confirmed(this.tr('Importare tutti i record in anteprima? Nessun record esistente sarà sostituito.')))) return;
-    if (this.busy || !this.initialized || this.batchState || this.metadataSource !== source || this.metadataImport !== preview || this.section !== section) return;
+    if (this.busy || !this.initialized || this.batchState || this.metadataImportUnknown || this.metadataSource !== source || this.metadataImport !== preview || this.section !== section) return;
     this.busy = true;
     this.clearMetadataImport();
     try {
-      this.metadataImported = await api.importArtworkMetadata(source, digest);
-      await this.refresh();
-    } catch (error) { this.showMetadataImportError(error); }
-    finally { this.busy = false; this.change.detectChanges(); }
+      // A rejected IPC or inconsistent acknowledgement can hide a committed write.
+      try {
+        const count = await api.importArtworkMetadata(source, digest);
+        if (count === preview.artworks.length && Number.isSafeInteger(count) && count > 0) {
+          this.metadataImported = count;
+        } else {
+          this.metadataImportUnknown = true;
+        }
+      } catch {
+        this.metadataImportUnknown = true;
+      }
+      // Refresh even on an uncertain reply, without losing an acknowledged success.
+      try { await this.refresh(); }
+      catch (error) { this.errorMessage = this.error(error); }
+    } finally { this.busy = false; this.change.detectChanges(); }
+  }
+
+  async acknowledgeMetadataImport(): Promise<void> {
+    if (this.busy || !this.initialized || !this.metadataImportUnknown) return;
+    const section = this.section;
+    if (!(await confirmed(this.tr('Ho controllato manualmente l’archivio e non ripeterò alla cieca il pacchetto incerto.')))) return;
+    if (this.busy || !this.initialized || !this.metadataImportUnknown || this.section !== section) return;
+    this.metadataImportUnknown = false;
+    this.change.detectChanges();
   }
 
   async exportLedger(kind: CsvRegisterKind): Promise<void> {
@@ -834,11 +855,11 @@ export class AppComponent implements OnInit {
     }
   }
   async restoreSelectedBackup(): Promise<void> {
-    if (this.busy || this.batchState || !this.restoreCandidate) return;
+    if (this.busy || this.batchState || !this.restoreCandidate || this.metadataImportUnknown) return;
     const candidate = this.restoreCandidate, preview = this.metadataImport, source = this.metadataSource;
     if (!(await confirmed('RIPRISTINO ARCHIVIO\n\nL’archivio locale attuale verrà sostituito con quello del backup. Una copia completa dell’archivio precedente verrà conservata accanto alla cartella dati.\n\nContinuare?'))) return;
     // A new backup, import preview or batch may have been selected while the dialog was open.
-    if (this.busy || this.batchState || this.restoreCandidate !== candidate || this.metadataImport !== preview || this.metadataSource !== source) return;
+    if (this.busy || this.batchState || this.metadataImportUnknown || this.restoreCandidate !== candidate || this.metadataImport !== preview || this.metadataSource !== source) return;
     if (preview != null || source != null) this.clearMetadataImport();
     this.busy = true; this.errorMessage = ''; this.notice = '';
     try {
