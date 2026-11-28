@@ -417,13 +417,14 @@
         <div class="backup-block">
           <h3>{{ tr('Diagnostica fotografie dell’archivio') }}</h3>
           <p>{{ tr('Verifica in sola lettura percorsi, presenza e intestazione delle immagini JPEG, PNG e WebP. Non modifica file e non confronta hash storici.') }}</p>
+          <p>{{ tr('Per i file RAW controlla anche dimensione e SHA-256, senza modificare gli allegati.') }}</p>
           <button type="button" class="secondary action-glyph action-glyph--shield" (click)="verifyArtworkMedia()" [disabled]="busy || !initialized">{{ tr('Verifica fotografie') }}</button>
           <div *ngIf="mediaAudit as audit" class="backup-result" role="status" aria-live="polite">
-            <strong>{{ tr('Riferimenti controllati') }}: {{ audit.checked }} · {{ tr('Fotografie leggibili') }}: {{ audit.healthy }} · {{ tr('Problemi rilevati') }}: {{ audit.problems }}</strong>
+            <strong>{{ tr('Riferimenti controllati') }}: {{ audit.checked }} · {{ tr('File verificati') }}: {{ audit.healthy }} · {{ tr('Problemi rilevati') }}: {{ audit.problems }}</strong>
             <p *ngIf="audit.problems === 0">{{ tr('Nessun problema rilevato nel controllo locale.') }}</p>
             <ul *ngIf="audit.issues.length">
               <li *ngFor="let issue of audit.issues">
-                <strong>{{ mediaArtworkLabel(issue.artworkId) }}</strong> · {{ tr(issue.role === 'primary' ? 'Copertina' : issue.role === 'certificate' ? 'Fotografia del certificato' : issue.role === 'collector' ? 'Collezionisti' : issue.role === 'media' ? 'Libreria immagini' : 'Galleria') }}
+                <strong>{{ mediaArtworkLabel(issue.artworkId) }}</strong> · {{ tr(issue.role === 'primary' ? 'Copertina' : issue.role === 'certificate' ? 'Fotografia del certificato' : issue.role === 'collector' ? 'Collezionisti' : issue.role === 'media' ? 'Libreria immagini' : issue.role === 'raw' ? 'Allegato RAW' : 'Galleria') }}
                 <span *ngIf="issue.role === 'certificate' && issue.imageId"> · ID: <code>{{ issue.imageId }}</code></span> ·
                 <code>{{ issue.path }}</code> — {{ mediaProblemLabel(issue.problem) }}
               </li>
