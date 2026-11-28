@@ -5,6 +5,7 @@
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
 const EN: Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "Cannot open the certificate: historical data or photograph unavailable.",
   "Posta": "Mail",
   "+ Nuova brochure": "+ New brochure",
   "A tutta pagina": "Full bleed",
@@ -1098,6 +1099,7 @@ const EN: Record<string,string> = {
   "servizi locali di prova": "local test services",
 };
 const ES:Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "No se puede abrir el certificado: datos o fotografía histórica no disponibles.",
   "Posta": "Correo",
   "+ Nuova brochure": "+ Nuevo folleto",
   "A tutta pagina": "A página completa",
@@ -1899,6 +1901,7 @@ const ES:Record<string,string> = {
   "Altre opere dell’archivio": "Otras obras del archivo",
 };
 const FR:Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "Impossible d’ouvrir le certificat : données ou photographie historique indisponibles.",
   "Posta": "Courrier",
   "+ Nuova brochure": "+ Nouvelle brochure",
   "A tutta pagina": "Pleine page",
@@ -2703,6 +2706,7 @@ const FR:Record<string,string> = {
   "Altre opere dell’archivio": "Autres œuvres de l’archive",
 };
 const DE:Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "Zertifikat kann nicht geöffnet werden: Historische Daten oder Foto fehlen.",
   "Posta": "E-Mail",
   "+ Nuova brochure": "+ Neue Broschüre",
   "A tutta pagina": "Ganzseitig",

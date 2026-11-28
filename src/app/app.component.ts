@@ -1,3 +1,4 @@
+import { loadCertificatePreview } from './certificate-preview';
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -260,6 +261,7 @@ export class AppComponent implements OnInit {
     taxes_eur: 0, shipping_eur: 0, sold_at: today(), notes: null as string | null };
   certificateDraft: CertificateInput = { artwork_id: '', collector_name: null, notes: null, language: 'it', place: null };
   certificatePreview = false;
+  private certificateRequest = 0;
   certificateImage: string | null = null;
   private readonly placeKey = 'repertica-certificate-place';
   selectedCertificate: Certificate | null = null;
@@ -1870,33 +1872,62 @@ export class AppComponent implements OnInit {
       return null;
     } finally { this.busy = false; this.change.detectChanges(); }
   }
-  /** Frozen picture of the certificate: the exact file recorded in the snapshot, even if the cover changed since. */
-  private async certificatePicture(path: string | null | undefined): Promise<string | null> {
-    if (!path) return null;
-    try {
-      const id = await api.mediaIdForPath(path);
-      if (!id) return null;
-      const revision = (await api.mediaDetail(id)).revisions.find(r => r.image_path === path);
-      return (await api.mediaPreview(id, 1600, null, revision?.id ?? null)).data_url;
-    } catch { return null; }
-  }
-  async showCertificate(c: Certificate): Promise<void> {
+  async showCertificate(c: Certificate): Promise<boolean> {
+    const request = ++this.certificateRequest;
     this.selectedCertificate = c;
-    try { this.selectedSnapshot = JSON.parse(c.snapshot_json) as Artwork; }
-    catch { this.selectedSnapshot = null; }
+    this.selectedSnapshot = null;
     this.certificateImage = null;
+    this.certificatePreview = false;
+    this.errorMessage = '';
     this.change.detectChanges();
-    this.certificateImage = await this.certificatePicture(this.selectedSnapshot?.image_path);
-    this.change.detectChanges();
+    try {
+      const { snapshot, image } = await loadCertificatePreview(c.snapshot_json, c.artwork_id,
+        () => api.certificateImage(c.id, c.snapshot_json));
+      if (request !== this.certificateRequest) return false;
+      this.selectedSnapshot = snapshot;
+      this.certificateImage = image;
+      this.change.detectChanges();
+      return true;
+    } catch (error) {
+      if (request === this.certificateRequest) {
+        this.errorMessage = this.tr('Impossibile aprire il certificato: dati o fotografia storica non disponibili.') + ' ' + this.error(error);
+        this.change.detectChanges();
+      }
+      return false;
+    }
   }
   async previewCertificate(c: Certificate): Promise<void> {
-    await this.showCertificate(c);
+    const pending = this.showCertificate(c);
+    const request = this.certificateRequest;
+    if (!await pending || request !== this.certificateRequest) return;
     this.certificatePreview = true;
     this.change.detectChanges();
   }
-  closeCertificatePreview(): void { this.certificatePreview = false; }
+  closeCertificatePreview(): void {
+    ++this.certificateRequest;
+    this.certificatePreview = false;
+    this.selectedCertificate = null;
+    this.selectedSnapshot = null;
+    this.certificateImage = null;
+  }
   async printCertificate(c: Certificate): Promise<void> {
-    if (this.selectedCertificate?.id !== c.id || !this.selectedSnapshot) await this.showCertificate(c);
-    window.setTimeout(() => window.print(), 150);
+    const pending = this.showCertificate(c);
+    const request = this.certificateRequest;
+    if (!await pending || request !== this.certificateRequest) return;
+    try {
+      if (this.certificateImage) {
+        const image = document.querySelector<HTMLImageElement>('.print-only rp-certificate-sheet img');
+        if (!image) throw new Error('Historical photograph not rendered');
+        await image.decode();
+      }
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      if (request === this.certificateRequest) window.print();
+    } catch (error) {
+      if (request === this.certificateRequest) {
+        this.closeCertificatePreview();
+        this.errorMessage = this.tr('Impossibile aprire il certificato: dati o fotografia storica non disponibili.') + ' ' + this.error(error);
+        this.change.detectChanges();
+      }
+    }
   }
 }
