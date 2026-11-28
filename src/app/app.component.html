@@ -755,6 +755,7 @@
         <label class="full"><span>{{ tr('Note') }}</span><textarea [(ngModel)]="newSaleDraft.notes" rows="2"></textarea></label>
       </div>
     </fieldset>
+    <div class="alert error" role="alert" *ngIf="errorMessage">{{ errorMessage }}</div>
     <div class="dialog-bottom"><button class="secondary" type="button" (click)="cancelArtworkDialog()">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !artworkDraft.title.trim()" (click)="saveArtwork()">{{ tr('Salva opera') }}</button></div>
   </div>
 </div>
@@ -881,6 +882,7 @@
       </div></fieldset>
     <fieldset class="dialog-section"><legend>{{ tr('Note private') }}</legend>
       <label class="full"><textarea [(ngModel)]="collectorDraft.notes" rows="4" [attr.aria-label]="tr('Note private')"></textarea></label></fieldset>
+    <div class="alert error" role="alert" *ngIf="errorMessage">{{ errorMessage }}</div>
     <div class="dialog-bottom"><button class="secondary" type="button" (click)="collectorDialog=false">{{ tr('Annulla') }}</button><button class="primary action-glyph action-glyph--confirm" type="button" [disabled]="busy || !collectorDraft.first_name.trim()" (click)="saveCollector()">{{ tr('Salva contatto') }}</button></div>
   </div>
 </div>

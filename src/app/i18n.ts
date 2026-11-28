@@ -4,7 +4,23 @@
  * while migrating legacy templates; all new UI strings must be added here.
  */
 export type AppLanguage = 'it' | 'en' | 'es' | 'fr' | 'de';
+
+export function chooseLanguage(input: string | null | undefined): AppLanguage {
+  // POSIX locales can include an encoding and/or modifier (e.g. de.UTF-8@euro).
+  const code = (input ?? '').trim().split(/[-_.@]/)[0].toLowerCase();
+  return ['it', 'en', 'es', 'fr', 'de'].includes(code) ? code as AppLanguage : 'en';
+}
+
+export function translateLabel(key: string, language: AppLanguage,
+  dictionaries: Record<AppLanguage, Record<string, string>>): string {
+  const selected = chooseLanguage(language);
+  if (selected === 'it') return key;
+  const own = (dictionary: Record<string, string>): string | undefined =>
+    Object.prototype.hasOwnProperty.call(dictionary, key) ? dictionary[key] : undefined;
+  return own(dictionaries[selected]) ?? own(dictionaries.en) ?? key;
+}
 const EN: Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "This record changed after you opened it. Close and reopen the editor to see the latest data.",
   "Posta": "Mail",
   "+ Nuova brochure": "+ New brochure",
   "A tutta pagina": "Full bleed",
@@ -1098,6 +1114,7 @@ const EN: Record<string,string> = {
   "servizi locali di prova": "local test services",
 };
 const ES:Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "La ficha ha cambiado desde que la abriste. Cierra y vuelve a abrir la edición para ver los datos actualizados.",
   "Posta": "Correo",
   "+ Nuova brochure": "+ Nuevo folleto",
   "A tutta pagina": "A página completa",
@@ -1899,6 +1916,7 @@ const ES:Record<string,string> = {
   "Altre opere dell’archivio": "Otras obras del archivo",
 };
 const FR:Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "La fiche a changé depuis son ouverture. Fermez et rouvrez l’éditeur pour voir les données à jour.",
   "Posta": "Courrier",
   "+ Nuova brochure": "+ Nouvelle brochure",
   "A tutta pagina": "Pleine page",
@@ -2703,6 +2721,7 @@ const FR:Record<string,string> = {
   "Altre opere dell’archivio": "Autres œuvres de l’archive",
 };
 const DE:Record<string,string> = {
+  "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "Der Datensatz wurde seit dem Öffnen geändert. Schließe und öffne die Bearbeitung erneut, um die aktuellen Daten zu sehen.",
   "Posta": "E-Mail",
   "+ Nuova brochure": "+ Neue Broschüre",
   "A tutta pagina": "Ganzseitig",
@@ -3507,11 +3526,6 @@ const DE:Record<string,string> = {
   "Altre opere dell’archivio": "Weitere Werke im Archiv",
 };
 const translations:Record<AppLanguage,Record<string,string>>={en:EN,it:{},es:ES,fr:FR,de:DE};
-export function chooseLanguage(input:string|null|undefined):AppLanguage {
-  const code=(input||'').split(/[-_]/)[0].toLowerCase();
-  return ['it','en','es','fr','de'].includes(code) ? code as AppLanguage : 'en';
-}
 export function translate(key:string,language:AppLanguage):string {
-  if (language==='it') return key;
-  return translations[language][key] ?? translations.en[key] ?? key;
+  return translateLabel(key, language, translations);
 }

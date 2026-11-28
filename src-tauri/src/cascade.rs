@@ -4,7 +4,7 @@
 //! a collector carries the sales made to them. The interface first asks for the impact, shows it, and only
 //! then asks for the deletion with `cascade` set: without it nothing that has dependents is ever removed.
 use crate::db::Database;
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -169,8 +169,18 @@ pub(crate) fn remove_sales(tx: &Transaction, column: &str, id: &str) -> Result<V
         if deleted != 1 || still_present {
             return Err("Vendita non eliminata completamente: verifica l'archivio SQLite".into());
         }
-        tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1 AND status='sold'",
-            params![artwork, chrono::Utc::now().to_rfc3339()]).map_err(err)?;
+        let previous: Option<String> = tx.query_row(
+            "SELECT updated_at FROM artworks WHERE id=?1 AND status='sold'",
+            params![artwork], |row| row.get(0)).optional().map_err(err)?;
+        if let Some(previous) = previous {
+            let stamp = crate::commands::next_edit_timestamp(&previous)?;
+            let changed = tx.execute("UPDATE artworks SET status='available',updated_at=?2 WHERE id=?1 AND status='sold'",
+                params![artwork, stamp]).map_err(err)?;
+            let stored: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1 AND status='available' AND updated_at=?2)",
+                params![artwork, stamp], |r| r.get(0)).map_err(err)?;
+            if changed != 1 || !stored { return Err(crate::commands::STALE_EDIT.into()); }
+        }
     }
     let remaining: bool = tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM sales WHERE {column}=?1)"),
         params![id], |r| r.get(0)).map_err(err)?;

@@ -8,7 +8,7 @@ use std::{fs, io::Read, path::{Component, Path}};
 use tauri::State;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct GalleryImage {
     id: String, artwork_id: String, image_path: String,
     caption: Option<String>, created_at: String, sort_order: i64, kind: String,
@@ -29,6 +29,14 @@ fn err(e: impl std::fmt::Display) -> String { crate::util::friendly(e) }
 fn row(r: &Row<'_>) -> rusqlite::Result<GalleryImage> {
     Ok(GalleryImage { id: r.get(0)?, artwork_id: r.get(1)?, image_path: r.get(2)?,
         caption: r.get(3)?, created_at: r.get(4)?, sort_order: r.get(5)?, kind: r.get(6)? })
+}
+// Internal snapshot includes the catalogue link without changing the public IPC model.
+fn gallery_snapshot(conn: &rusqlite::Connection, artwork_id: &str) -> Result<Vec<(GalleryImage, Option<String>)>, String> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT {GALLERY_COLUMNS},media_id FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order,id"
+    )).map_err(err)?;
+    let rows = statement.query_map(params![artwork_id], |r| Ok((row(r)?, r.get(7)?))).map_err(err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(err)
 }
 fn relative_media_path(path: &str) -> bool {
     let mut components = Path::new(path).components();
@@ -62,12 +70,23 @@ fn normalize_caption(caption: Option<String>) -> Result<Option<String>, String> 
 }
 fn update_caption_core(db: &Database, image_id: &str, caption: Option<String>) -> Result<GalleryImage, String> {
     let caption = normalize_caption(caption)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let updated = conn.execute("UPDATE artwork_images SET caption=?2 WHERE id=?1",
-        params![image_id, caption]).map_err(err)?;
-    if updated == 0 { return Err("Fotografia non trovata".into()); }
-    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
-        params![image_id], row).map_err(err)
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let artwork_id: String = tx.query_row("SELECT artwork_id FROM artwork_images WHERE id=?1",
+        params![image_id], |r| r.get(0)).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    let mut expected = gallery_snapshot(&tx, &artwork_id)?;
+    let index = expected.iter().position(|(photo, _)| photo.id == image_id)
+        .ok_or("Fotografia non trovata")?;
+    let updated = tx.execute("UPDATE artwork_images SET caption=?2 WHERE id=?1",
+        params![image_id, &caption]).map_err(err)?;
+    if updated != 1 { return Err("Didascalia non aggiornata: verifica l'archivio SQLite".into()); }
+    expected[index].0.caption = caption;
+    if gallery_snapshot(&tx, &artwork_id)? != expected {
+        return Err("Didascalia non salvata correttamente: verifica l'archivio SQLite".into());
+    }
+    let (saved, _) = expected.swap_remove(index);
+    tx.commit().map_err(err)?;
+    Ok(saved)
 }
 fn list_core(db: &Database, artwork_id: &str) -> Result<Vec<GalleryImage>, String> {
     let conn = db.conn.lock().map_err(err)?;
@@ -138,36 +157,37 @@ where
         ).map_err(err)?;
         if !exists { return Err("Opera non trovata".into()); }
 
-        // This query also provides the count, so a concurrent addition cannot
-        // bypass the limit. Compact imported, duplicated or overflowing sort
-        // positions in the same transaction as the insertion.
-        let ordered_ids: Vec<String> = {
-            let mut query = tx.prepare(
-                "SELECT id FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order,id"
-            ).map_err(err)?;
-            let rows = query.query_map(params![artwork_id], |r| r.get::<_, String>(0)).map_err(err)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(err)?
-        };
-        if ordered_ids.len() >= 20 {
+        // Count, compact and verify the entire gallery in the same transaction.
+        let mut expected = gallery_snapshot(&tx, artwork_id)?;
+        if expected.len() >= 20 {
             return Err("Massimo 20 fotografie aggiuntive per opera".into());
         }
-        for (index, existing_id) in ordered_ids.iter().enumerate() {
+        for (index, (photo, _)) in expected.iter_mut().enumerate() {
             let position = i64::try_from(index + 1).map_err(|_| "Troppe fotografie per l'ordinamento")?;
-            tx.execute(
+            let changed = tx.execute(
                 "UPDATE artwork_images SET sort_order=?3 WHERE id=?1 AND artwork_id=?2",
-                params![existing_id, artwork_id, position],
+                params![&photo.id, artwork_id, position],
             ).map_err(err)?;
+            if changed != 1 { return Err("Ordinamento fotografie incompleto".into()); }
+            photo.sort_order = position;
         }
-        let next_position = i64::try_from(ordered_ids.len() + 1)
+        let next_position = i64::try_from(expected.len() + 1)
             .map_err(|_| "Troppe fotografie per l'ordinamento")?;
         let stamp = Utc::now().to_rfc3339();
-        tx.execute(
+        let inserted = tx.execute(
             "INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order)
              VALUES(?1,?2,?3,?4,?5,?6)",
             params![id, artwork_id, relative, caption, stamp, next_position],
         ).map_err(err)?;
-        let image = tx.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"),
-            params![id], row).map_err(err)?;
+        if inserted != 1 { return Err("Fotografia non inserita".into()); }
+        expected.push((GalleryImage {
+            id, artwork_id: artwork_id.to_owned(), image_path: relative,
+            caption, created_at: stamp, sort_order: next_position, kind: "OTHER".into(),
+        }, None));
+        if gallery_snapshot(&tx, artwork_id)? != expected {
+            return Err("Inserimento fotografia alterato da SQLite: verifica l'archivio".into());
+        }
+        let (image, _) = expected.pop().ok_or("Fotografia non inserita")?;
         tx.commit().map_err(err)?;
         Ok(image)
     })();
@@ -178,10 +198,23 @@ where
 }
 fn update_kind_core(db: &Database, image_id: &str, kind: &str) -> Result<GalleryImage, String> {
     let kind = normalize_kind(Some(kind))?;
-    let conn = db.conn.lock().map_err(err)?;
-    let updated = conn.execute("UPDATE artwork_images SET kind=?2 WHERE id=?1", params![image_id, kind]).map_err(err)?;
-    if updated == 0 { return Err("Fotografia non trovata".into()); }
-    conn.query_row(&format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1"), params![image_id], row).map_err(err)
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let artwork_id: String = tx.query_row("SELECT artwork_id FROM artwork_images WHERE id=?1",
+        params![image_id], |r| r.get(0)).optional().map_err(err)?.ok_or("Fotografia non trovata")?;
+    let mut expected = gallery_snapshot(&tx, &artwork_id)?;
+    let index = expected.iter().position(|(photo, _)| photo.id == image_id)
+        .ok_or("Fotografia non trovata")?;
+    let updated = tx.execute("UPDATE artwork_images SET kind=?2 WHERE id=?1",
+        params![image_id, &kind]).map_err(err)?;
+    if updated != 1 { return Err("Tipo fotografia non aggiornato: verifica l'archivio SQLite".into()); }
+    expected[index].0.kind = kind;
+    if gallery_snapshot(&tx, &artwork_id)? != expected {
+        return Err("Tipo fotografia non salvato correttamente: verifica l'archivio SQLite".into());
+    }
+    let (saved, _) = expected.swap_remove(index);
+    tx.commit().map_err(err)?;
+    Ok(saved)
 }
 #[tauri::command]
 pub fn update_artwork_gallery_kind(db: State<'_, Database>, image_id: String, kind: String) -> Result<GalleryImage, String> {
@@ -199,13 +232,14 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
     require_regular_media_dir(db)?;
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
-    let new_primary: String = tx.query_row(
-        "SELECT image_path FROM artwork_images WHERE id=?1 AND artwork_id=?2",
-        params![image_id, artwork_id], |r| r.get(0),
+    let original = tx.query_row(
+        &format!("SELECT {GALLERY_COLUMNS} FROM artwork_images WHERE id=?1 AND artwork_id=?2"),
+        params![image_id, artwork_id], row,
     ).optional().map_err(err)?.ok_or("Fotografia non trovata per questa opera")?;
-    let old_primary: Option<String> = tx.query_row(
-        "SELECT image_path FROM artworks WHERE id=?1",
-        params![artwork_id], |r| r.get(0),
+    let new_primary = &original.image_path;
+    let (old_primary, previous): (Option<String>, String) = tx.query_row(
+        "SELECT image_path,updated_at FROM artworks WHERE id=?1",
+        params![artwork_id], |r| Ok((r.get(0)?,r.get(1)?)),
     ).optional().map_err(err)?.ok_or("Opera non trovata")?;
 
     // Reject invalid references before changing either side. Never follow media symlinks.
@@ -223,7 +257,7 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
     // anything (or a sparse, oversized file) behind a gallery reference.
     // Reject it before the transaction changes the cover or gallery metadata.
     // Only its first 12 bytes are needed to detect our supported formats.
-    let candidate = fs::File::open(db.directory.join(&new_primary)).map_err(err)?;
+    let candidate = fs::File::open(db.directory.join(new_primary)).map_err(err)?;
     let size = candidate.metadata().map_err(err)?.len();
     if size == 0 || size > MAX_GALLERY_PREVIEW_BYTES {
         return Err("Fotografia da promuovere vuota o troppo grande (massimo 12 MiB)".into());
@@ -237,16 +271,43 @@ fn promote_core(db: &Database, artwork_id: &str, image_id: &str) -> Result<(), S
     // The catalogue link travels with the picture it describes.
     let new_media: Option<String> = tx.query_row("SELECT media_id FROM artwork_images WHERE id=?1", params![image_id], |r| r.get(0)).map_err(err)?;
     let old_media: Option<String> = tx.query_row("SELECT image_media_id FROM artworks WHERE id=?1", params![artwork_id], |r| r.get(0)).map_err(err)?;
-    tx.execute("UPDATE artworks SET image_path=?2,image_media_id=?4,updated_at=?3 WHERE id=?1",
-        params![artwork_id, new_primary, Utc::now().to_rfc3339(), new_media]).map_err(err)?;
-    if let Some(old_path) = old_primary {
+    // An imported archive can contain BEFORE triggers that silently suppress
+    // a write with RAISE(IGNORE). All parts of the swap must actually change
+    // one row, otherwise commit would leave the cover/gallery out of sync.
+    let stamp = crate::util::next_archive_revision(&previous)?;
+    let changed_cover = tx.execute("UPDATE artworks SET image_path=?2,image_media_id=?4,updated_at=?3 WHERE id=?1",
+        params![artwork_id, new_primary, &stamp, &new_media]).map_err(err)?;
+    if changed_cover != 1 {
+        return Err("Promozione incompleta: aggiornamento copertina rifiutato da SQLite".into());
+    }
+    let changed_gallery = if let Some(old_path) = old_primary.as_deref() {
         // The old cover has no caption. Do not retain the promoted photo's
         // potentially misleading caption on a different image.
         tx.execute("UPDATE artwork_images SET image_path=?2,caption=NULL,kind='OTHER',media_id=?3 WHERE id=?1",
-            params![image_id, old_path, old_media]).map_err(err)?;
+            params![image_id, old_path, &old_media]).map_err(err)?
     } else {
         // No old cover to swap: the gallery reference becomes the primary one.
-        tx.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?;
+        tx.execute("DELETE FROM artwork_images WHERE id=?1", params![image_id]).map_err(err)?
+    };
+    if changed_gallery != 1 {
+        return Err("Promozione incompleta: modifica della galleria rifiutata da SQLite".into());
+    }
+    // AFTER triggers may rewrite a successful UPDATE or recreate a deleted row.
+    // Read both sides after the final write, including nullable catalogue links.
+    let cover_saved: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artworks WHERE id=?1 AND image_path=?2 AND image_media_id IS ?3 AND updated_at=?4)",
+        params![artwork_id, new_primary, &new_media, &stamp], |r| r.get(0)).map_err(err)?;
+    let gallery_saved: bool = if let Some(old_path) = old_primary.as_deref() {
+        tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM artwork_images WHERE id=?1 AND artwork_id=?2 AND image_path=?3 AND media_id IS ?4 AND caption IS NULL AND kind='OTHER' AND created_at=?5 AND sort_order=?6)",
+            params![image_id, artwork_id, old_path, &old_media, &original.created_at, original.sort_order],
+            |r| r.get(0)).map_err(err)?
+    } else {
+        tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM artwork_images WHERE id=?1)",
+            params![image_id], |r| r.get(0)).map_err(err)?
+    };
+    if !cover_saved || !gallery_saved {
+        return Err("Promozione incompleta: copertina o galleria alterata da SQLite".into());
     }
     tx.commit().map_err(err)
 }
@@ -262,18 +323,15 @@ fn move_core(db: &Database, artwork_id: &str, image_id: &str, direction: &str) -
     if direction != "up" && direction != "down" { return Err("Direzione non valida".into()); }
     let mut conn = db.conn.lock().map_err(err)?;
     let tx = conn.transaction().map_err(err)?;
-    let mut ordered_ids: Vec<String> = {
-        let mut statement = tx.prepare(
-            "SELECT id FROM artwork_images WHERE artwork_id=?1 ORDER BY sort_order,id"
-        ).map_err(err)?;
-        let rows = statement.query_map(params![artwork_id], |r| r.get::<_, String>(0)).map_err(err)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(err)?
-    };
-    let index = ordered_ids.iter().position(|id| id.as_str() == image_id)
+    // Keep the complete gallery snapshot, including nullable catalogue links.
+    // A successful UPDATE alone does not prove that an imported SQLite trigger
+    // preserved the requested order or the other photographs' metadata.
+    let mut expected = gallery_snapshot(&tx, artwork_id)?;
+    let index = expected.iter().position(|(photo, _)| photo.id == image_id)
         .ok_or("Fotografia non trovata per questa opera")?;
     let neighbor = if direction == "up" {
         index.checked_sub(1)
-    } else if index + 1 < ordered_ids.len() {
+    } else if index + 1 < expected.len() {
         Some(index + 1)
     } else {
         None
@@ -281,14 +339,18 @@ fn move_core(db: &Database, artwork_id: &str, image_id: &str, direction: &str) -
     let Some(neighbor) = neighbor else {
         return tx.commit().map_err(err); // Already first/last: no-op.
     };
-    ordered_ids.swap(index, neighbor);
-    for (index, id) in ordered_ids.iter().enumerate() {
+    expected.swap(index, neighbor);
+    for (index, (photo, _)) in expected.iter_mut().enumerate() {
         let position = i64::try_from(index + 1).map_err(|_| "Troppe fotografie per il riordino")?;
         let changed = tx.execute(
             "UPDATE artwork_images SET sort_order=?3 WHERE artwork_id=?1 AND id=?2",
-            params![artwork_id, id, position],
+            params![artwork_id, &photo.id, position],
         ).map_err(err)?;
         if changed != 1 { return Err("Riordino fotografie incompleto".into()); }
+        photo.sort_order = position;
+    }
+    if gallery_snapshot(&tx, artwork_id)? != expected {
+        return Err("Riordino fotografie alterato da SQLite: verifica l'archivio".into());
     }
     tx.commit().map_err(err)
 }
@@ -490,6 +552,55 @@ mod tests {
             vec!["one","two","three"]);
     }
     #[test]
+    fn gallery_reorder_rolls_back_ignored_or_rewritten_rows_and_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            for id in ["a", "b"] {
+                conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                    VALUES(?1,?1,?1,'t','t')", params![id]).unwrap();
+            }
+            for (id, art, pos) in [("one","a",1),("two","a",2),("three","a",3),("other","b",1)] {
+                conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,kind)
+                    VALUES(?1,?2,?3,?1,'fixed',?4,'DETAIL')",
+                    params![id, art, format!("media/{id}.jpg"), pos]).unwrap();
+                fs::write(db.directory.join(format!("media/{id}.jpg")), id.as_bytes()).unwrap();
+            }
+        }
+        let original = list_core(&db, "a").unwrap();
+        let unrelated = list_core(&db, "b").unwrap();
+        for trigger in [
+            "CREATE TRIGGER sabotage BEFORE UPDATE OF sort_order ON artwork_images
+                WHEN NEW.id='three' BEGIN SELECT RAISE(IGNORE); END;",
+            "CREATE TRIGGER sabotage AFTER UPDATE OF sort_order ON artwork_images
+                WHEN NEW.id='three' AND NEW.sort_order=2
+                BEGIN UPDATE artwork_images SET sort_order=OLD.sort_order WHERE id=NEW.id; END;",
+            "CREATE TRIGGER sabotage AFTER UPDATE OF sort_order ON artwork_images
+                WHEN NEW.id='two' BEGIN UPDATE artwork_images SET caption='changed' WHERE id='one'; END;",
+            "CREATE TRIGGER sabotage AFTER UPDATE OF sort_order ON artwork_images
+                WHEN NEW.id='two' BEGIN DELETE FROM artwork_images WHERE id='one'; END;",
+        ] {
+            db.conn.lock().unwrap().execute_batch(trigger).unwrap();
+            assert!(move_core(&db, "a", "three", "up").is_err(), "{trigger}");
+            assert_eq!(list_core(&db, "a").unwrap(), original);
+            assert_eq!(list_core(&db, "b").unwrap(), unrelated);
+            for id in ["one", "two", "three", "other"] {
+                assert_eq!(fs::read(db.directory.join(format!("media/{id}.jpg"))).unwrap(), id.as_bytes());
+            }
+            db.conn.lock().unwrap().execute_batch("DROP TRIGGER sabotage").unwrap();
+        }
+        move_core(&db, "a", "three", "up").unwrap();
+        let mut expected = original;
+        expected.swap(1, 2);
+        for (index, photo) in expected.iter_mut().enumerate() {
+            photo.sort_order = (index + 1) as i64;
+        }
+        assert_eq!(list_core(&db, "a").unwrap(), expected);
+        assert_eq!(list_core(&db, "b").unwrap(), unrelated);
+    }
+
+    #[test]
     fn reordering_repairs_duplicate_and_extreme_positions_without_touching_other_artworks() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().join("app")).unwrap();
@@ -592,6 +703,75 @@ mod tests {
         assert_eq!(photos[0].sort_order, i64::MAX);
         assert_eq!(photos[0].id, "existing");
         assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn gallery_append_and_metadata_preserve_catalogue_links_and_other_photos() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('a','A','A','t','t'),('b','B','B','t','t');
+                INSERT INTO media_items(id,original_name,current_revision_id,created_at,updated_at)
+                VALUES('m','one.jpg','r','t','t');
+                INSERT INTO media_revisions(id,media_id,number,kind,image_path,width,height,size_bytes,sha256,created_at)
+                VALUES('r','m',1,'ORIGINAL','media/one.jpg',1,1,3,
+                    '0000000000000000000000000000000000000000000000000000000000000000','t');
+                INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,kind,media_id)
+                VALUES('one','a','media/one.jpg','old','t',8,'DETAIL','m'),
+                    ('two','a','media/two.jpg',NULL,'t',9,'OTHER',NULL),
+                    ('other','b','media/other.jpg',NULL,'t',1,'OTHER',NULL);").unwrap();
+            for id in ["one", "two", "other"] {
+                fs::write(db.directory.join(format!("media/{id}.jpg")), id.as_bytes()).unwrap();
+            }
+        }
+        let snapshot = |art: &str| gallery_snapshot(&db.conn.lock().unwrap(), art).unwrap();
+        let original = snapshot("a");
+        let unrelated = snapshot("b");
+        for (operation, trigger) in [
+            ("append", "BEFORE UPDATE OF sort_order ON artwork_images WHEN NEW.id='one'
+                BEGIN SELECT RAISE(IGNORE); END"),
+            ("append", "AFTER UPDATE OF sort_order ON artwork_images WHEN NEW.id='one'
+                BEGIN UPDATE artwork_images SET media_id=NULL WHERE id=NEW.id; END"),
+            ("append", "AFTER INSERT ON artwork_images
+                BEGIN UPDATE artwork_images SET caption='wrong' WHERE id=NEW.id; END"),
+            ("append", "AFTER INSERT ON artwork_images
+                BEGIN DELETE FROM artwork_images WHERE id='one'; END"),
+            ("caption", "AFTER UPDATE OF caption ON artwork_images
+                BEGIN UPDATE artwork_images SET media_id=NULL WHERE id=NEW.id; END"),
+            ("caption", "AFTER UPDATE OF caption ON artwork_images WHEN NEW.id='one'
+                BEGIN UPDATE artwork_images SET kind='FRAMED' WHERE id='two'; END"),
+            ("kind", "AFTER UPDATE OF kind ON artwork_images
+                BEGIN UPDATE artwork_images SET media_id=NULL WHERE id=NEW.id; END"),
+        ] {
+            db.conn.lock().unwrap().execute_batch(&format!("CREATE TRIGGER sabotage {trigger};")).unwrap();
+            let result = match operation {
+                "append" => add_gallery_bytes(&db, "a", &[0xff, 0xd8, 0xff, 1], Some("new".into())),
+                "caption" => update_caption_core(&db, "one", Some("new".into())),
+                _ => update_kind_core(&db, "one", "FRAMED"),
+            };
+            assert!(result.is_err(), "{trigger}");
+            assert_eq!(snapshot("a"), original);
+            assert_eq!(snapshot("b"), unrelated);
+            assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 3);
+            for id in ["one", "two", "other"] {
+                assert_eq!(fs::read(db.directory.join(format!("media/{id}.jpg"))).unwrap(), id.as_bytes());
+            }
+            db.conn.lock().unwrap().execute_batch("DROP TRIGGER sabotage").unwrap();
+        }
+        update_caption_core(&db, "one", Some("new".into())).unwrap();
+        update_kind_core(&db, "one", "FRAMED").unwrap();
+        let added = add_gallery_bytes(&db, "a", &[0xff, 0xd8, 0xff, 1], Some("new".into())).unwrap();
+        let saved = snapshot("a");
+        assert_eq!(saved.len(), 3);
+        assert_eq!(saved[0].0.caption.as_deref(), Some("new"));
+        assert_eq!(saved[0].0.kind, "FRAMED");
+        assert_eq!(saved[0].1.as_deref(), Some("m"));
+        assert_eq!(saved[2].0, added);
+        assert_eq!(saved[2].1, None);
+        assert_eq!(snapshot("b"), unrelated);
+        assert_eq!(fs::read_dir(db.directory.join("media")).unwrap().count(), 4);
     }
 
     #[test]
@@ -932,6 +1112,76 @@ mod tests {
         assert!(mime(b"not a picture").is_none());
     }
     #[test]
+    fn imported_sqlite_triggers_cannot_silently_corrupt_gallery_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::open(dir.path().join("app")).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','ART','Artwork','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,kind,created_at)
+                VALUES('photo','art','media/photo.jpg','Original','OTHER','t')", []).unwrap();
+            conn.execute_batch(
+                "CREATE TRIGGER ignore_caption BEFORE UPDATE OF caption ON artwork_images
+                 BEGIN SELECT RAISE(IGNORE); END;"
+            ).unwrap();
+        }
+        assert!(update_caption_core(&db, "photo", Some("New".into())).unwrap_err().contains("non aggiornata"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER ignore_caption;
+                 CREATE TRIGGER undo_caption AFTER UPDATE OF caption ON artwork_images
+                 BEGIN
+                   UPDATE artwork_images SET caption='Original' WHERE id=NEW.id;
+                   UPDATE artworks SET title='Unexpected' WHERE id=NEW.artwork_id;
+                 END;"
+            ).unwrap();
+        }
+        assert!(update_caption_core(&db, "photo", Some("New".into())).unwrap_err().contains("non salvata"));
+        {
+            let conn = db.conn.lock().unwrap();
+            let title: String = conn.query_row("SELECT title FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+            assert_eq!(title, "Artwork", "trigger side effects must roll back");
+            conn.execute_batch(
+                "DROP TRIGGER undo_caption;
+                 CREATE TRIGGER rewrite_link AFTER UPDATE OF caption ON artwork_images
+                 BEGIN UPDATE artwork_images SET image_path='media/other.jpg' WHERE id=NEW.id; END;"
+            ).unwrap();
+        }
+        assert!(update_caption_core(&db, "photo", Some("New".into())).unwrap_err().contains("non salvata"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER rewrite_link;
+                 CREATE TRIGGER ignore_kind BEFORE UPDATE OF kind ON artwork_images
+                 BEGIN SELECT RAISE(IGNORE); END;"
+            ).unwrap();
+        }
+        assert!(update_kind_core(&db, "photo", "DETAIL").unwrap_err().contains("non aggiornato"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER ignore_kind;
+                 CREATE TRIGGER undo_kind AFTER UPDATE OF kind ON artwork_images
+                 BEGIN UPDATE artwork_images SET kind='OTHER' WHERE id=NEW.id; END;"
+            ).unwrap();
+        }
+        assert!(update_kind_core(&db, "photo", "DETAIL").unwrap_err().contains("non salvato"));
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute_batch("DROP TRIGGER undo_kind;").unwrap();
+        }
+        let preserved = list_core(&db, "art").unwrap();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(preserved[0].caption.as_deref(), Some("Original"));
+        assert_eq!(preserved[0].kind, "OTHER");
+        assert_eq!(preserved[0].image_path, "media/photo.jpg");
+        assert_eq!(update_caption_core(&db, "photo", Some("New".into())).unwrap().caption.as_deref(), Some("New"));
+        assert_eq!(update_kind_core(&db, "photo", "DETAIL").unwrap().kind, "DETAIL");
+    }
+
+    #[test]
     fn captions_can_be_changed_or_cleared_without_touching_media_or_other_artworks() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::open(dir.path().join("app")).unwrap();
@@ -1023,8 +1273,11 @@ mod tests {
         }
         assert!(promote_core(&db, "b", "side").is_err());
         assert!(promote_core(&db, "a", "missing").is_err());
+        db.conn.lock().unwrap().execute("UPDATE artworks SET updated_at='2099-01-01T00:00:00.000000000Z' WHERE id='a'", []).unwrap();
         promote_core(&db, "a", "side").unwrap();
         let conn = db.conn.lock().unwrap();
+        let revision: String = conn.query_row("SELECT updated_at FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(revision, "2099-01-01T00:00:00.000000001Z");
         let main: String = conn.query_row(
             "SELECT image_path FROM artworks WHERE id='a'", [], |r| r.get(0)).unwrap();
         let (gallery, caption, created): (String, Option<String>, String) = conn.query_row(
@@ -1039,6 +1292,125 @@ mod tests {
         let other: Option<String> = conn.query_row(
             "SELECT image_path FROM artworks WHERE id='b'", [], |r| r.get(0)).unwrap();
         assert_eq!(other, None);
+    }
+
+    #[test]
+    fn promotion_rolls_back_when_imported_triggers_silently_ignore_a_swap() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(temp.path().join("app")).unwrap();
+        let cover = "media/cover.png";
+        let gallery = "media/gallery.png";
+        let png = [137, 80, 78, 71, 13, 10, 26, 10];
+        fs::write(db.directory.join(cover), png).unwrap();
+        fs::write(db.directory.join(gallery), png).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,image_path,created_at,updated_at)
+                VALUES('art','A','Art',?1,'t','t')", params![cover]).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at)
+                VALUES('photo','art',?1,'Back','t')", params![gallery]).unwrap();
+        }
+
+        // With a cover, both the artwork UPDATE and the gallery UPDATE can
+        // independently be suppressed. Neither must commit a half-swap.
+        for (create, drop_trigger) in [
+            ("CREATE TRIGGER block_cover BEFORE UPDATE ON artworks
+              BEGIN SELECT RAISE(IGNORE); END;", "DROP TRIGGER block_cover;"),
+            ("CREATE TRIGGER block_gallery BEFORE UPDATE ON artwork_images
+              BEGIN SELECT RAISE(IGNORE); END;", "DROP TRIGGER block_gallery;"),
+            ("CREATE TRIGGER undo_cover AFTER UPDATE OF image_path ON artworks
+              BEGIN UPDATE artworks SET image_path=OLD.image_path WHERE id=NEW.id; END;",
+              "DROP TRIGGER undo_cover;"),
+            ("CREATE TRIGGER undo_gallery AFTER UPDATE OF image_path ON artwork_images
+              BEGIN UPDATE artwork_images SET caption='Back' WHERE id=NEW.id; END;",
+              "DROP TRIGGER undo_gallery;"),
+            ("CREATE TRIGGER move_gallery AFTER UPDATE OF image_path ON artwork_images
+              BEGIN UPDATE artwork_images SET sort_order=99 WHERE id=NEW.id; END;",
+              "DROP TRIGGER move_gallery;"),
+            ("CREATE TRIGGER undo_revision AFTER UPDATE OF image_path ON artwork_images
+              BEGIN UPDATE artworks SET updated_at='t' WHERE id=NEW.artwork_id; END;",
+              "DROP TRIGGER undo_revision;"),
+        ] {
+            db.conn.lock().unwrap().execute_batch(create).unwrap();
+            let error = promote_core(&db, "art", "photo").unwrap_err();
+            assert!(error.contains("Promozione incompleta"), "{error}");
+            {
+                let conn = db.conn.lock().unwrap();
+                let primary: String = conn.query_row(
+                    "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+                let (extra, caption): (String, String) = conn.query_row(
+                    "SELECT image_path,caption FROM artwork_images WHERE id='photo'",
+                    [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+                let updated: String = conn.query_row(
+                    "SELECT updated_at FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+                assert_eq!((primary.as_str(), extra.as_str(), caption.as_str(), updated.as_str()),
+                    (cover, gallery, "Back", "t"));
+                let position: i64 = conn.query_row("SELECT sort_order FROM artwork_images WHERE id='photo'",
+                    [], |r| r.get(0)).unwrap();
+                assert_eq!(position, 0);
+            }
+            assert!(db.directory.join(cover).is_file());
+            assert!(db.directory.join(gallery).is_file());
+            db.conn.lock().unwrap().execute_batch(drop_trigger).unwrap();
+        }
+        promote_core(&db, "art", "photo").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let primary: String = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+        assert_eq!(primary, gallery);
+    }
+
+    #[test]
+    fn first_cover_promotion_rolls_back_when_gallery_delete_is_ignored() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::open(temp.path().join("app")).unwrap();
+        let photo = "media/first.png";
+        fs::write(db.directory.join(photo), [137, 80, 78, 71, 13, 10, 26, 10]).unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO artworks(id,code,title,created_at,updated_at)
+                VALUES('art','A','Art','t','t')", []).unwrap();
+            conn.execute("INSERT INTO artwork_images(id,artwork_id,image_path,created_at)
+                VALUES('photo','art',?1,'t')", params![photo]).unwrap();
+            conn.execute_batch("CREATE TRIGGER block_gallery_delete BEFORE DELETE ON artwork_images
+                BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        }
+        let error = promote_core(&db, "art", "photo").unwrap_err();
+        assert!(error.contains("Promozione incompleta"), "{error}");
+        {
+            let conn = db.conn.lock().unwrap();
+            let primary: Option<String> = conn.query_row(
+                "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+            let remaining: i64 = conn.query_row(
+                "SELECT count(*) FROM artwork_images WHERE id='photo'", [], |r| r.get(0)).unwrap();
+            let updated: String = conn.query_row(
+                "SELECT updated_at FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+            assert_eq!((primary, remaining, updated.as_str()), (None, 1, "t"));
+            conn.execute_batch("DROP TRIGGER block_gallery_delete;
+                CREATE TRIGGER recreate_gallery AFTER DELETE ON artwork_images BEGIN
+                    INSERT INTO artwork_images(id,artwork_id,image_path,caption,created_at,sort_order,kind,media_id)
+                    VALUES(OLD.id,OLD.artwork_id,OLD.image_path,OLD.caption,OLD.created_at,OLD.sort_order,OLD.kind,OLD.media_id);
+                END;").unwrap();
+        }
+        assert!(promote_core(&db, "art", "photo").unwrap_err().contains("Promozione incompleta"));
+        {
+            let conn = db.conn.lock().unwrap();
+            let (primary, updated): (Option<String>, String) = conn.query_row(
+                "SELECT image_path,updated_at FROM artworks WHERE id='art'", [],
+                |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+            let remaining: String = conn.query_row("SELECT image_path FROM artwork_images WHERE id='photo'",
+                [], |r| r.get(0)).unwrap();
+            assert_eq!((primary, updated.as_str(), remaining.as_str()), (None, "t", photo));
+            conn.execute_batch("DROP TRIGGER recreate_gallery;").unwrap();
+        }
+        assert!(db.directory.join(photo).is_file());
+        promote_core(&db, "art", "photo").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let primary: String = conn.query_row(
+            "SELECT image_path FROM artworks WHERE id='art'", [], |r| r.get(0)).unwrap();
+        let remaining: i64 = conn.query_row(
+            "SELECT count(*) FROM artwork_images WHERE id='photo'", [], |r| r.get(0)).unwrap();
+        assert_eq!((primary.as_str(), remaining), (photo, 0));
     }
 
     #[test]
