@@ -1,9 +1,9 @@
 /**
- * User-facing metadata for the twelve local SQLite CSV registers.
+ * User-facing metadata for the fourteen local SQLite CSV registers.
  * Filename suggestions are stable and translated by UI messages, not by the
  * OS locale: importing these CSVs back is intentionally NOT supported.
  */
-export type CsvRegisterKind = 'artworks' | 'gallery' | 'collectors' | 'collector_photos' | 'raw_files' | 'certificates' | 'sales' | 'balances' | 'receipts' | 'expenses' | 'allocations' | 'installments';
+export type CsvRegisterKind = 'artworks' | 'gallery' | 'collectors' | 'collector_photos' | 'raw_files' | 'certificates' | 'sales' | 'balances' | 'receipts' | 'expenses' | 'allocations' | 'installments' | 'media_items' | 'media_revisions';
 
 export interface CsvRegisterOption {
   title: string;
@@ -13,7 +13,7 @@ export interface CsvRegisterOption {
 
 export const csvRegisterOptions: Record<CsvRegisterKind, CsvRegisterOption> = {
   artworks: {
-    title: 'Esporta opere CSV',
+    title: 'Esporta opere CSV (con acquirenti)',
     filename: 'opere',
     success: 'Registro opere esportato in CSV locale.'
   },
@@ -66,6 +66,16 @@ export const csvRegisterOptions: Record<CsvRegisterKind, CsvRegisterOption> = {
     title: 'Esporta ripartizioni CSV',
     filename: 'ripartizioni',
     success: 'Ripartizioni esportate in CSV locale.'
+  },
+  media_items: {
+    title: 'Esporta catalogo immagini CSV',
+    filename: 'immagini',
+    success: 'Catalogo immagini esportato in CSV locale.'
+  },
+  media_revisions: {
+    title: 'Esporta versioni immagini CSV',
+    filename: 'versioni',
+    success: 'Versioni immagini esportate in CSV locale.'
   },
   expenses: {
     title: 'Esporta spese CSV',

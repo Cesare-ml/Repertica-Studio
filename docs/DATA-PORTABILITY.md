@@ -1,10 +1,10 @@
 # Esportazioni CSV locali — registri dell'archivio
 
-L'esportatore Rust `export_ledger_csv` supporta dodici valori di `kind`:
+L'esportatore Rust `export_ledger_csv` supporta quattordici valori di `kind`:
 
 | Tipo | Righe esportate | Contenuti |
 | --- | --- | --- |
-| `artworks` | Tutte le opere | UUID, codice, titolo, anno, tecnica, supporto, dimensioni in cm, descrizione, ubicazione, stato, percorso dell'immagine principale e date |
+| `artworks` | Tutte le opere, comprese quelle invendute | UUID, codice, titolo, anno, tecnica, supporto, dimensioni in cm, descrizione, ubicazione, stato, percorso dell'immagine principale e date; in coda UUID vendita e collezionista, nome attuale del collezionista e data della vendita (vuoti per opere invendute) |
 | `gallery` | Tutte le fotografie aggiuntive della galleria | UUID foto e opera, codice e titolo attuali, percorso relativo del file, didascalia, ordine di visualizzazione, data e tipo (`kind`: `DETAIL`, `SIGNATURE`, `DIGITAL_MOCKUP`, `IN_SITU`, `OTHER`, `FRAMED`, `WORK_IN_PROGRESS`); non contiene i byte delle immagini |
 | `collectors` | Tutti i collezionisti | UUID, nome completo, contatti e note private, date; in coda nome, cognome, dati di nascita, profili social, percorso della foto profilo e numero di fotografie |
 | `collector_photos` | Tutte le fotografie dei collezionisti, profilo e aggiuntive | UUID foto/collezionista, nome attuale, tipo (`PROFILE` o `PHOTO`), percorso relativo, UUID Media Center facoltativo e data; nessun file binario |
@@ -16,8 +16,12 @@ L'esportatore Rust `export_ledger_csv` supporta dodici valori di `kind`:
 | `balances` | Tutti i saldi delle vendite | UUID vendita/opera/collezionista, data, valuta, lordo, incassato dichiarato e residuo in centesimi (anche vendite senza incassi) |
 | `expenses` | Tutte le spese | UUID, date, causali, fornitori, importi in centesimi, fondo (UUID e, in coda, nome della parte) |
 | `receipts` | Tutti gli incassi registrati manualmente | UUID incasso/vendita/opera/collezionista, data, importo in centesimi, valuta, metodo, riferimento, note e data di registrazione; **se presente**, percorso relativo, nome originale, MIME, dimensione, SHA-256 e data dell'allegato locale dell'incasso |
+| `media_items` | Tutte le immagini, incluse quelle cestinate | UUID immagine, titolo, descrizione, testo alternativo, crediti, copyright, nome originale, stato, versione corrente, hash percettivo e date |
+| `media_revisions` | Tutte le versioni, anche storiche | UUID versione e immagine, progressivo, tipo, percorso, dimensioni, byte, SHA-256 registrato, JSON operazioni e data |
 
 Tutti i registri sono esportati integralmente, senza dipendere dai filtri dell'interfaccia. L'output è UTF-8 con BOM, separatore `;`, righe CRLF, campi testuali tra virgolette con escape delle virgolette, e difesa contro formule di fogli elettronici. Le dimensioni sono numeri decimali con punto (non valori monetari). I campi vuoti non conservano la distinzione fra stringa vuota e `NULL`.
+
+**Collegamenti opera–collezionista (`artworks`):** le quattro colonne finali `sale_id`, `collector_id`, `collector_name`, `sold_at` identificano la vendita dell'opera e il suo acquirente, senza richiedere un incrocio manuale con il registro `sales`. La relazione usa UUID stabili e un `LEFT JOIN`: anche un'opera mai venduta viene esportata **una sola volta**, con queste quattro celle vuote. `collector_name` è il nome **attuale** nell'archivio, non una dichiarazione storica immutabile; per importo, note e ripartizioni continua a fare fede il registro `sales`. I nuovi campi sono aggiunti in coda per mantenere l'ordine delle colonne precedenti, ma gli strumenti esterni che assumono un numero fisso di colonne devono essere adattati. Anche questo CSV contiene dati personali in chiaro: il pulsante e il dialogo nativo indicano esplicitamente che contiene gli acquirenti. La data di vendita è convalidata prima di esportare, anche nel registro opere.
 
 **Registri aggiuntivi (`collector_photos`, `raw_files`):** espongono riferimenti stabili e metadati per ricostruire il legame con collezionisti, opere e Media Center. Una foto profilo precede le foto aggiuntive dello stesso collezionista; i file RAW sono ordinati per codice opera. I due `kind` sono disponibili anche dai pulsanti CSV in **Opere → Metadati RAW** e **Collezionisti → Fotografie**; il comando Rust `export_ledger_csv` salva i registri nella cartella scelta dall'utente. Non contengono byte di immagini/RAW, né verificano nuovamente gli SHA-256; per trasferire effettivamente i file resta necessario un backup completo SQLite + `media/`.
 
@@ -34,6 +38,8 @@ Il campo `current_artwork_title` nei certificati mostra il **titolo attuale** co
 - Il formato CSV è destinato a analisi e interoperabilità **in sola lettura**, non è un formato di reimportazione transazionale. Le immagini, i file associati e l'intero schema SQLite non sono contenuti nei CSV: per una copia completa portabile usare sempre **Impostazioni → Backup** e la sua verifica SHA-256.
 - L'esportazione `sales` registra vendite **non necessariamente incassate**: non deve essere descritta come saldo bancario. L'esportazione distinta `receipts` elenca **gli incassi dichiarati dall'utente**, non movimenti bancari verificati: un incasso può essere parziale; lo stesso `sale_id` può comparire più volte. Il registro `balances` riporta una riga per vendita con importo lordo, incassato dichiarato e residuo: non considera automaticamente pagate le vendite prive di incassi.
 - **Interfaccia**: Opere (registri separati per schede e metadati galleria), Collezionisti, Certificati, Vendite (tre pulsanti separati per vendite, incassi e saldi) e Acquisti e spese dispongono del pulsante CSV. Il dialogo nativo propone un nome `ReperticaStudio-<registro>-AAAA-MM-GG.csv` e lascia scegliere qualsiasi cartella accessibile. Se il percorso è già occupato, il backend rifiuta la sovrascrittura e mostra un errore; scegliere un nuovo nome. Le esportazioni includono **tutti** i record, anche se nell'interfaccia sono attivi filtri o un anno specifico.
+
+**Media Center:** i due nuovi registri si trovano in **Impostazioni → Esportazioni → Libreria immagini**. Includono anche il cestino e le versioni precedenti, indipendentemente dai filtri. Se la versione corrente non esiste o appartiene a un altro media, entrambi gli export sono rifiutati. Non comprendono byte dei file, tag o raccolte e non ricalcolano gli hash: usare il backup completo verificato per trasferire l’intera libreria. I CSV non sono un formato di ripristino.
 
 ## Collaudo
 

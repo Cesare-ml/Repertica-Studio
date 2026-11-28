@@ -5,9 +5,9 @@ import { csvRegisterOptions } from '../src/app/csv-registers.ts';
 import { translate } from '../src/app/i18n.ts';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
-const kinds = ['artworks', 'gallery', 'collectors', 'collector_photos', 'raw_files', 'certificates', 'sales', 'balances', 'receipts', 'expenses', 'allocations', 'installments'];
+const kinds = ['artworks', 'gallery', 'collectors', 'collector_photos', 'raw_files', 'certificates', 'sales', 'balances', 'receipts', 'expenses', 'allocations', 'installments', 'media_items', 'media_revisions'];
 
-test('all twelve backend CSV register kinds have unique local export labels and filenames', () => {
+test('all fourteen backend CSV register kinds have unique local export labels and filenames', () => {
   assert.deepEqual(Object.keys(csvRegisterOptions).sort(), [...kinds].sort());
   const backend = read('src-tauri/src/export.rs');
   const filenames = new Set();
@@ -69,6 +69,17 @@ test('sale balances export includes exact cents and does not infer receipt recor
   }
 });
 
+test('artwork register appends purchaser UUIDs and keeps the unsold works via LEFT JOIN', () => {
+  const backend = read('src-tauri/src/export.rs');
+  assert.match(backend, /fixed_price_cents;sale_id;collector_id;collector_name;sold_at"/);
+  assert.match(backend, /FROM artworks a\s+LEFT JOIN sales s ON s\.artwork_id=a\.id\s+LEFT JOIN collectors c ON c\.id=s\.collector_id/);
+  assert.match(backend, /s\.id,s\.collector_id,c\.name,s\.sold_at/);
+  assert.equal(csvRegisterOptions.artworks.title, 'Esporta opere CSV (con acquirenti)');
+  for (const locale of ['en', 'es', 'fr', 'de']) {
+    assert.notEqual(translate(csvRegisterOptions.artworks.title, locale), csvRegisterOptions.artworks.title);
+  }
+});
+
 test('gallery metadata export preserves image UUIDs, artwork relation, captions and order', () => {
   const backend = read('src-tauri/src/export.rs');
   const html = read('src/app/app.component.html');
@@ -98,4 +109,19 @@ test('collector photos and RAW metadata CSV exports are accessible and translate
   }
   assert.match(backend, /FROM collector_images p JOIN collectors c ON c.id=p.collector_id/);
   assert.match(backend, /FROM artwork_raw_files r JOIN artworks a ON a.id=r.artwork_id/);
+});
+
+test('media metadata exports include full catalog and revision history with translated labels', () => {
+  const backend = read('src-tauri/src/export.rs');
+  const html = read('src/app/app.component.html');
+  for (const kind of ['media_items', 'media_revisions']) {
+    assert.ok(html.includes("exportLedger('" + kind + "')"));
+    for (const locale of ['en', 'es', 'fr', 'de']) {
+      assert.notEqual(translate(csvRegisterOptions[kind].title, locale), csvRegisterOptions[kind].title);
+      assert.notEqual(translate(csvRegisterOptions[kind].success, locale), csvRegisterOptions[kind].success);
+    }
+  }
+  assert.match(backend, /FROM media_items ORDER BY created_at,id/);
+  assert.match(backend, /FROM media_revisions ORDER BY media_id,number,id/);
+  assert.match(backend, /r\.id=m\.current_revision_id AND r\.media_id=m\.id/);
 });

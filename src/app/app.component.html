@@ -501,7 +501,7 @@
           <p>{{ tr('Copie dei registri in formato CSV, apribili con Excel o LibreOffice. Sono esportazioni di sola lettura: non modificano l’archivio e non si possono reimportare.') }}</p>
           <div class="export-groups">
             <div class="export-group"><h4>{{ tr('Archivio opere') }}</h4>
-              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('artworks')" [disabled]="busy || !initialized">{{ tr('Esporta opere CSV (con acquirenti)') }}</button>
               <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('gallery')" [disabled]="busy || !initialized">{{ tr('Esporta metadati galleria CSV') }}</button>
               <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('raw_files')" [disabled]="busy || !initialized">{{ tr('Esporta metadati RAW CSV') }}</button>
             </div>
@@ -518,6 +518,10 @@
             </div>
             <div class="export-group"><h4>{{ tr('Certificati') }}</h4>
               <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('certificates')" [disabled]="busy || !initialized">{{ tr('Esporta certificati CSV') }}</button>
+            </div>
+            <div class="export-group"><h4>{{ tr('Libreria immagini') }}</h4>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('media_items')" [disabled]="busy || !initialized">{{ tr('Esporta catalogo immagini CSV') }}</button>
+              <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('media_revisions')" [disabled]="busy || !initialized">{{ tr('Esporta versioni immagini CSV') }}</button>
             </div>
             <div class="export-group"><h4>{{ tr('Spese') }}</h4>
               <button class="secondary small action-glyph action-glyph--export" type="button" (click)="exportLedger('expenses')" [disabled]="busy || !initialized">{{ tr('Esporta spese CSV') }}</button>
