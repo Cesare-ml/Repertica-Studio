@@ -143,9 +143,15 @@ pub fn link(conn: &Connection, artwork_id: &str, staged: &StagedRaw) -> Result<O
     if !exists { return Err("Opera non trovata".into()); }
     let previous: Option<String> = conn.query_row("SELECT media_path FROM artwork_raw_files WHERE artwork_id=?1", params![artwork_id], |r| r.get(0))
         .optional().map_err(err)?;
-    conn.execute("DELETE FROM artwork_raw_files WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
-    conn.execute("INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
+    let deleted = conn.execute("DELETE FROM artwork_raw_files WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
+    if previous.is_some() && deleted != 1 {
+        return Err("Il RAW precedente non è stato scollegato: sostituzione annullata".into());
+    }
+    let inserted = conn.execute("INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
         params![artwork_id, staged.relative, staged.original_name, staged.size_bytes as i64, staged.sha256, Utc::now().to_rfc3339()]).map_err(err)?;
+    if inserted != 1 {
+        return Err("Il nuovo RAW non è stato registrato: sostituzione annullata".into());
+    }
     Ok(previous)
 }
 
@@ -215,6 +221,14 @@ pub fn attach_core(db: &Database, artwork_id: &str, source: &Path, max_bytes: u6
         if let Some(ref old) = replaced { verify_raw_integrity(&db.directory, old)?; }
         link(&tx, artwork_id, &staged)?;
         let saved = row(&tx, artwork_id)?.ok_or("Allegato non salvato")?;
+        // Imported databases may contain AFTER INSERT triggers that silently alter
+        // the new reference. Never commit or discard the old RAW in that case.
+        if saved.artwork_id != artwork_id || saved.media_path != staged.relative
+            || saved.original_name != staged.original_name || saved.size_bytes != staged.size_bytes as i64
+            || !saved.sha256.eq_ignore_ascii_case(&staged.sha256)
+        {
+            return Err("I metadati del RAW non corrispondono al file copiato: salvataggio annullato".into());
+        }
         tx.commit().map_err(err)?;
         Ok((saved, replaced))
     })();
@@ -237,11 +251,18 @@ pub fn attach_core(db: &Database, artwork_id: &str, source: &Path, max_bytes: u6
 
 pub fn remove_core(db: &Database, artwork_id: &str) -> Result<(), String> {
     regular_media_dir(&db.directory)?;
-    let conn = db.conn.lock().map_err(err)?;
-    let file = row(&conn, artwork_id)?.ok_or("Nessun file RAW allegato")?;
+    let mut conn = db.conn.lock().map_err(err)?;
+    let tx = conn.transaction().map_err(err)?;
+    let file = row(&tx, artwork_id)?.ok_or("Nessun file RAW allegato")?;
     // A damaged import must keep its database reference for recovery.
     verify_raw_integrity(&db.directory, &file)?;
-    conn.execute("DELETE FROM artwork_raw_files WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
+    let deleted = tx.execute("DELETE FROM artwork_raw_files WHERE artwork_id=?1", params![artwork_id]).map_err(err)?;
+    // RAISE(IGNORE) can report success with zero changes; an AFTER DELETE
+    // trigger can even recreate the row. Both must roll back before file cleanup.
+    if deleted != 1 || row(&tx, artwork_id)?.is_some() {
+        return Err("Il collegamento RAW non è stato rimosso: allegato conservato".into());
+    }
+    tx.commit().map_err(err)?;
     cleanup_unlinked_raw(&conn, &db.directory, &file.media_path);
     Ok(())
 }
@@ -525,4 +546,75 @@ mod tests {
         assert!(db.directory.join(&saved.media_path).is_symlink(), "removal must not touch tampered entries");
         assert!(original.exists());
     }
+
+    #[test]
+    fn ignored_or_recreated_deletions_keep_raw_and_database_link() {
+        let (dir, db) = setup();
+        let source = raw(dir.path(), "original.nef", b"II*\0", 96);
+        let saved = attach_core(&db, "a", &source, MAX_RAW_BYTES).unwrap();
+        let stored = db.directory.join(&saved.media_path);
+
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_raw_delete BEFORE DELETE ON artwork_raw_files
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        assert!(remove_core(&db, "a").unwrap_err().contains("non è stato rimosso"));
+        assert_eq!(row(&db.conn.lock().unwrap(), "a").unwrap(), Some(saved.clone()));
+        assert!(stored.exists());
+        db.conn.lock().unwrap().execute_batch(
+            "DROP TRIGGER ignore_raw_delete;
+             CREATE TRIGGER restore_raw_delete AFTER DELETE ON artwork_raw_files
+             BEGIN
+               INSERT INTO artwork_raw_files(artwork_id,media_path,original_name,size_bytes,sha256,created_at)
+               VALUES(OLD.artwork_id,OLD.media_path,OLD.original_name,OLD.size_bytes,OLD.sha256,OLD.created_at);
+             END;"
+        ).unwrap();
+        assert!(remove_core(&db, "a").unwrap_err().contains("non è stato rimosso"));
+        assert_eq!(row(&db.conn.lock().unwrap(), "a").unwrap(), Some(saved));
+        assert!(stored.exists());
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER restore_raw_delete;").unwrap();
+        remove_core(&db, "a").unwrap();
+        assert!(!stored.exists());
+        assert!(row(&db.conn.lock().unwrap(), "a").unwrap().is_none());
+    }
+
+    #[test]
+    fn ignored_or_tampered_insert_does_not_replace_a_raw_or_leak_files() {
+        let (dir, db) = setup();
+        let source = raw(dir.path(), "first.nef", b"II*\0", 64);
+        let saved = attach_core(&db, "a", &source, MAX_RAW_BYTES).unwrap();
+        let replacement = raw(dir.path(), "second.dng", b"MM\0*", 128);
+
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_raw_replace BEFORE DELETE ON artwork_raw_files
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        assert!(attach_core(&db, "a", &replacement, MAX_RAW_BYTES).unwrap_err().contains("non è stato scollegato"));
+        assert_eq!(row(&db.conn.lock().unwrap(), "a").unwrap(), Some(saved.clone()));
+        assert_eq!(media_count(&db), 1);
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER ignore_raw_replace;").unwrap();
+
+        db.conn.lock().unwrap().execute_batch(
+            "CREATE TRIGGER ignore_raw_insert BEFORE INSERT ON artwork_raw_files
+             BEGIN SELECT RAISE(IGNORE); END;"
+        ).unwrap();
+        assert!(attach_core(&db, "a", &replacement, MAX_RAW_BYTES).unwrap_err().contains("non è stato registrato"));
+        assert_eq!(row(&db.conn.lock().unwrap(), "a").unwrap(), Some(saved.clone()));
+        assert_eq!(media_count(&db), 1);
+
+        db.conn.lock().unwrap().execute_batch(
+            "DROP TRIGGER ignore_raw_insert;
+             CREATE TRIGGER corrupt_raw_insert AFTER INSERT ON artwork_raw_files
+             BEGIN UPDATE artwork_raw_files SET sha256='0000000000000000000000000000000000000000000000000000000000000000' WHERE artwork_id=NEW.artwork_id; END;"
+        ).unwrap();
+        assert!(attach_core(&db, "a", &replacement, MAX_RAW_BYTES).unwrap_err().contains("non corrispondono"));
+        assert_eq!(row(&db.conn.lock().unwrap(), "a").unwrap(), Some(saved.clone()));
+        assert_eq!(media_count(&db), 1);
+        assert!(db.directory.join(&saved.media_path).exists());
+        db.conn.lock().unwrap().execute_batch("DROP TRIGGER corrupt_raw_insert;").unwrap();
+        let updated = attach_core(&db, "a", &replacement, MAX_RAW_BYTES).unwrap();
+        assert_ne!(updated.media_path, saved.media_path);
+        assert_eq!(media_count(&db), 1);
+    }
+
 }
