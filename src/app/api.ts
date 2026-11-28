@@ -107,6 +107,8 @@ export const api = {
     invoke<void>('remove_sale_receipt_attachment', {receiptId}),
   exportReceiptAttachment: (receiptId: string, destination: string) =>
     invoke<string>('export_sale_receipt_attachment', {receiptId, destination}),
+  certificateImage: (certificateId: string, expectedSnapshotJson: string) =>
+    invoke<string | null>('certificate_image_data', { certificateId, expectedSnapshotJson }),
   listCertificates: () => invoke<Certificate[]>('list_certificates'),
   issueCertificate: (input: CertificateInput) => invoke<Certificate>('issue_certificate', { input }),
   overview: () => invoke<Overview>('overview'),

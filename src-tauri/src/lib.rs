@@ -106,6 +106,7 @@ pub fn run() {
             commands::data_directory,
             commands::save_artwork_image,
             commands::artwork_image_data,
+            commands::certificate_image_data,
             commands::save_artwork_image_from_path,
             gallery::list_artwork_gallery,
             gallery::add_artwork_gallery_image,

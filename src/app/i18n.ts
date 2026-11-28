@@ -20,6 +20,7 @@ export function translateLabel(key: string, language: AppLanguage,
   return own(dictionaries[selected]) ?? own(dictionaries.en) ?? key;
 }
 const EN: Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "Cannot open the certificate: historical data or photograph unavailable.",
   "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "This record changed after you opened it. Close and reopen the editor to see the latest data.",
   "Posta": "Mail",
   "+ Nuova brochure": "+ New brochure",
@@ -1159,6 +1160,7 @@ const EN: Record<string,string> = {
   "servizi locali di prova": "local test services",
 };
 const ES:Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "No se puede abrir el certificado: datos o fotografía histórica no disponibles.",
   "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "La ficha ha cambiado desde que la abriste. Cierra y vuelve a abrir la edición para ver los datos actualizados.",
   "Posta": "Correo",
   "+ Nuova brochure": "+ Nuevo folleto",
@@ -2005,6 +2007,7 @@ const ES:Record<string,string> = {
   "Altre opere dell’archivio": "Otras obras del archivo",
 };
 const FR:Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "Impossible d’ouvrir le certificat : données ou photographie historique indisponibles.",
   "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "La fiche a changé depuis son ouverture. Fermez et rouvrez l’éditeur pour voir les données à jour.",
   "Posta": "Courrier",
   "+ Nuova brochure": "+ Nouvelle brochure",
@@ -2854,6 +2857,7 @@ const FR:Record<string,string> = {
   "Altre opere dell’archivio": "Autres œuvres de l’archive",
 };
 const DE:Record<string,string> = {
+  "Impossibile aprire il certificato: dati o fotografia storica non disponibili.": "Zertifikat kann nicht geöffnet werden: Historische Daten oder Foto fehlen.",
   "La scheda è cambiata dopo l’apertura. Chiudi e riapri la modifica per vedere i dati aggiornati.": "Der Datensatz wurde seit dem Öffnen geändert. Schließe und öffne die Bearbeitung erneut, um die aktuellen Daten zu sehen.",
   "Posta": "E-Mail",
   "+ Nuova brochure": "+ Neue Broschüre",
