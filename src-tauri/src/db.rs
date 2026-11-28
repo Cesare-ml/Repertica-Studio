@@ -13,9 +13,38 @@ pub struct Database {
     pub(crate) auto_backup_last_recorded: AtomicU64,
 }
 
+/// Refuse links and special filesystem entries for SQLite and its sidecars.
+/// A restored or externally modified archive must not redirect database writes
+/// to another local file. Missing files are allowed: SQLite creates a new DB.
+fn check_archive_entry(path: &std::path::Path, expect_directory: bool) -> Result<bool, Box<dyn Error>> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(format!(
+            "Percorso archivio non sicuro: {} è un collegamento simbolico", path.display()
+        ).into()),
+        Ok(meta) if expect_directory && !meta.is_dir() => Err(format!(
+            "Percorso archivio non valido: {} deve essere una cartella", path.display()
+        ).into()),
+        Ok(meta) if !expect_directory && !meta.is_file() => Err(format!(
+            "Percorso archivio non valido: {} deve essere un file regolare", path.display()
+        ).into()),
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
 pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
     fs::create_dir_all(&directory)?;
-    fs::create_dir_all(directory.join("media"))?;
+    let media = directory.join("media");
+    if !check_archive_entry(&media, true)? {
+        fs::create_dir(&media)?;
+    }
+    // SQLite may read/write WAL, shared-memory and rollback journal sidecars.
+    // Check them as well as the DB before letting SQLite follow their paths.
+    for name in ["repertica.sqlite", "repertica.sqlite-wal",
+                 "repertica.sqlite-shm", "repertica.sqlite-journal"] {
+        check_archive_entry(&directory.join(name), false)?;
+    }
     let conn = Connection::open(directory.join("repertica.sqlite"))?;
     conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -603,6 +632,47 @@ pub fn open(directory: PathBuf) -> Result<Database, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn non_directory_media_path_is_rejected_before_creating_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("media"), b"not a directory").unwrap();
+        let error = open(dir.path().into()).err().expect("must refuse invalid media path").to_string();
+        assert!(error.contains("deve essere una cartella"), "{error}");
+        assert!(!dir.path().join("repertica.sqlite").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_media_directory_is_rejected_without_touching_external_files() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::write(external.path().join("photo.jpg"), b"preserve").unwrap();
+        symlink(external.path(), dir.path().join("media")).unwrap();
+        let error = open(dir.path().into()).err().expect("must refuse media link").to_string();
+        assert!(error.contains("collegamento simbolico"), "{error}");
+        assert_eq!(fs::read(external.path().join("photo.jpg")).unwrap(), b"preserve");
+        assert!(!dir.path().join("repertica.sqlite").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sqlite_database_and_sidecar_symlinks_are_rejected_before_open() {
+        use std::os::unix::fs::symlink;
+        for name in ["repertica.sqlite", "repertica.sqlite-wal",
+                     "repertica.sqlite-shm", "repertica.sqlite-journal"] {
+            let dir = tempfile::tempdir().unwrap();
+            let external = tempfile::tempdir().unwrap();
+            let target = external.path().join("untouched");
+            fs::write(&target, b"keep external contents").unwrap();
+            symlink(&target, dir.path().join(name)).unwrap();
+            let error = open(dir.path().into()).err().expect("must refuse SQLite link").to_string();
+            assert!(error.contains("collegamento simbolico"), "{name}: {error}");
+            assert_eq!(fs::read(&target).unwrap(), b"keep external contents");
+            assert!(!dir.path().join("repertica.sqlite").exists() || name == "repertica.sqlite");
+        }
+    }
+
     #[test]
     fn creates_schema_and_reopens_without_resetting_data() {
         let dir = tempfile::tempdir().unwrap();
