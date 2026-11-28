@@ -40,15 +40,26 @@ fn list_core(c:&Connection)->Result<Vec<SaleReceipt>,String>{
     let rows=q.query_map([],row).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
     Ok(rows)
 }
+// An externally modified/imported SQLite archive may have invalid totals even
+// when foreign_key_check succeeds (for example, its receipt triggers were disabled).
+// Never display negative "outstanding" sums or use corrupted totals to accept a payment.
+fn checked_balance(sale_id:String,sale:i64,received:i64,invalid_receipts:i64)->Result<SaleBalance,String>{
+    if sale<=0 || received<0 || received>sale || invalid_receipts != 0 {
+        return Err(format!("Invalid stored receipt balance for sale {sale_id}: check the archive before recording payments"));
+    }
+    let outstanding=sale.checked_sub(received)
+        .ok_or_else(||format!("Receipt balance exceeds integer range for sale {sale_id}"))?;
+    Ok(SaleBalance{sale_id,sale_cents:sale,received_cents:received,outstanding_cents:outstanding})
+}
 fn balances_core(c:&Connection)->Result<Vec<SaleBalance>,String>{
-    let mut q=c.prepare("SELECT s.id,s.amount_cents,COALESCE(SUM(r.amount_cents),0)
+    let mut q=c.prepare("SELECT s.id,s.amount_cents,COALESCE(SUM(r.amount_cents),0),
+        COUNT(CASE WHEN r.id IS NOT NULL AND (typeof(r.amount_cents) <> 'integer' OR r.amount_cents NOT BETWEEN 1 AND 100000000000) THEN 1 END)
         FROM sales s LEFT JOIN sale_receipts r ON r.sale_id=s.id GROUP BY s.id
         ORDER BY s.sold_at DESC,s.created_at DESC,s.id").map_err(err)?;
-    let rows=q.query_map([],|r|{
-        let sale:i64=r.get(1)?;let received:i64=r.get(2)?;
-        Ok(SaleBalance{sale_id:r.get(0)?,sale_cents:sale,received_cents:received,outstanding_cents:sale-received})
-    }).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
-    Ok(rows)
+    let rows=q.query_map([],|r|Ok((
+        r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?
+    ))).map_err(err)?.collect::<Result<Vec<_>,_>>().map_err(err)?;
+    rows.into_iter().map(|(id,sale,received,invalid)|checked_balance(id,sale,received,invalid)).collect()
 }
 fn record_core(c:&mut Connection,input:SaleReceiptInput)->Result<SaleReceipt,String>{
     if !valid_date(&input.received_at){return Err("Invalid receipt date".into())}
@@ -59,13 +70,16 @@ fn record_core(c:&mut Connection,input:SaleReceiptInput)->Result<SaleReceipt,Str
     let reference=clean(input.reference,200)?;
     let notes=clean(input.notes,2000)?;
     let tx=c.transaction().map_err(err)?;
-    let (sale,received):(i64,i64)=tx.query_row(
+    let (sale,received,invalid):(i64,i64,i64)=tx.query_row(
         "SELECT s.amount_cents,
-         (SELECT COALESCE(SUM(amount_cents),0) FROM sale_receipts WHERE sale_id=s.id)
+         (SELECT COALESCE(SUM(amount_cents),0) FROM sale_receipts WHERE sale_id=s.id),
+         (SELECT COUNT(*) FROM sale_receipts WHERE sale_id=s.id
+             AND (typeof(amount_cents) <> 'integer' OR amount_cents NOT BETWEEN 1 AND 100000000000))
          FROM sales s WHERE s.id=?1",
-        params![input.sale_id],|r|Ok((r.get(0)?,r.get(1)?))
+        params![input.sale_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))
     ).optional().map_err(err)?.ok_or_else(||"Sale not found".to_string())?;
-    if received.checked_add(input.amount_cents).is_none_or(|sum|sum>sale){
+    let balance=checked_balance(input.sale_id.clone(),sale,received,invalid)?;
+    if input.amount_cents>balance.outstanding_cents {
         return Err("Receipt exceeds outstanding sale amount".into())
     }
     let id=Uuid::new_v4().to_string();
@@ -294,6 +308,52 @@ mod tests{
         assert!(receipt_year_overview_core(&c,1899).is_err());
         assert!(receipt_year_overview_core(&c,2201).is_err());
     }
+    #[test]
+    fn invalid_imported_receipt_totals_do_not_allow_new_payments() {
+        let temp=tempfile::tempdir().unwrap();
+        let db=crate::db::open(temp.path().into()).unwrap();
+        let mut c=db.conn.lock().unwrap();
+        setup(&c);
+        // Simulate a SQLite archive altered by external tools with triggers and
+        // CHECK constraints bypassed. A negative historical receipt previously
+        // allowed an extra receipt despite an invalid underlying balance.
+        c.execute_batch("DROP TRIGGER sale_receipts_limit_insert;
+            DROP TRIGGER sale_receipts_limit_update;
+            DROP TRIGGER sales_no_shrink_below_receipts;
+            PRAGMA ignore_check_constraints=ON;").unwrap();
+        c.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+            VALUES('negative','s','2026-11-20',-1000,'cash','t')",[]).unwrap();
+        c.execute_batch("PRAGMA ignore_check_constraints=OFF;").unwrap();
+        assert!(balances_core(&c).unwrap_err().contains("Invalid stored receipt balance"));
+        assert!(record_core(&mut c,input(12001)).unwrap_err().contains("Invalid stored receipt balance"));
+        assert_eq!(list_core(&c).unwrap().len(),1);
+
+        // A negative receipt can be hidden by a larger positive receipt: the
+        // aggregate alone would look legitimate, but individual rows are invalid.
+        c.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+            VALUES('positive','s','2026-11-20',2000,'cash','t')",[]).unwrap();
+        assert!(balances_core(&c).unwrap_err().contains("Invalid stored receipt balance"));
+        assert!(record_core(&mut c,input(1)).is_err());
+        assert_eq!(list_core(&c).unwrap().len(),2);
+        c.execute("DELETE FROM sale_receipts WHERE id='positive'",[]).unwrap();
+
+        // Overpayment introduced with the trigger missing also fails closed.
+        c.execute("DELETE FROM sale_receipts WHERE id='negative'",[]).unwrap();
+        c.execute("INSERT INTO sale_receipts(id,sale_id,received_at,amount_cents,method,created_at)
+            VALUES('overpaid','s','2026-11-20',12002,'cash','t')",[]).unwrap();
+        assert!(balances_core(&c).unwrap_err().contains("Invalid stored receipt balance"));
+        assert!(record_core(&mut c,input(1)).is_err());
+        assert_eq!(list_core(&c).unwrap().len(),1);
+
+        // Removing the offending imported row restores normal behavior without
+        // rewriting historical sales or inventing receipt entries.
+        c.execute("DELETE FROM sale_receipts WHERE id='overpaid'",[]).unwrap();
+        assert_eq!(balances_core(&c).unwrap()[0].outstanding_cents,12001);
+        let saved=record_core(&mut c,input(500)).unwrap();
+        assert_eq!(saved.amount_cents,500);
+        assert_eq!(balances_core(&c).unwrap()[0].outstanding_cents,11501);
+    }
+
     #[test]
     fn v3_migration_does_not_invent_historical_receipts(){
         let temp=tempfile::tempdir().unwrap();let db=crate::db::open(temp.path().into()).unwrap();
