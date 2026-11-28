@@ -68,3 +68,30 @@ e dalla data, e mantiene i riferimenti stabili. I campi di testo potenzialmente
 interpretabili come formule dai fogli di calcolo vengono neutralizzati.
 Il file CSV non sovrascrive un documento esistente, **non è un backup
 ripristinabile** e non attesta effettivi pagamenti bancari.
+
+
+## Archivi importati o modificati esternamente
+
+Il registro dei saldi e il comando di registrazione incassi rifiutano ora le
+vendite il cui totale SQLite è impossibile: prezzo non positivo, incassi
+negativi, singoli incassi fuori dai limiti interi dello schema (anche se
+compensati da altre righe) o somma incassi superiore al prezzo. Può succedere se una copia del
+database è stata modificata con strumenti esterni disattivando trigger o
+vincoli `CHECK`. In questi casi l'app segnala la vendita da verificare
+anziché mostrare un residuo negativo o consentire nuovi incassi sulla base
+di dati incoerenti. Il controllo **non corregge né elimina** le registrazioni.
+I controlli additivi non richiedono migrazioni e non cambiano gli archivi validi.
+
+Test Rust: una copia modificata con trigger e vincoli disabilitati viene
+rifiutata sia dalla lista saldi sia dalla registrazione di un nuovo incasso;
+dopo la rimozione manuale della riga di prova incoerente, la vendita torna
+utilizzabile. Per i dati reali è necessario recuperare da un backup verificato
+oppure far revisionare la discrepanza prima di intervenire.
+
+Il riepilogo annuale verifica le singole date e gli importi delle registrazioni
+selezionate nell'intervallo dell'anno, prima di sommarli. Un importo negativo
+compensato da uno positivo o una data non valida non viene quindi presentato
+come un totale mensile attendibile. Il riepilogo resta riferito all'intero anno:
+lo stato delle rate, invece, considera solo gli incassi fino alla data richiesta.
+La modifica di un piano ammette zero rate (rimozione) oppure da 2 a 60;
+un piano di una sola rata è rifiutato prima di modificare quello esistente.
