@@ -109,7 +109,11 @@ fn next_number(conn: &Connection, policy: &CodePolicy, year: i32) -> Result<i64,
         "SELECT COALESCE((SELECT last_value FROM archive_code_sequences WHERE scope_key=?1),0)",
         params![scope_key(policy, year)], |r| r.get(0),
     ).map_err(err)?;
-    let mut number = counter.max(highest_existing(conn, policy, year)?) + 1;
+    // An imported manual code or an existing sequence may have reached i64::MAX.
+    // A checked increment prevents a panic in debug builds and negative codes in release builds.
+    let exhausted = || "Numerazione archivio esaurita: scegli un altro prefisso".to_string();
+    let mut number = counter.max(highest_existing(conn, policy, year)?)
+        .checked_add(1).ok_or_else(exhausted)?;
     // Manual codes may use different padding: never hand out a code that already exists.
     loop {
         let taken: bool = conn.query_row(
@@ -117,7 +121,7 @@ fn next_number(conn: &Connection, policy: &CodePolicy, year: i32) -> Result<i64,
             params![format_code(policy, year, number)], |r| r.get(0),
         ).map_err(err)?;
         if !taken { return Ok(number); }
-        number += 1;
+        number = number.checked_add(1).ok_or_else(exhausted)?;
     }
 }
 
@@ -134,11 +138,21 @@ pub fn allocate(conn: &Connection, artwork_year: Option<&str>) -> Result<String,
     let policy = load(conn)?;
     let year = year_for(artwork_year);
     let number = next_number(conn, &policy, year)?;
-    conn.execute(
+    let key = scope_key(&policy, year);
+    let written = conn.execute(
         "INSERT INTO archive_code_sequences(scope_key,last_value) VALUES(?1,?2)
          ON CONFLICT(scope_key) DO UPDATE SET last_value=excluded.last_value",
-        params![scope_key(&policy, year), number],
+        params![key, number],
     ).map_err(err)?;
+    // The caller owns the artwork transaction. A trigger can silently ignore
+    // the UPSERT or overwrite the reserved number; never report that as success.
+    let persisted: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM archive_code_sequences WHERE scope_key=?1 AND last_value=?2)",
+        params![key, number], |r| r.get(0),
+    ).map_err(err)?;
+    if written != 1 || !persisted {
+        return Err("Impossibile riservare il codice archivio".into());
+    }
     Ok(format_code(&policy, year, number))
 }
 
@@ -260,6 +274,80 @@ mod tests {
         assert!(validate(&policy("ML", "GLOBAL", 4, "/")).is_err());
         assert_eq!(validate(&policy(" ml ", "YEARLY", 3, "_")).unwrap().prefix, "ML");
         assert!(c.execute("UPDATE archive_code_policy SET scope='WEEKLY'", []).is_err(), "the database enforces it too");
+    }
+
+    #[test]
+    fn an_imported_maximum_manual_code_cannot_overflow_or_consume_a_sequence() {
+        let (_dir, db) = conn();
+        let c = db.conn.lock().unwrap();
+        add(&c, "ART-9223372036854775807");
+        assert!(preview(&c, None).unwrap_err().contains("esaurita"));
+        assert!(allocate(&c, None).unwrap_err().contains("esaurita"));
+        let sequences: i64 = c.query_row(
+            "SELECT COUNT(*) FROM archive_code_sequences", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(sequences, 0, "a rejected allocation must never advance the counter");
+        assert_eq!(c.query_row(
+            "SELECT code FROM artworks WHERE id='ART-9223372036854775807'",
+            [], |r| r.get::<_, String>(0)
+        ).unwrap(), "ART-9223372036854775807");
+    }
+
+    #[test]
+    fn an_exhausted_counter_fails_cleanly_and_a_new_prefix_still_works() {
+        let (_dir, db) = conn();
+        let c = db.conn.lock().unwrap();
+        c.execute(
+            "INSERT INTO archive_code_sequences(scope_key,last_value) VALUES('ART|GLOBAL',?1)",
+            params![i64::MAX],
+        ).unwrap();
+        assert!(preview(&c, None).unwrap_err().contains("esaurita"));
+        assert!(allocate(&c, None).unwrap_err().contains("esaurita"));
+        assert_eq!(c.query_row(
+            "SELECT last_value FROM archive_code_sequences WHERE scope_key='ART|GLOBAL'",
+            [], |r| r.get::<_, i64>(0)
+        ).unwrap(), i64::MAX);
+        set(&c, &policy("NEW", "GLOBAL", 4, "-"));
+        assert_eq!(allocate(&c, None).unwrap(), "NEW-0001");
+    }
+
+    #[test]
+    fn ignored_or_altered_sequence_reservation_rolls_back_and_can_be_retried() {
+        let (_dir, db) = conn();
+        let mut c = db.conn.lock().unwrap();
+        // A missing counter must not be treated as a successfully reserved code.
+        c.execute_batch("CREATE TRIGGER ignore_reservation BEFORE INSERT ON archive_code_sequences
+            BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+        {
+            let tx = c.transaction().unwrap();
+            assert!(allocate(&tx, None).unwrap_err().contains("riservare"));
+            tx.rollback().unwrap();
+        }
+        assert_eq!(c.query_row("SELECT count(*) FROM archive_code_sequences", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        c.execute_batch("DROP TRIGGER ignore_reservation;").unwrap();
+        assert_eq!(allocate(&c, None).unwrap(), "ART-0001");
+
+        // Even when SQLite reports one changed row, verify the actual counter.
+        // The previous artwork was deleted; its number must not be reissued.
+        for sql in [
+            "CREATE TRIGGER alter_reservation AFTER UPDATE ON archive_code_sequences
+                BEGIN UPDATE archive_code_sequences SET last_value=OLD.last_value
+                WHERE scope_key=NEW.scope_key; END;",
+            "CREATE TRIGGER alter_reservation AFTER UPDATE ON archive_code_sequences
+                BEGIN DELETE FROM archive_code_sequences WHERE scope_key=NEW.scope_key; END;",
+        ] {
+            c.execute_batch(sql).unwrap();
+            {
+                let tx = c.transaction().unwrap();
+                assert!(allocate(&tx, None).unwrap_err().contains("riservare"));
+                tx.rollback().unwrap();
+            }
+            assert_eq!(c.query_row("SELECT last_value FROM archive_code_sequences WHERE scope_key='ART|GLOBAL'",
+                [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+            c.execute_batch("DROP TRIGGER alter_reservation;").unwrap();
+        }
+        assert_eq!(preview(&c, None).unwrap(), "ART-0002");
+        assert_eq!(allocate(&c, None).unwrap(), "ART-0002");
     }
 
     #[test]
